@@ -5,7 +5,8 @@
   "scripts": {
     "postinstall": "wrangler types",
     "typecheck": "wrangler types && tsc",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "test:live": "vitest run --config vitest.live.config.ts"
   },
   "dependencies": {
     "@iris/agent": "workspace:*",

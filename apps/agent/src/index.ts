@@ -2,10 +2,10 @@ import { createUserAgent } from "./user-agent";
 import { createWorkersAiModel } from "./workers-ai-model";
 
 /** The Workers AI model every user's agent thinks with. */
-const MODEL = "@cf/zai-org/glm-4.7-flash";
+export const WORKERS_AI_MODEL = "@cf/zai-org/glm-4.7-flash";
 
 export const UserAgent = createUserAgent((env) => ({
-  model: createWorkersAiModel((input) => env.AI.run(MODEL, input)),
+  model: createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input)),
   tools: [],
 }));
 export type UserAgent = InstanceType<typeof UserAgent>;
