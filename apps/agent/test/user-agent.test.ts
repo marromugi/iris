@@ -218,15 +218,27 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
 });
 
 test("refuses storage that a newer version of the code migrated", async () => {
-  await expect(
-    runInDurableObject(userAgent(), async (_, state) => {
-      state.storage.sql.exec(
-        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('', ?)",
-        Date.UTC(2100, 0, 1),
-      );
-      await store.migrate(state.storage);
-    }),
-  ).rejects.toThrow(
-    "Storage has a migration from 2100-01-01T00:00:00.000Z, newer than any this code knows.",
-  );
+  await runInDurableObject(userAgent(), (_, state) => {
+    state.storage.sql.exec(
+      "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('', ?)",
+      Date.UTC(2100, 0, 1),
+    );
+
+    expect(() => store.migrate(state.storage)).toThrow(
+      "Storage has a migration from 2100-01-01T00:00:00.000Z, newer than any this code knows.",
+    );
+  });
+});
+
+test("a failing migration throws the SQLite error and leaves nothing half applied", async () => {
+  await runInDurableObject(userAgent(), (_, state) => {
+    state.storage.sql.exec("DELETE FROM __drizzle_migrations");
+    state.storage.sql.exec("DROP TABLE tasks");
+
+    expect(() => store.migrate(state.storage)).toThrow(/already exists/);
+    const tables = state.storage.sql
+      .exec<{ name: string }>("SELECT name FROM sqlite_master WHERE name = 'tasks'")
+      .toArray();
+    expect(tables).toEqual([]);
+  });
 });
