@@ -10,6 +10,9 @@ export {
 export {
   type AssistantMessage,
   assistantMessageSchema,
+  type JsonArray,
+  type JsonObject,
+  type JsonValue,
   type Message,
   messageSchema,
   type TextPart,

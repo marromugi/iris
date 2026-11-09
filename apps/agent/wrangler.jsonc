@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "iris-agent",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  "durable_objects": {
+    "bindings": [{ "name": "USER_AGENT", "class_name": "UserAgent" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserAgent"] }],
+}

@@ -5,6 +5,16 @@ export const textPartSchema = z.object({
   text: z.string(),
 });
 
+// Written with interfaces, not as zod's own recursive JSON type alias, which Workers RPC types
+// can't expand when a message is returned from a Durable Object.
+export type JsonValue = string | number | boolean | null | JsonArray | JsonObject;
+export interface JsonArray extends ReadonlyArray<JsonValue> {}
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+
+const jsonSchema = z.json();
+
 /**
  * The model asking for one tool to run. `input` is any JSON value, so it survives being stored,
  * and is unchecked until the tool's own schema parses it.
@@ -13,7 +23,7 @@ export const toolCallPartSchema = z.object({
   type: z.literal("tool-call"),
   id: z.string().min(1),
   name: z.string().min(1),
-  input: z.json(),
+  input: z.custom<JsonValue>((value) => jsonSchema.safeParse(value).success, "Not a JSON value."),
 });
 
 export const userMessageSchema = z.object({
