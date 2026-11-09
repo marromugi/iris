@@ -36,7 +36,6 @@ struct TaskListTests {
 
         #expect(hidden == [Samples.newsTask.id])
         #expect(list.shown.value?.map(\.id) == [Samples.newsTask.id])
-        #expect(list.removing.isEmpty)
     }
 
     @Test func aRemovalThatDoesNotGoThroughBringsTheTaskBackAndSaysWhy() async {

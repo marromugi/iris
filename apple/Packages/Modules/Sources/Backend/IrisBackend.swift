@@ -4,12 +4,13 @@ import OpenAPIRuntime
 /// The one entrance to the iris server: signing in and out, and every call the app makes to `/api`. Errors come out as
 /// `AppError`; the generated types come out as they are, since they are the server's own contract.
 public final class IrisBackend: Sendable {
-    /// Where iris runs once it is deployed.
+    /// Where iris runs once it is deployed: the server openapi.json names.
     public static let production: URL = {
-        guard let url = URL(string: "https://iris-agent.marrromugi-dev.workers.dev") else {
-            preconditionFailure("The production origin is a literal absolute URL")
+        do {
+            return try Servers.Server1.url()
+        } catch {
+            preconditionFailure("openapi.json names its server with an absolute URL: \(error)")
         }
-        return url
     }()
 
     private let vault: SignInVault

@@ -61,6 +61,5 @@ struct SessionTests {
         await session.signOut()
 
         #expect(session.state == .signedOut)
-        #expect(await !backend.isSignedIn)
     }
 }

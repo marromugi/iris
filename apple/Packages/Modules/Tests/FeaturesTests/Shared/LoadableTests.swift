@@ -32,6 +32,15 @@ struct LoadableTests {
         }
     }
 
+    @Test func anEndedSignInReplacesWhatItShows() async {
+        let state = await Loadable<String>.loaded("前に読んだ").reading { () async throws(AppError) -> String in throw .signedOut }
+
+        guard case .failed(.signedOut) = state else {
+            Issue.record("expected the ended sign-in, got \(state)")
+            return
+        }
+    }
+
     @Test func showsNothingNewWhenTheFirstReadIsCancelled() async {
         let state = await Loadable<String>.loading.reading { () async throws(AppError) -> String in throw .cancelled }
 

@@ -27,6 +27,6 @@ xcodebuild build -project Iris.xcodeproj -scheme Iris -destination 'generic/plat
 
 ## つなぐサーバー
 
-アプリは `https://iris-agent.marrromugi-dev.workers.dev` につなぐ。Debug ビルドでは、スキームの環境変数 `IRIS_SERVER_ORIGIN` にオリジン（例：`https://localhost:8787`）を入れると、そちらにつなぐ。パスキーは https でしか通らないので、手元のサーバーも https で動かし、その証明書をシミュレーターに信頼させる（`xcrun simctl keychain booted add-root-cert cert.pem`）。
+アプリは、`openapi.json` の `servers` にあるオリジン（今は `https://iris-agent.marrromugi-dev.workers.dev`）につなぐ。Debug ビルドでは、Xcode のスキームの Run → Arguments → Environment Variables に `IRIS_SERVER_ORIGIN`（例：`https://localhost:8787`）を入れると、そちらにつなぐ。パスキーは https でしか通らないので、手元のサーバーも自己署名の証明書で https で動かし、その証明書をシミュレーターに信頼させる（`xcrun simctl keychain booted add-root-cert <証明書のファイル>`）。はじめてサインインする人には招待が要る。招待の出し方と、サーバーを手元で動かす手順は、サーバーの側（`apps/agent`）に書く。
 
 サインインは OAuth（認可コード + PKCE）。アプリは `/register` で自分を公開クライアントとして登録し、`/authorize` をシートで開き（`resource` は `<origin>/api`）、戻ってきたコードを `/token` でトークンに替えてキーチェーンに置く。サーバーが受け付けるリダイレクトは `dev.marromugi.iris:/oauth` だけ。
