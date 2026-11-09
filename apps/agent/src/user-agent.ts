@@ -2,17 +2,10 @@ import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { nextWakeAt, runNext } from "./runner";
-import { nextRunAt, scheduleSchema } from "./schedule";
+import { DEFAULT_RECENT_RUNS } from "./runs";
+import { nextRunAt } from "./schedule";
 import * as store from "./store";
-
-const DEFAULT_RECENT_RUNS = 20;
-
-export const newTaskSchema = z.object({
-  prompt: z.string().trim().min(1),
-  schedule: scheduleSchema,
-});
-
-export type NewTask = z.input<typeof newTaskSchema>;
+import { type NewTask, newTaskSchema } from "./task";
 
 export type AddTaskResult =
   | { readonly ok: true; readonly task: store.Task }

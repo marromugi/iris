@@ -1,4 +1,4 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["apps/agent/drizzle/**"]
+  "ignorePatterns": ["apps/agent/drizzle/**", "apps/agent/openapi.json"]
 }
