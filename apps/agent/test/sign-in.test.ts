@@ -106,7 +106,7 @@ describe("an invite key", () => {
     });
   });
 
-  test("makes one user, even when two phones register with it at once", async () => {
+  test("makes one user, even when two phones both started registering with it", async () => {
     const key = await issueInvite("七郎");
     const finishOnFirstPhone = await (
       await openSignInSheet()
