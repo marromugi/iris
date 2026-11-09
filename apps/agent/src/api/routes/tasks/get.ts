@@ -1,4 +1,5 @@
 import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import type { Answer } from "../../answer";
 import { signedIn } from "../../errors";
 import type { ApiEnv } from "../../middlewares/signed-in-user";
 import { json, taskJson, taskSchema } from "../../schemas";
@@ -16,7 +17,7 @@ const route = createRoute({
 /** GET /api/tasks: the signed-in user's tasks. */
 export const listTasks = defineOpenAPIRoute<typeof route, ApiEnv>({
   route,
-  handler: async (c) => {
+  handler: async (c): Promise<Answer<typeof route>> => {
     const tasks = await c.var.agent.listTasks();
     return c.json(tasks.map(taskJson), 200);
   },

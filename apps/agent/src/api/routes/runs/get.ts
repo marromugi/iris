@@ -1,4 +1,5 @@
 import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import type { Answer } from "../../answer";
 import { DEFAULT_RECENT_RUNS, MAX_RECENT_RUNS } from "../../../runs";
 import { invalid, signedIn } from "../../errors";
 import type { ApiEnv } from "../../middlewares/signed-in-user";
@@ -23,7 +24,7 @@ const route = createRoute({
 /** GET /api/runs: the signed-in user's latest runs, each with its conversation. */
 export const recentRuns = defineOpenAPIRoute<typeof route, ApiEnv>({
   route,
-  handler: async (c) => {
+  handler: async (c): Promise<Answer<typeof route>> => {
     const runs = await c.var.agent.recentRuns(c.req.valid("query").limit);
     return c.json(runs.map(runJson), 200);
   },

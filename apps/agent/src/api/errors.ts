@@ -3,7 +3,7 @@ import type { ErrorHandler } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { json } from "./schemas";
 
-/** Every error with a body answers this. */
+/** Every error `/api` itself answers has this body; the OAuth layer's 401 comes before `/api` and doesn't. */
 export const errorSchema = z.object({ message: z.string() }).meta({ id: "Error" });
 
 /** An error response a route documents; the route gives the description that fits it. */
@@ -16,13 +16,16 @@ export const invalid = {
   400: errorResponse("The request doesn't fit the API; the message says why"),
 };
 
+/** The answer when a request reaches `/api` without a signed-in user. */
+export const NO_USER = { status: 403, description: "The token names no user" } as const;
+
 /** What every route can answer. The OAuth resource server answers 401 before any handler runs. */
 export const signedIn = {
   401: {
     description:
       "No token, or one not valid for /api (expired, revoked, or for another resource): sign in again. The body is empty without a token, and { error, error_description } (RFC 6750) with one.",
   },
-  403: errorResponse("The token names no user"),
+  [NO_USER.status]: errorResponse(NO_USER.description),
   500: errorResponse("Something went wrong on the server"),
 };
 

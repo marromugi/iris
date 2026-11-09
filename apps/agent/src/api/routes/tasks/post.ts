@@ -1,4 +1,5 @@
 import { createRoute, defineOpenAPIRoute } from "@hono/zod-openapi";
+import type { Answer } from "../../answer";
 import { newTaskSchema } from "../../../task";
 import { errorResponse, invalid, signedIn } from "../../errors";
 import type { ApiEnv } from "../../middlewares/signed-in-user";
@@ -25,7 +26,7 @@ const route = createRoute({
 /** POST /api/tasks: adds a task for the signed-in user, or says why it can't. */
 export const addTask = defineOpenAPIRoute<typeof route, ApiEnv>({
   route,
-  handler: async (c) => {
+  handler: async (c): Promise<Answer<typeof route>> => {
     const added = await c.var.agent.addTask(c.req.valid("json"));
     return added.ok ? c.json(taskJson(added.task), 201) : c.json({ message: added.error }, 400);
   },

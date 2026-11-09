@@ -17,8 +17,8 @@ export const PRODUCTION_ORIGIN = "https://iris-agent.marrromugi-dev.workers.dev"
 /**
  * `/api`: a signed-in user's tasks and runs, for requests the OAuth layer let through with
  * `UserProps`. A request without them is 403; one that doesn't fit the API is 400 with a message
- * saying why. Every answer with a body is JSON (a removal's 204 has none, nor does the OAuth
- * layer's 401 without a token), and none is cached.
+ * saying why. Every answer `/api` gives with a body is JSON (a removal's 204 has none), and none
+ * is cached. The OAuth layer's 401 comes before `/api` and is its own.
  */
 export const agentApi = new OpenAPIHono<ApiEnv>({
   defaultHook: (result, c) =>

@@ -1,4 +1,5 @@
 import { createRoute, defineOpenAPIRoute, z } from "@hono/zod-openapi";
+import type { Answer } from "../../../answer";
 import { errorResponse, invalid, signedIn } from "../../../errors";
 import type { ApiEnv } from "../../../middlewares/signed-in-user";
 
@@ -20,7 +21,7 @@ const route = createRoute({
 /** DELETE /api/tasks/{taskId}: removes one of the signed-in user's tasks. */
 export const removeTask = defineOpenAPIRoute<typeof route, ApiEnv>({
   route,
-  handler: async (c) => {
+  handler: async (c): Promise<Answer<typeof route>> => {
     const removed = await c.var.agent.removeTask(c.req.valid("param").taskId);
     return removed ? c.body(null, 204) : c.json({ message: NO_SUCH_TASK }, 404);
   },
