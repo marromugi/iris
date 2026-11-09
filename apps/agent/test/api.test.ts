@@ -41,7 +41,7 @@ test("adds a task and lists it for that user only", async () => {
   expect(task).toEqual({
     id: expect.any(String),
     ...dailyMail,
-    nextRunAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T23:00:00\.000Z$/),
+    nextRunAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T23:00:00Z$/),
   });
   expect(await (await call("user-1", "/api/tasks")).json()).toEqual([task]);
   expect(await (await call("user-2", "/api/tasks")).json()).toEqual([]);
@@ -57,6 +57,24 @@ test("says why a task can't be added", async () => {
   expect(await added.json()).toEqual({
     message: "✖ Not a known IANA time zone.\n  → at schedule.timeZone",
   });
+});
+
+test("answers a body it can't read as { message }", async () => {
+  const malformed = await call("user-1", "/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{bad",
+  });
+  const notJson = await call("user-1", "/api/tasks", { method: "POST", body: "prompt=hi" });
+
+  expect([malformed.status, await malformed.json()]).toEqual([
+    400,
+    { message: "Malformed JSON in request body" },
+  ]);
+  expect([notJson.status, await notJson.json()]).toEqual([
+    415,
+    { message: "Unsupported Media Type" },
+  ]);
 });
 
 test("removes a task, and answers 404 for one that isn't there", async () => {

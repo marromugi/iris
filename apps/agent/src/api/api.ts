@@ -1,4 +1,5 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { HTTPException } from "hono/http-exception";
 import {
   assistantMessageSchema,
   textPartSchema,
@@ -6,6 +7,7 @@ import {
   toolResultMessageSchema,
   userMessageSchema,
 } from "@iris/agent";
+import { DEFAULT_RECENT_RUNS, MAX_RECENT_RUNS } from "../runs";
 import { scheduleSchema } from "../schedule";
 import type { Run, Task } from "../store";
 import { newTaskSchema } from "../task";
@@ -15,22 +17,36 @@ const userPropsSchema = z.object({ userId: z.string().min(1) });
 
 export type UserProps = z.infer<typeof userPropsSchema>;
 
-/** Where the deployed Worker serves `/api`; the OpenAPI document names it as the server. */
+/**
+ * Where the Worker is expected to serve `/api` once deployed (nothing is deployed yet); the
+ * OpenAPI document names it as the server.
+ */
 export const PRODUCTION_ORIGIN = "https://iris-agent.marrromugi-dev.workers.dev";
 
-const DEFAULT_RUN_LIMIT = 20;
-const MAX_RUN_LIMIT = 100;
+const NO_SUCH_TASK = "No task of this user has this ID";
 
 const errorSchema = z.object({ message: z.string() }).meta({ id: "Error" });
+
+// Whole seconds: clients' default ISO 8601 parsers (Swift's among them) reject fractional seconds.
+const timeSchema = z.iso.datetime({ precision: 0 });
+
+function timeJson(time: Date): string {
+  return time.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
 
 const taskSchema = z
   .object({
     id: z.uuid(),
     prompt: z.string(),
     schedule: scheduleSchema,
-    nextRunAt: z.iso.datetime(),
+    nextRunAt: timeSchema,
   })
   .meta({ id: "Task" });
+
+// An assistant message's part types as @iris/agent defines them. Typed as exactly these two, so
+// a part type added there stops this from compiling until the API document says how to send it.
+const [textPart, toolCallPart]: readonly [typeof textPartSchema, typeof toolCallPartSchema] =
+  assistantMessageSchema.shape.parts.element.options;
 
 // A message as @iris/agent defines it, except that a tool call's input is written as any value:
 // the OpenAPI generator can't describe the JSON-value check the agent runs on it.
@@ -40,8 +56,8 @@ const messageSchema = z
     assistantMessageSchema.extend({
       parts: z.array(
         z.discriminatedUnion("type", [
-          textPartSchema,
-          toolCallPartSchema.extend({
+          textPart,
+          toolCallPart.extend({
             input: z.unknown().meta({ description: "The tool's input: any JSON value" }),
           }),
         ]),
@@ -55,8 +71,8 @@ const runSchema = z
   .object({
     id: z.uuid(),
     taskId: z.uuid().nullable(),
-    startedAt: z.iso.datetime(),
-    endedAt: z.iso.datetime().nullable(),
+    startedAt: timeSchema,
+    endedAt: timeSchema.nullable(),
     lastError: z.string().nullable(),
     failedAttempts: z.int().nonnegative(),
     messages: z.array(messageSchema),
@@ -68,13 +84,14 @@ const json = <S extends z.ZodType>(schema: S, description: string) => ({
   description,
 });
 const invalid = { 400: json(errorSchema, "The request doesn't fit the API; the message says why") };
-// The OAuth resource server answers 401 before any handler runs.
+// Every route can answer these. The OAuth resource server answers 401 before any handler runs.
 const signedIn = {
   401: {
     description:
       "No token, or one not valid for /api (expired, revoked, or for another resource): sign in again. The body is empty without a token, and { error, error_description } (RFC 6750) with one.",
   },
   403: json(errorSchema, "The token names no user"),
+  500: json(errorSchema, "Something went wrong on the server"),
 };
 
 /** Every route `/api` serves, with what each answers. */
@@ -98,7 +115,12 @@ export const routes = {
         required: true,
       },
     },
-    responses: { 201: json(taskSchema, "The task added"), ...invalid, ...signedIn },
+    responses: {
+      201: json(taskSchema, "The task added"),
+      415: json(errorSchema, "The body isn't sent as application/json"),
+      ...invalid,
+      ...signedIn,
+    },
   }),
   removeTask: createRoute({
     operationId: "removeTask",
@@ -107,7 +129,7 @@ export const routes = {
     request: { params: z.object({ taskId: z.uuid() }) },
     responses: {
       204: { description: "Removed. Runs it already started carry on." },
-      404: json(errorSchema, "No task of this user has this ID"),
+      404: json(errorSchema, NO_SUCH_TASK),
       ...invalid,
       ...signedIn,
     },
@@ -118,7 +140,7 @@ export const routes = {
     path: "/api/runs",
     request: {
       query: z.object({
-        limit: z.coerce.number().int().min(1).max(MAX_RUN_LIMIT).default(DEFAULT_RUN_LIMIT),
+        limit: z.coerce.number().int().min(1).max(MAX_RECENT_RUNS).default(DEFAULT_RECENT_RUNS),
       }),
     },
     responses: {
@@ -134,7 +156,8 @@ type Variables = { agent: ReturnType<Env["USER_AGENT"]["getByName"]> };
 /**
  * `/api`: a signed-in user's tasks and runs, for requests the OAuth layer let through with
  * `UserProps`. A request without them is 403; one that doesn't fit the API is 400 with a message
- * saying why. Every answer is JSON, never cached.
+ * saying why. Every answer with a body is JSON (a removal's 204 has none, nor does the OAuth
+ * layer's 401 without a token), and none is cached.
  */
 export const agentApi = new OpenAPIHono<{ Bindings: Env; Variables: Variables }>({
   defaultHook: (result, c) =>
@@ -153,15 +176,25 @@ agentApi.use("*", async (c, next) => {
 
 agentApi.notFound((c) => c.json({ message: "Not found" }, 404));
 
+// Hono rejects a body it can't read (malformed JSON, not JSON at all) by throwing; answer those
+// as { message } like every other error, and anything unexpected as 500.
+agentApi.onError((error, c) => {
+  if (error instanceof HTTPException && error.status < 500) {
+    return c.json({ message: error.message }, error.status);
+  }
+  console.error("/api failed.", error);
+  return c.json({ message: "Something went wrong" }, 500);
+});
+
 function taskJson(task: Task): z.infer<typeof taskSchema> {
-  return { ...task, nextRunAt: task.nextRunAt.toISOString() };
+  return { ...task, nextRunAt: timeJson(task.nextRunAt) };
 }
 
 function runJson(run: Run): z.infer<typeof runSchema> {
   return {
     ...run,
-    startedAt: run.startedAt.toISOString(),
-    endedAt: run.endedAt?.toISOString() ?? null,
+    startedAt: timeJson(run.startedAt),
+    endedAt: run.endedAt === null ? null : timeJson(run.endedAt),
   };
 }
 
@@ -177,7 +210,7 @@ agentApi.openapi(routes.addTask, async (c) => {
 
 agentApi.openapi(routes.removeTask, async (c) => {
   const removed = await c.var.agent.removeTask(c.req.valid("param").taskId);
-  return removed ? c.body(null, 204) : c.json({ message: "No task of this user has this ID" }, 404);
+  return removed ? c.body(null, 204) : c.json({ message: NO_SUCH_TASK }, 404);
 });
 
 agentApi.openapi(routes.recentRuns, async (c) => {
