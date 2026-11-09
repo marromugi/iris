@@ -1,7 +1,7 @@
 import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
-import { nextWakeAt, runDue } from "./runner";
+import { nextWakeAt, runNext } from "./runner";
 import { nextRunAt, scheduleSchema } from "./schedule";
 import * as store from "./store";
 
@@ -43,14 +43,14 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
         nextRunAt: nextRunAt(parsed.data.schedule, now),
       };
       store.insertTask(this.ctx.storage, task);
-      await this.wakeAt(nextWakeAt(this.ctx.storage, now));
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
       return { ok: true, task };
     }
 
     /** Removes a task and says whether there was one. Runs it already started carry on. */
     async removeTask(id: string): Promise<boolean> {
       const removed = store.deleteTask(this.ctx.storage, id);
-      await this.wakeAt(nextWakeAt(this.ctx.storage, new Date()));
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
       return removed;
     }
 
@@ -64,7 +64,7 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     }
 
     override async alarm(): Promise<void> {
-      const wakeAt = await runDue(this.ctx.storage, agentFor(this.env), () => new Date());
+      const wakeAt = await runNext(this.ctx.storage, agentFor(this.env), () => new Date());
       await this.wakeAt(wakeAt);
     }
 

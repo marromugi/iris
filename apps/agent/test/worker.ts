@@ -1,8 +1,11 @@
 import type { AssistantMessage, Model } from "@iris/agent";
 import { createUserAgent } from "../src/user-agent";
 
-/** What the test model does on each call, in order: reply with a message or fail with an error. */
-export const scriptedModel: (AssistantMessage | Error)[] = [];
+/**
+ * What the test model does on each call, in order: reply with a message, fail with an error, or
+ * do something while the call is in flight and then reply.
+ */
+export const scriptedModel: (AssistantMessage | Error | (() => AssistantMessage))[] = [];
 
 const model: Model = async () => {
   const next = scriptedModel.shift();
@@ -12,7 +15,7 @@ const model: Model = async () => {
   if (next instanceof Error) {
     throw next;
   }
-  return next;
+  return typeof next === "function" ? next() : next;
 };
 
 export const testAgent = { model, tools: [] };

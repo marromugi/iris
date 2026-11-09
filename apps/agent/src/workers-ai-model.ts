@@ -10,12 +10,13 @@ import {
 /** One chat completion call to a Workers AI model that takes and returns the OpenAI-style format. */
 export type ChatCompletion = (input: {
   messages: ChatCompletionMessageParam[];
-  tools: ChatCompletionTool[];
+  tools?: ChatCompletionTool[];
 }) => Promise<ChatCompletionsOutput>;
 
 /**
  * A `Model` backed by a Workers AI chat completions model. The Workers AI format stays in this
- * module. Rejects when the call does, or when the reply has no message.
+ * module. Rejects when the call does, and when the reply has no message or an empty one (no
+ * text, refusal or tool call, as when the model runs out of tokens while reasoning).
  */
 export function createWorkersAiModel(complete: ChatCompletion): Model {
   return async (request) => {
@@ -26,13 +27,20 @@ export function createWorkersAiModel(complete: ChatCompletion): Model {
           : [{ role: "system" as const, content: request.system }]),
         ...request.messages.map(toChatMessage),
       ],
-      tools: request.tools.map(toChatTool),
+      // Left out when empty: OpenAI-style APIs may reject an empty list of tools.
+      ...(request.tools.length > 0 ? { tools: request.tools.map(toChatTool) } : {}),
     });
     const choice = output.choices[0];
     if (choice === undefined) {
       throw new Error(`Workers AI model ${output.model} returned no message.`);
     }
-    return fromChatMessage(choice.message);
+    const message = fromChatMessage(choice.message);
+    if (message.parts.length === 0) {
+      throw new Error(
+        `Workers AI model ${output.model} returned an empty message (finish reason: ${choice.finish_reason}).`,
+      );
+    }
+    return message;
   };
 }
 
@@ -78,6 +86,9 @@ function fromChatMessage(message: ChatCompletionResponseMessage): AssistantMessa
   const parts: AssistantMessage["parts"] = [];
   if (message.content !== null && message.content !== "") {
     parts.push({ type: "text", text: message.content });
+  }
+  if (message.refusal !== null && message.refusal !== "") {
+    parts.push({ type: "text", text: message.refusal });
   }
   for (const call of message.tool_calls ?? []) {
     parts.push(

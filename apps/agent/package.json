@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "wrangler types",
     "typecheck": "wrangler types && tsc"
   },
   "dependencies": {

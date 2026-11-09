@@ -15,7 +15,9 @@ const MIGRATIONS: readonly string[] = [
      task_id TEXT,
      started_at INTEGER NOT NULL,
      ended_at INTEGER,
-     last_error TEXT
+     last_error TEXT,
+     failed_attempts INTEGER NOT NULL DEFAULT 0,
+     last_failed_at INTEGER
    );
    CREATE TABLE messages (
      run_id TEXT NOT NULL,
@@ -100,14 +102,15 @@ export function listTasks(storage: DurableObjectStorage): Task[] {
     .map(toTask);
 }
 
-export function dueTasks(storage: DurableObjectStorage, now: Date): Task[] {
-  return storage.sql
+/** The task whose run time came first, among those due by `now`. */
+export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | undefined {
+  const row = storage.sql
     .exec<TaskRow>(
-      "SELECT * FROM tasks WHERE next_run_at <= ? ORDER BY next_run_at, id",
+      "SELECT * FROM tasks WHERE next_run_at <= ? ORDER BY next_run_at, id LIMIT 1",
       now.getTime(),
     )
-    .toArray()
-    .map(toTask);
+    .toArray()[0];
+  return row === undefined ? undefined : toTask(row);
 }
 
 /**
@@ -166,13 +169,22 @@ export function loadConversation(storage: DurableObjectStorage, runId: string): 
     });
 }
 
-export function unendedRunIds(storage: DurableObjectStorage): string[] {
-  return storage.sql
-    .exec<{ id: string }>("SELECT id FROM runs WHERE ended_at IS NULL ORDER BY started_at, id")
-    .toArray()
-    .map((row) => row.id);
+export interface UnendedRun {
+  readonly id: string;
+  /** When the run last failed, or when it started if it never failed (it was cut off). */
+  readonly lastTriedAt: Date;
 }
 
+export function unendedRuns(storage: DurableObjectStorage): UnendedRun[] {
+  return storage.sql
+    .exec<{ id: string; last_tried_at: number }>(
+      "SELECT id, coalesce(last_failed_at, started_at) AS last_tried_at FROM runs WHERE ended_at IS NULL ORDER BY started_at, id",
+    )
+    .toArray()
+    .map((row) => ({ id: row.id, lastTriedAt: new Date(row.last_tried_at) }));
+}
+
+/** Ends a run that finished or reached its step limit, clearing any earlier failure. */
 export function endRun(storage: DurableObjectStorage, runId: string, endedAt: Date): void {
   storage.sql.exec(
     "UPDATE runs SET ended_at = ?, last_error = NULL WHERE id = ?",
@@ -181,18 +193,39 @@ export function endRun(storage: DurableObjectStorage, runId: string, endedAt: Da
   );
 }
 
-export function recordRunError(storage: DurableObjectStorage, runId: string, error: string): void {
-  storage.sql.exec("UPDATE runs SET last_error = ? WHERE id = ?", error, runId);
+/** Ends a run that won't be tried again, keeping the error of its last attempt. */
+export function giveUpRun(storage: DurableObjectStorage, runId: string, endedAt: Date): void {
+  storage.sql.exec("UPDATE runs SET ended_at = ? WHERE id = ?", endedAt.getTime(), runId);
+}
+
+/** Records a failed attempt and returns how many attempts of the run have failed so far. */
+export function recordRunFailure(
+  storage: DurableObjectStorage,
+  runId: string,
+  failure: { error: string; failedAt: Date },
+): number {
+  return storage.sql
+    .exec<{ failed_attempts: number }>(
+      "UPDATE runs SET last_error = ?, last_failed_at = ?, failed_attempts = failed_attempts + 1 WHERE id = ? RETURNING failed_attempts",
+      failure.error,
+      failure.failedAt.getTime(),
+      runId,
+    )
+    .one().failed_attempts;
 }
 
 export interface Run {
   readonly id: string;
   readonly taskId: string | null;
   readonly startedAt: Date;
-  /** Set once the run has finished or reached its step limit; unset while it still has to be carried on. */
+  /**
+   * Set once the run has finished, reached its step limit, or been given up after failing too
+   * often; unset while it still has to be carried on.
+   */
   readonly endedAt: Date | null;
-  /** Why the last attempt failed, while the run is waiting to be carried on. */
+  /** Why the last attempt failed. Cleared when a later attempt finishes; kept on a run given up. */
   readonly lastError: string | null;
+  readonly failedAttempts: number;
   readonly messages: Message[];
 }
 
@@ -205,6 +238,7 @@ export function recentRuns(storage: DurableObjectStorage, limit: number): Run[] 
       started_at: number;
       ended_at: number | null;
       last_error: string | null;
+      failed_attempts: number;
     }>("SELECT * FROM runs ORDER BY started_at DESC, id LIMIT ?", limit)
     .toArray()
     .map((row) => ({
@@ -213,6 +247,7 @@ export function recentRuns(storage: DurableObjectStorage, limit: number): Run[] 
       startedAt: new Date(row.started_at),
       endedAt: row.ended_at === null ? null : new Date(row.ended_at),
       lastError: row.last_error,
+      failedAttempts: row.failed_attempts,
       messages: loadConversation(storage, row.id),
     }));
 }

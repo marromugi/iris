@@ -2,24 +2,35 @@ import { type Agent, run } from "@iris/agent";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 
-/** How long to wait before trying a failed run again, for example one whose model call failed. */
+/** How long after a run was last tried it is carried on, for example after its model call failed. */
 export const RETRY_DELAY_MS = 5 * 60 * 1000;
 
+/** How many failed attempts a run gets before it is given up, so a run that keeps failing can't keep calling the model. */
+export const MAX_FAILED_ATTEMPTS = 3;
+
 /**
- * Carries on every run that hasn't ended, then starts a run for each task that is due. A due task
- * that missed several times (the object was down) runs once and moves to its next time after now.
- * A run that throws keeps its messages so far, gets its error recorded, and is carried on at the
- * next wake-up. Returns when to wake up next, or undefined when nothing is waiting.
+ * Does one piece of work that is due, then returns when to wake up next (a time already passed
+ * when more work is due), or undefined when nothing is waiting. One piece per wake-up keeps each
+ * wake-up within the platform's time limit however much is due.
+ *
+ * The piece is, first, a run that hasn't ended and whose retry time has come: it is carried on
+ * from its saved messages. Otherwise it is the task whose time came first: a run of it starts and
+ * the task moves to its next time after now, so a task that missed several times runs once. A
+ * run that throws keeps its messages so far and is tried again `RETRY_DELAY_MS` later, until it
+ * has failed `MAX_FAILED_ATTEMPTS` times and is given up.
  */
-export async function runDue(
+export async function runNext(
   storage: DurableObjectStorage,
   agent: Agent,
   now: () => Date,
 ): Promise<Date | undefined> {
-  for (const runId of store.unendedRunIds(storage)) {
-    await carryOn(storage, agent, runId, now);
+  const retry = store.unendedRuns(storage).find((unended) => retryAt(unended) <= now());
+  if (retry !== undefined) {
+    await carryOn(storage, agent, retry.id, now);
+    return nextWakeAt(storage);
   }
-  for (const task of store.dueTasks(storage, now())) {
+  const task = store.nextDueTask(storage, now());
+  if (task !== undefined) {
     const runId = crypto.randomUUID();
     const startedAt = now();
     store.startRun(storage, {
@@ -30,17 +41,22 @@ export async function runDue(
     });
     await carryOn(storage, agent, runId, now);
   }
-  return nextWakeAt(storage, now());
+  return nextWakeAt(storage);
 }
 
-/** The earliest of the next task time and, while a run hasn't ended, the time to try it again. */
-export function nextWakeAt(storage: DurableObjectStorage, now: Date): Date | undefined {
-  const taskAt = store.earliestTaskRunAt(storage);
-  if (store.unendedRunIds(storage).length === 0) {
-    return taskAt;
-  }
-  const retryAt = new Date(now.getTime() + RETRY_DELAY_MS);
-  return taskAt === undefined || retryAt < taskAt ? retryAt : taskAt;
+/** The earliest of the next task time and the retry times of runs that haven't ended. */
+export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
+  const times = [
+    store.earliestTaskRunAt(storage),
+    ...store.unendedRuns(storage).map(retryAt),
+  ].filter((time) => time !== undefined);
+  return times.length === 0
+    ? undefined
+    : new Date(Math.min(...times.map((time) => time.getTime())));
+}
+
+function retryAt(unended: store.UnendedRun): Date {
+  return new Date(unended.lastTriedAt.getTime() + RETRY_DELAY_MS);
 }
 
 async function carryOn(
@@ -58,7 +74,16 @@ async function carryOn(
     }
     store.endRun(storage, runId, now());
   } catch (error) {
-    console.error(`Run ${runId} failed and will be carried on at the next wake-up.`, error);
-    store.recordRunError(storage, runId, error instanceof Error ? error.message : String(error));
+    const failedAt = now();
+    const failed = store.recordRunFailure(storage, runId, {
+      error: error instanceof Error ? error.message : String(error),
+      failedAt,
+    });
+    if (failed >= MAX_FAILED_ATTEMPTS) {
+      console.error(`Run ${runId} failed ${failed} times and is given up.`, error);
+      store.giveUpRun(storage, runId, failedAt);
+    } else {
+      console.error(`Run ${runId} failed and will be tried again later.`, error);
+    }
   }
 }
