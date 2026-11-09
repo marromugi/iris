@@ -11,5 +11,14 @@ enum DateText {
         )
     }
 
+    /// How long before `now` a moment was, such as 14 分前 or 昨日; 1 分以内 under a minute.
+    static func ago(_ date: Date, from now: Date) -> String {
+        var style = Date.AnchoredRelativeFormatStyle(
+            anchor: date, presentation: .named, unitsStyle: .wide, locale: japanese)
+        // No seconds: the screens write it again once a minute.
+        style.allowedFields = [.year, .month, .week, .day, .hour, .minute]
+        return style.format(now)
+    }
+
     private static let japanese = Locale(identifier: "ja_JP")
 }

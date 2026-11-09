@@ -2,7 +2,7 @@
     import Backend
     import Foundation
 
-    /// Made-up tasks and runs, for previews and tests. Runs are written as `/api` sends them.
+    /// Made-up agents, tasks, and runs, for previews and tests. Runs are written as `/api` sends them.
     nonisolated enum Samples {
         static let weatherTask = ScheduledTask(
             id: "0b4f6a52-9a51-4c7e-8a9e-6d1f2c3b4a50",
@@ -41,6 +41,38 @@
             }
             """)
 
+        static let mailRun = run(
+            """
+            {
+              "id": "2f4e6a8c-0b1d-4e3f-8a5c-7d9e1f3a5b7c",
+              "taskId": null,
+              "startedAt": "2026-11-10T00:00:00Z",
+              "endedAt": "2026-11-10T00:04:00Z",
+              "lastError": null,
+              "failedAttempts": 0,
+              "messages": [
+                {"role": "user", "text": "昨日届いたメールを確認して、返信が必要そうなものをトリアージして教えて"},
+                {"role": "assistant", "parts": [
+                  {"type": "text", "text": "今から確認します。"},
+                  {"type": "tool-call", "id": "call-1", "name": "maillist", "input": {"since": "2026-11-09"}}
+                ]},
+                {"role": "tool", "callId": "call-1", "isError": false, "content": "42 件のメールがあります。"},
+                {"role": "assistant", "parts": [
+                  {"type": "text", "text": "返信が要りそうなものを開いて確かめます。"},
+                  {"type": "tool-call", "id": "call-2", "name": "mailread", "input": {"id": "m-12"}}
+                ]},
+                {"role": "tool", "callId": "call-2", "isError": false, "content": "件名: 来週の打ち合わせ\\n日程の候補を 3 つ挙げてほしい、とのこと。"},
+                {"role": "assistant", "parts": [
+                  {"type": "tool-call", "id": "call-3", "name": "mailread", "input": {"id": "m-31"}}
+                ]},
+                {"role": "tool", "callId": "call-3", "isError": false, "content": "件名: 請求書の確認\\n金曜までに返事がほしい、とのこと。"},
+                {"role": "assistant", "parts": [
+                  {"type": "text", "text": "返信が要りそうなのは 2 件です。打ち合わせの日程と、金曜が期限の請求書の確認です。"}
+                ]}
+              ]
+            }
+            """)
+
         static let retryingRun = run(
             """
             {
@@ -74,6 +106,16 @@
               ]
             }
             """)
+
+        /// Many agents, for seeing that the home holds up when there are more than fit on the screen.
+        static let agents: [AgentSummary] =
+            [
+                AgentSummary(id: "mail", name: "メールの整理", lastRanAt: moment("2026-11-10T00:00:00Z")),
+                AgentSummary(id: "stocks", name: "株価の確認", lastRanAt: moment("2026-11-09T23:50:00Z")),
+                AgentSummary(id: "news", name: "ニュースのまとめ", lastRanAt: moment("2026-11-09T20:00:00Z")),
+                AgentSummary(id: "new", name: "まだ動いていないエージェント", lastRanAt: nil),
+            ]
+            + (1...16).map { AgentSummary(id: "pod-\($0)", name: "Pod \($0)", lastRanAt: moment("2026-11-01T00:00:00Z")) }
 
         static func moment(_ text: String) -> Date {
             guard let date = try? Date(text, strategy: .iso8601) else {

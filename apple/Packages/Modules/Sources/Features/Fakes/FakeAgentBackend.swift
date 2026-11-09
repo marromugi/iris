@@ -8,7 +8,7 @@
     final class FakeAgentBackend: AgentBackend {
         struct Answers: Sendable {
             var tasks = [Samples.newsTask, Samples.weatherTask]
-            var runs = [Samples.weatherRun, Samples.retryingRun, Samples.gaveUpRun]
+            var runs = [Samples.mailRun, Samples.weatherRun, Samples.retryingRun, Samples.gaveUpRun]
             var failure: AppError?
             /// When a task added here runs next.
             var nextRunAt = Samples.moment("2026-11-12T00:00:00Z")
