@@ -3,11 +3,38 @@
   "name": "iris-agent",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
+  "vars": {
+    // Where the Worker is served: the OAuth issuer, and `/api` under it is the one resource its
+    // tokens are for. `pnpm dev` overrides it with the local https origin.
+    "ORIGIN": "https://iris-agent.marrromugi-dev.workers.dev",
+  },
   "ai": { "binding": "AI" },
   "durable_objects": {
     "bindings": [{ "name": "USER_AGENT", "class_name": "UserAgent" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserAgent"] }],
+  // Users, their passkeys, and invites: what sign-in reads across users. The ID is a stand-in for
+  // local development; deploying needs the real database's ID.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "iris",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "d1-migrations",
+    },
+  ],
+  // The OAuth provider's clients, grants and tokens, and passkey ceremonies. The ID is a stand-in
+  // for local development; deploying needs the real namespace's ID.
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }],
+  "ratelimits": [
+    {
+      "name": "SIGN_IN_RATE_LIMIT",
+      // Workers in one account that use the same namespace_id share counters, so this one is iris's alone.
+      "namespace_id": "51617",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
+  "dev": { "port": 8787 },
   // Drizzle migrations import their .sql files as text.
   "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
 }

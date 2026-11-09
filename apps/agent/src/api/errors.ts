@@ -16,14 +16,17 @@ export const invalid = {
   400: errorResponse("The request doesn't fit the API; the message says why"),
 };
 
-/** The answer when a request reaches `/api` without a signed-in user. */
-export const NO_USER = { status: 403, description: "The token names no user" } as const;
+/** The answer when a request reaches `/api` without a signed-in user, or for one that was removed. */
+export const NO_USER = {
+  status: 403,
+  description: "The token names no user, or one that no longer exists",
+} as const;
 
 /** What every route can answer. The OAuth resource server answers 401 before any handler runs. */
 export const signedIn = {
   401: {
     description:
-      "No token, or one not valid for /api (expired, revoked, or for another resource): sign in again. The body is empty without a token, and { error, error_description } (RFC 6750) with one.",
+      'No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error="invalid_token" (RFC 6750).',
   },
   [NO_USER.status]: errorResponse(NO_USER.description),
   500: errorResponse("Something went wrong on the server"),

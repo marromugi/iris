@@ -1,3 +1,5 @@
+import { env as workerEnv } from "cloudflare:workers";
+import { createApp } from "./app";
 import { createUserAgent } from "./user-agent";
 import { createWorkersAiModel, WORKERS_AI_MODEL } from "./workers-ai-model";
 
@@ -10,7 +12,4 @@ export const UserAgent = createUserAgent((env) => ({
 }));
 export type UserAgent = InstanceType<typeof UserAgent>;
 
-// Nothing is reachable from outside until sign-in exists; user agents are reached over RPC only.
-export default {
-  fetch: () => new Response("Not found", { status: 404 }),
-} satisfies ExportedHandler<Env>;
+export default createApp(workerEnv.ORIGIN) satisfies ExportedHandler<Env>;

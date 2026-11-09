@@ -1,6 +1,7 @@
 import { OpenAPIHono, z } from "@hono/zod-openapi";
 import { answerError } from "./errors";
 import { type ApiEnv, signedInUser } from "./middlewares/signed-in-user";
+import { me } from "./routes/me/get";
 import { recentRuns } from "./routes/runs/get";
 import { removeTask } from "./routes/tasks/[taskId]/delete";
 import { listTasks } from "./routes/tasks/get";
@@ -9,16 +10,17 @@ import { addTask } from "./routes/tasks/post";
 export type { UserProps } from "./middlewares/signed-in-user";
 
 /**
- * Where the Worker is expected to serve `/api` once deployed (nothing is deployed yet); the
- * OpenAPI document names it as the server.
+ * Where the Worker serves `/api` once deployed; the OpenAPI document names it as the server. The
+ * Worker's `ORIGIN` in wrangler.jsonc is the same, which the test of openapi.json holds.
  */
 export const PRODUCTION_ORIGIN = "https://iris-agent.marrromugi-dev.workers.dev";
 
 /**
- * `/api`: a signed-in user's tasks and runs, for requests the OAuth layer let through with
- * `UserProps`. A request without them is 403; one that doesn't fit the API is 400 with a message
- * saying why. Every answer `/api` gives with a body is JSON (a removal's 204 has none), and none
- * is cached. The OAuth layer's 401 comes before `/api` and is its own.
+ * `/api`: who is signed in, and their tasks and runs, for requests the OAuth layer let through with
+ * `UserProps`. A request without them, or for a user that no longer exists, is 403; one that
+ * doesn't fit the API is 400 with a message saying why. Every answer `/api` gives with a body is
+ * JSON (a removal's 204 has none), and none is cached. The OAuth layer's 401 comes before `/api`
+ * and is its own.
  */
 export const agentApi = new OpenAPIHono<ApiEnv>({
   defaultHook: (result, c) =>
@@ -28,7 +30,7 @@ export const agentApi = new OpenAPIHono<ApiEnv>({
 agentApi.use("*", signedInUser);
 agentApi.notFound((c) => c.json({ message: "Not found" }, 404));
 agentApi.onError(answerError);
-agentApi.openapiRoutes([listTasks, addTask, removeTask, recentRuns]);
+agentApi.openapiRoutes([me, listTasks, addTask, removeTask, recentRuns]);
 
 agentApi.openAPIRegistry.registerComponent("securitySchemes", "iris", {
   type: "oauth2",

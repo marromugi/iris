@@ -13,5 +13,5 @@
   "env": {
     "builtin": true
   },
-  "ignorePatterns": ["apps/agent/drizzle/**"]
+  "ignorePatterns": ["apps/agent/drizzle/**", "apps/agent/d1-migrations/**"]
 }

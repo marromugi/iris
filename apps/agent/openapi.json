@@ -30,6 +30,34 @@
       }
     },
     "schemas": {
+      "Me": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name the user's invite gave them"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
       "Task": {
         "type": "object",
         "properties": {
@@ -66,17 +94,6 @@
           "prompt",
           "schedule",
           "nextRunAt"
-        ]
-      },
-      "Error": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message"
         ]
       },
       "NewTask": {
@@ -280,6 +297,46 @@
     "parameters": {}
   },
   "paths": {
+    "/api/me": {
+      "get": {
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "The signed-in user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tasks": {
       "get": {
         "operationId": "listTasks",
@@ -298,10 +355,10 @@
             }
           },
           "401": {
-            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): sign in again. The body is empty without a token, and { error, error_description } (RFC 6750) with one."
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
           },
           "403": {
-            "description": "The token names no user",
+            "description": "The token names no user, or one that no longer exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -356,10 +413,10 @@
             }
           },
           "401": {
-            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): sign in again. The body is empty without a token, and { error, error_description } (RFC 6750) with one."
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
           },
           "403": {
-            "description": "The token names no user",
+            "description": "The token names no user, or one that no longer exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -420,10 +477,10 @@
             }
           },
           "401": {
-            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): sign in again. The body is empty without a token, and { error, error_description } (RFC 6750) with one."
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
           },
           "403": {
-            "description": "The token names no user",
+            "description": "The token names no user, or one that no longer exists",
             "content": {
               "application/json": {
                 "schema": {
@@ -496,10 +553,10 @@
             }
           },
           "401": {
-            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): sign in again. The body is empty without a token, and { error, error_description } (RFC 6750) with one."
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
           },
           "403": {
-            "description": "The token names no user",
+            "description": "The token names no user, or one that no longer exists",
             "content": {
               "application/json": {
                 "schema": {
