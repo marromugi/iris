@@ -11,6 +11,7 @@ struct DateTextTests {
     }
 
     @Test(arguments: [
+        (secondsBefore: -90.0, text: "1 分以内"),
         (secondsBefore: 20.0, text: "1 分以内"),
         (secondsBefore: 14 * 60.0, text: "14 分前"),
         (secondsBefore: 3 * 3600.0, text: "3 時間前"),
