@@ -1,0 +1,32 @@
+name: Iris
+options:
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  Modules:
+    path: Packages/Modules
+targets:
+  Iris:
+    type: application
+    platform: iOS
+    sources:
+      - path: Iris
+        type: syncedFolder
+    dependencies:
+      - package: Modules
+        product: Features
+    settings:
+      base:
+        # The server accepts the sign-in only for this app's redirect, dev.marromugi.iris:/oauth.
+        PRODUCT_BUNDLE_IDENTIFIER: dev.marromugi.iris
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: iris
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_VERSION: "6.0"
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES

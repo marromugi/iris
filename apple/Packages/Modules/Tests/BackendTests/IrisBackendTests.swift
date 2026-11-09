@@ -1,0 +1,207 @@
+import AuthenticationServices
+import Foundation
+import Testing
+
+@testable import Backend
+
+struct IrisBackendTests {
+    let server = FakeServer()
+    let store = InMemoryCredentialStore()
+
+    func backend(now: Date = Date()) -> IrisBackend {
+        IrisBackend(origin: server.origin, store: store, send: server.send, now: { now })
+    }
+
+    func signIn(_ backend: IrisBackend) async throws {
+        try await backend.signIn { url, _ in try await server.signInSheet(url: url) }
+    }
+
+    @Test func signsInThroughTheSheetAndReadsTheTasks() async throws {
+        let backend = backend()
+
+        try await signIn(backend)
+        let tasks = try await backend.tasks()
+
+        #expect(tasks.map(\.prompt) == ["天気を教えて"])
+        #expect(tasks.first?.nextRunAt == Date(timeIntervalSince1970: 1_794_348_000))
+        #expect(await backend.isSignedIn)
+        #expect(store.load()?.origin == "https://iris.test")
+    }
+
+    @Test func signsInAgainAfterTheServerDroppedTheAppsRegistration() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await backend.signOut()
+        await server.forgetRegistrations()
+
+        try await signIn(backend)
+
+        #expect(try await backend.tasks().count == 1)
+    }
+
+    @Test func ignoresASignInKeptForAnotherServer() async throws {
+        let tokens = Tokens(accessToken: "access-9", refreshToken: "refresh-9", expiresAt: .distantFuture)
+        store.save(Credentials(origin: "https://localhost:8787", clientID: "client-9", tokens: tokens))
+
+        #expect(await !backend().isSignedIn)
+    }
+
+    @Test func closingTheSheetIsACancelAndKeepsNothing() async throws {
+        let backend = backend()
+
+        await #expect(throws: AppError.cancelled) {
+            try await backend.signIn { _, _ in throw ASWebAuthenticationSessionError(.canceledLogin) }
+        }
+        #expect(store.load() == nil)
+    }
+
+    @Test func signingOutEndsTheGrantOnTheServerToo() async throws {
+        let signedInAt = Date(timeIntervalSince1970: 0)
+        let backend = backend(now: signedInAt)
+        try await signIn(backend)
+        let kept = try #require(store.load())
+
+        await backend.signOut()
+
+        let expired = IrisBackend(
+            origin: server.origin, store: InMemoryCredentialStore(kept), send: server.send,
+            now: { signedInAt.addingTimeInterval(3600) })
+        await #expect(throws: AppError.signedOut) { try await expired.tasks() }
+    }
+
+    @Test func signingOutWhileARefreshIsAnsweredStaysSignedOutEvenIfTheServerMissesIt() async throws {
+        let signedInAt = Date(timeIntervalSince1970: 0)
+        try await signIn(backend(now: signedInAt))
+        let later = backend(now: signedInAt.addingTimeInterval(3600))
+        await server.missRevocations()
+        await server.holdRefreshAnswers()
+
+        let read = Task { try await later.tasks() }
+        await server.heldRefreshAnswer()
+        await later.signOut()
+        await server.releaseRefreshAnswers()
+
+        await #expect(throws: AppError.signedOut) { try await read.value }
+        #expect(await !later.isSignedIn)
+        #expect(store.load() == nil)
+    }
+
+    @Test func refreshesAndRetriesOnceWhenTheServerRefusesTheToken() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.revokeAccessToken()
+
+        let tasks = try await backend.tasks()
+
+        #expect(tasks.count == 1)
+        #expect(store.load()?.tokens.accessToken == "access-2")
+    }
+
+    @Test func refreshesBeforeAskingWhenTheTokenIsAboutToExpire() async throws {
+        let signedInAt = Date(timeIntervalSince1970: 0)
+        try await signIn(backend(now: signedInAt))
+
+        _ = try await backend(now: signedInAt.addingTimeInterval(3600 - 30)).tasks()
+
+        let apiRequests = await server.requests.filter { $0.url?.path == "/api/tasks" }
+        #expect(apiRequests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer access-2"])
+    }
+
+    @Test func endsTheSignInWhenTheRefreshIsRefused() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.endGrant()
+
+        await #expect(throws: AppError.signedOut) { try await backend.tasks() }
+        #expect(await !backend.isSignedIn)
+        #expect(store.load() == nil)
+    }
+
+    @Test func endsTheSignInWhenEvenAFreshTokenIsRefused() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.refuseEveryToken()
+
+        await #expect(throws: AppError.signedOut) { try await backend.tasks() }
+        #expect(await !backend.isSignedIn)
+    }
+
+    @Test func endsTheSignInWhenTheTokenNamesNoUser() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.nameNoUser()
+
+        await #expect(throws: AppError.signedOut) { try await backend.tasks() }
+        #expect(await !backend.isSignedIn)
+        #expect(store.load() == nil)
+    }
+
+    @Test func refreshesOnceForRequestsThatNeedItAtTheSameTime() async throws {
+        let signedInAt = Date(timeIntervalSince1970: 0)
+        try await signIn(backend(now: signedInAt))
+        let later = backend(now: signedInAt.addingTimeInterval(3600))
+
+        async let first = later.tasks()
+        async let second = later.recentRuns()
+        _ = try await (first, second)
+
+        let refreshes = await server.requests.filter { $0.url?.path == "/token" }.count - 1
+        #expect(refreshes == 1)
+    }
+
+    @Test func addsATaskAsJSONAndGetsItBackWithItsNextRun() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        let added = try await backend.addTask(
+            NewTask(prompt: "ニュースをまとめて", schedule: .init(cron: "30 6 * * *", timeZone: "Asia/Tokyo")))
+
+        #expect(added.prompt == "ニュースをまとめて")
+        #expect(added.schedule.cron == "30 6 * * *")
+        #expect(added.nextRunAt == Date(timeIntervalSince1970: 1_794_346_200))
+        #expect(try await backend.tasks().map(\.prompt) == ["天気を教えて", "ニュースをまとめて"])
+    }
+
+    @Test func aTaskTheServerRefusesSaysWhyInTheServersWords() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        await #expect(throws: AppError.refused(message: "✖ Not a known IANA time zone.\n  → at schedule.timeZone")) {
+            try await backend.addTask(NewTask(prompt: "天気", schedule: .init(cron: "0 7 * * *", timeZone: "Mars/Olympus")))
+        }
+    }
+
+    @Test func removesATaskAndCountsOneAlreadyGoneAsRemoved() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        let id = try #require(try await backend.tasks().first?.id)
+
+        try await backend.removeTask(id: id)
+        try await backend.removeTask(id: id)
+
+        #expect(try await backend.tasks().isEmpty)
+    }
+
+    @Test func readsRunsWithTheirConversations() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        let runs = try await backend.recentRuns()
+
+        let run = try #require(runs.first)
+        #expect(run.endedAt == Date(timeIntervalSince1970: 1_794_261_607))
+        #expect(run.taskId == nil)
+        guard case .case2(let assistant) = run.messages[1], case .case2(let call) = assistant.parts.first else {
+            Issue.record("expected the assistant's tool call, got \(run.messages[1])")
+            return
+        }
+        #expect(call.name == "weather")
+        #expect(call.input?.value as? [String: String] == ["city": "Tokyo"])
+        #expect(run.messages.count == 4)
+    }
+
+    @Test func aCallWithoutASignInIsSignedOut() async throws {
+        await #expect(throws: AppError.signedOut) { try await backend().tasks() }
+        #expect(await server.requests.isEmpty)
+    }
+}
