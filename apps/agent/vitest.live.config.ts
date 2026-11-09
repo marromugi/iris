@@ -15,5 +15,7 @@ export default defineConfig({
   test: {
     include: ["test/live/**/*.live.ts"],
     testTimeout: 120_000,
+    // The Workers pool drops intercepted console output; the point of this check is to read what the model said.
+    disableConsoleIntercept: true,
   },
 });
