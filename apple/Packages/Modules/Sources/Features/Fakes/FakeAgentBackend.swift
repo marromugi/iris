@@ -50,10 +50,10 @@
             }
         }
 
-        func recentRuns() async throws(AppError) -> [Run] {
+        func recentRuns(limit: Int) async throws(AppError) -> [Run] {
             try answers.withLock { answers throws(AppError) in
                 if let failure = answers.failure { throw failure }
-                return answers.runs
+                return Array(answers.runs.prefix(limit))
             }
         }
     }

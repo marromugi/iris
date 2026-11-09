@@ -34,7 +34,7 @@ struct RunsScreen: View {
     }
 
     private func load() async {
-        runs = await runs.reading { () async throws(AppError) -> [Run] in try await agent.recentRuns() }
+        runs = await runs.reading { () async throws(AppError) -> [Run] in try await agent.recentRuns(limit: 20) }
     }
 }
 
