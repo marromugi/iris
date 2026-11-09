@@ -2,7 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["./worker-configuration.d.ts", "@cloudflare/vitest-plugin/types"],
-    "allowJs": true
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx"
   },
   "include": [
     "src",
@@ -14,5 +16,6 @@
     "vitest.live.config.ts",
     "scripts",
     "openapi.json"
-  ]
+  ],
+  "exclude": ["src/sign-in/client"]
 }
