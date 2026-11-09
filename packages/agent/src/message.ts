@@ -15,6 +15,11 @@ export interface JsonObject {
 
 const jsonSchema = z.json();
 
+export const jsonValueSchema = z.custom<JsonValue>(
+  (value) => jsonSchema.safeParse(value).success,
+  "Not a JSON value.",
+);
+
 /**
  * The model asking for one tool to run. `input` is any JSON value, so it survives being stored,
  * and is unchecked until the tool's own schema parses it.
@@ -23,7 +28,7 @@ export const toolCallPartSchema = z.object({
   type: z.literal("tool-call"),
   id: z.string().min(1),
   name: z.string().min(1),
-  input: z.custom<JsonValue>((value) => jsonSchema.safeParse(value).success, "Not a JSON value."),
+  input: jsonValueSchema,
 });
 
 export const userMessageSchema = z.object({

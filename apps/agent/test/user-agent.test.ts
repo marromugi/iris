@@ -4,14 +4,14 @@ import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
 import { RETRY_DELAY_MS, runDue } from "../src/runner";
 import * as store from "../src/store";
-import { scriptedModel, testAgent, type UserAgent } from "./worker";
+import { scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
   scriptedModel.length = 0;
   await reset();
 });
 
-const userAgent = () => (env.USER_AGENT as DurableObjectNamespace<UserAgent>).getByName("user-1");
+const userAgent = () => env.USER_AGENT.getByName("user-1");
 
 const reply = (text: string): AssistantMessage => ({
   role: "assistant",

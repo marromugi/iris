@@ -5,6 +5,8 @@ export default defineProject({
   plugins: [
     cloudflareTest({
       main: "./test/worker.ts",
+      // Tests never reach Cloudflare: no sign-in, no Workers AI usage.
+      remoteBindings: false,
       wrangler: { configPath: "./wrangler.jsonc" },
     }),
   ],
