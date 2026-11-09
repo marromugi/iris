@@ -216,3 +216,17 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
     failedAt.getTime() + RETRY_DELAY_MS,
   );
 });
+
+test("refuses storage that a newer version of the code migrated", async () => {
+  await expect(
+    runInDurableObject(userAgent(), async (_, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('', ?)",
+        Date.UTC(2100, 0, 1),
+      );
+      await store.migrate(state.storage);
+    }),
+  ).rejects.toThrow(
+    "Storage has a migration from 2100-01-01T00:00:00.000Z, newer than any this code knows.",
+  );
+});

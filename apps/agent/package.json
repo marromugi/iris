@@ -4,15 +4,18 @@
   "type": "module",
   "scripts": {
     "postinstall": "wrangler types",
-    "typecheck": "wrangler types && tsc"
+    "typecheck": "wrangler types && tsc",
+    "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "@iris/agent": "workspace:*",
     "croner": "11.0.0",
+    "drizzle-orm": "0.45.4",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",
+    "drizzle-kit": "0.31.11",
     "wrangler": "4.158.0"
   }
 }

@@ -8,4 +8,6 @@
     "bindings": [{ "name": "USER_AGENT", "class_name": "UserAgent" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserAgent"] }],
+  // Drizzle migrations import their .sql files as text.
+  "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
 }

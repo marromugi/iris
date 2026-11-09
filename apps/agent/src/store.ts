@@ -1,35 +1,17 @@
 import { type Message, messageSchema } from "@iris/agent";
+import { asc, desc, eq, isNull, lte, min, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/durable-sqlite";
+import { migrate as applyMigrations } from "drizzle-orm/durable-sqlite/migrator";
+import migrations from "../drizzle/migrations";
+import { messages, runs, tasks } from "./db/schema";
 import type { Schedule } from "./schedule";
-
-/** Each entry brings the schema from the version before it to its own; the index plus one is the version. */
-const MIGRATIONS: readonly string[] = [
-  `CREATE TABLE tasks (
-     id TEXT PRIMARY KEY,
-     prompt TEXT NOT NULL,
-     cron TEXT NOT NULL,
-     time_zone TEXT NOT NULL,
-     next_run_at INTEGER NOT NULL
-   );
-   CREATE TABLE runs (
-     id TEXT PRIMARY KEY,
-     task_id TEXT,
-     started_at INTEGER NOT NULL,
-     ended_at INTEGER,
-     last_error TEXT,
-     failed_attempts INTEGER NOT NULL DEFAULT 0,
-     last_failed_at INTEGER
-   );
-   CREATE TABLE messages (
-     run_id TEXT NOT NULL,
-     seq INTEGER NOT NULL,
-     format INTEGER NOT NULL,
-     body TEXT NOT NULL,
-     PRIMARY KEY (run_id, seq)
-   );`,
-];
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
 const MESSAGE_FORMAT = 1;
+
+function database(storage: DurableObjectStorage) {
+  return drizzle(storage);
+}
 
 export interface Task {
   readonly id: string;
@@ -38,78 +20,77 @@ export interface Task {
   readonly nextRunAt: Date;
 }
 
-/** Brings the schema up to the latest version. Refuses storage written by a newer version of this code. */
-export function migrate(storage: DurableObjectStorage): void {
-  storage.sql.exec("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)");
-  const row = storage.sql
-    .exec<{ version: number }>("SELECT version FROM schema_version")
-    .toArray()[0];
-  const current = row?.version ?? 0;
-  if (current > MIGRATIONS.length) {
-    throw new Error(
-      `Storage is at schema version ${current}, newer than the ${MIGRATIONS.length} this code knows.`,
+/**
+ * Applies the migrations drizzle-kit generated that the storage hasn't had yet. Refuses storage
+ * that has a migration newer than any this code knows, which a newer version of the code wrote.
+ */
+export async function migrate(storage: DurableObjectStorage): Promise<void> {
+  const db = database(storage);
+  const known = Math.max(0, ...migrations.journal.entries.map((entry) => entry.when));
+  const tracked = db.get<{ count: number }>(
+    sql`SELECT count(*) AS count FROM sqlite_master WHERE type = 'table' AND name = '__drizzle_migrations'`,
+  );
+  if (tracked.count > 0) {
+    const applied = db.get<{ latest: number | null }>(
+      sql`SELECT max(created_at) AS latest FROM __drizzle_migrations`,
     );
-  }
-  for (const [index, migration] of MIGRATIONS.entries()) {
-    if (index < current) {
-      continue;
+    if (applied.latest !== null && applied.latest > known) {
+      throw new Error(
+        `Storage has a migration from ${new Date(applied.latest).toISOString()}, newer than any this code knows.`,
+      );
     }
-    storage.transactionSync(() => {
-      storage.sql.exec(migration);
-      storage.sql.exec("DELETE FROM schema_version");
-      storage.sql.exec("INSERT INTO schema_version (version) VALUES (?)", index + 1);
-    });
   }
+  await applyMigrations(db, migrations);
 }
 
-type TaskRow = {
-  id: string;
-  prompt: string;
-  cron: string;
-  time_zone: string;
-  next_run_at: number;
-};
-
-function toTask(row: TaskRow): Task {
+function toTask(row: typeof tasks.$inferSelect): Task {
   return {
     id: row.id,
     prompt: row.prompt,
-    schedule: { cron: row.cron, timeZone: row.time_zone },
-    nextRunAt: new Date(row.next_run_at),
+    schedule: { cron: row.cron, timeZone: row.timeZone },
+    nextRunAt: row.nextRunAt,
   };
 }
 
 export function insertTask(storage: DurableObjectStorage, task: Task): void {
-  storage.sql.exec(
-    "INSERT INTO tasks (id, prompt, cron, time_zone, next_run_at) VALUES (?, ?, ?, ?, ?)",
-    task.id,
-    task.prompt,
-    task.schedule.cron,
-    task.schedule.timeZone,
-    task.nextRunAt.getTime(),
-  );
+  database(storage)
+    .insert(tasks)
+    .values({
+      id: task.id,
+      prompt: task.prompt,
+      cron: task.schedule.cron,
+      timeZone: task.schedule.timeZone,
+      nextRunAt: task.nextRunAt,
+    })
+    .run();
 }
 
 /** Deletes the task and says whether there was one. Runs it already started stay. */
 export function deleteTask(storage: DurableObjectStorage, id: string): boolean {
-  return storage.sql.exec("DELETE FROM tasks WHERE id = ?", id).rowsWritten > 0;
+  return (
+    database(storage).delete(tasks).where(eq(tasks.id, id)).returning({ id: tasks.id }).all()
+      .length > 0
+  );
 }
 
 export function listTasks(storage: DurableObjectStorage): Task[] {
-  return storage.sql
-    .exec<TaskRow>("SELECT * FROM tasks ORDER BY next_run_at, id")
-    .toArray()
+  return database(storage)
+    .select()
+    .from(tasks)
+    .orderBy(asc(tasks.nextRunAt), asc(tasks.id))
+    .all()
     .map(toTask);
 }
 
 /** The task whose run time came first, among those due by `now`. */
 export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | undefined {
-  const row = storage.sql
-    .exec<TaskRow>(
-      "SELECT * FROM tasks WHERE next_run_at <= ? ORDER BY next_run_at, id LIMIT 1",
-      now.getTime(),
-    )
-    .toArray()[0];
+  const row = database(storage)
+    .select()
+    .from(tasks)
+    .where(lte(tasks.nextRunAt, now))
+    .orderBy(asc(tasks.nextRunAt), asc(tasks.id))
+    .limit(1)
+    .get();
   return row === undefined ? undefined : toTask(row);
 }
 
@@ -121,20 +102,17 @@ export function startRun(
   storage: DurableObjectStorage,
   run: { id: string; task: Task; startedAt: Date; taskNextRunAt: Date },
 ): void {
-  storage.transactionSync(() => {
-    storage.sql.exec(
-      "UPDATE tasks SET next_run_at = ? WHERE id = ?",
-      run.taskNextRunAt.getTime(),
-      run.task.id,
-    );
-    storage.sql.exec(
-      "INSERT INTO runs (id, task_id, started_at) VALUES (?, ?, ?)",
-      run.id,
-      run.task.id,
-      run.startedAt.getTime(),
-    );
-    appendMessage(storage, run.id, 0, { role: "user", text: run.task.prompt });
+  database(storage).transaction((tx) => {
+    tx.update(tasks).set({ nextRunAt: run.taskNextRunAt }).where(eq(tasks.id, run.task.id)).run();
+    tx.insert(runs).values({ id: run.id, taskId: run.task.id, startedAt: run.startedAt }).run();
+    tx.insert(messages)
+      .values(messageRow(run.id, 0, { role: "user", text: run.task.prompt }))
+      .run();
   });
+}
+
+function messageRow(runId: string, seq: number, message: Message): typeof messages.$inferInsert {
+  return { runId, seq, format: MESSAGE_FORMAT, body: JSON.stringify(message) };
 }
 
 export function appendMessage(
@@ -143,22 +121,19 @@ export function appendMessage(
   seq: number,
   message: Message,
 ): void {
-  storage.sql.exec(
-    "INSERT INTO messages (run_id, seq, format, body) VALUES (?, ?, ?, ?)",
-    runId,
-    seq,
-    MESSAGE_FORMAT,
-    JSON.stringify(message),
-  );
+  database(storage)
+    .insert(messages)
+    .values(messageRow(runId, seq, message))
+    .run();
 }
 
 export function loadConversation(storage: DurableObjectStorage, runId: string): Message[] {
-  return storage.sql
-    .exec<{ seq: number; format: number; body: string }>(
-      "SELECT seq, format, body FROM messages WHERE run_id = ? ORDER BY seq",
-      runId,
-    )
-    .toArray()
+  return database(storage)
+    .select()
+    .from(messages)
+    .where(eq(messages.runId, runId))
+    .orderBy(asc(messages.seq))
+    .all()
     .map((row) => {
       if (row.format !== MESSAGE_FORMAT) {
         throw new Error(
@@ -176,26 +151,23 @@ export interface UnendedRun {
 }
 
 export function unendedRuns(storage: DurableObjectStorage): UnendedRun[] {
-  return storage.sql
-    .exec<{ id: string; last_tried_at: number }>(
-      "SELECT id, coalesce(last_failed_at, started_at) AS last_tried_at FROM runs WHERE ended_at IS NULL ORDER BY started_at, id",
-    )
-    .toArray()
-    .map((row) => ({ id: row.id, lastTriedAt: new Date(row.last_tried_at) }));
+  return database(storage)
+    .select({ id: runs.id, startedAt: runs.startedAt, lastFailedAt: runs.lastFailedAt })
+    .from(runs)
+    .where(isNull(runs.endedAt))
+    .orderBy(asc(runs.startedAt), asc(runs.id))
+    .all()
+    .map((row) => ({ id: row.id, lastTriedAt: row.lastFailedAt ?? row.startedAt }));
 }
 
 /** Ends a run that finished or reached its step limit, clearing any earlier failure. */
 export function endRun(storage: DurableObjectStorage, runId: string, endedAt: Date): void {
-  storage.sql.exec(
-    "UPDATE runs SET ended_at = ?, last_error = NULL WHERE id = ?",
-    endedAt.getTime(),
-    runId,
-  );
+  database(storage).update(runs).set({ endedAt, lastError: null }).where(eq(runs.id, runId)).run();
 }
 
 /** Ends a run that won't be tried again, keeping the error of its last attempt. */
 export function giveUpRun(storage: DurableObjectStorage, runId: string, endedAt: Date): void {
-  storage.sql.exec("UPDATE runs SET ended_at = ? WHERE id = ?", endedAt.getTime(), runId);
+  database(storage).update(runs).set({ endedAt }).where(eq(runs.id, runId)).run();
 }
 
 /** Records a failed attempt and returns how many attempts of the run have failed so far. */
@@ -204,14 +176,20 @@ export function recordRunFailure(
   runId: string,
   failure: { error: string; failedAt: Date },
 ): number {
-  return storage.sql
-    .exec<{ failed_attempts: number }>(
-      "UPDATE runs SET last_error = ?, last_failed_at = ?, failed_attempts = failed_attempts + 1 WHERE id = ? RETURNING failed_attempts",
-      failure.error,
-      failure.failedAt.getTime(),
-      runId,
-    )
-    .one().failed_attempts;
+  const row = database(storage)
+    .update(runs)
+    .set({
+      lastError: failure.error,
+      lastFailedAt: failure.failedAt,
+      failedAttempts: sql`${runs.failedAttempts} + 1`,
+    })
+    .where(eq(runs.id, runId))
+    .returning({ failedAttempts: runs.failedAttempts })
+    .get();
+  if (row === undefined) {
+    throw new Error(`There is no run ${runId} to record a failure for.`);
+  }
+  return row.failedAttempts;
 }
 
 export interface Run {
@@ -231,30 +209,27 @@ export interface Run {
 
 /** The latest runs first, each with its conversation. */
 export function recentRuns(storage: DurableObjectStorage, limit: number): Run[] {
-  return storage.sql
-    .exec<{
-      id: string;
-      task_id: string | null;
-      started_at: number;
-      ended_at: number | null;
-      last_error: string | null;
-      failed_attempts: number;
-    }>("SELECT * FROM runs ORDER BY started_at DESC, id LIMIT ?", limit)
-    .toArray()
+  return database(storage)
+    .select()
+    .from(runs)
+    .orderBy(desc(runs.startedAt), asc(runs.id))
+    .limit(limit)
+    .all()
     .map((row) => ({
       id: row.id,
-      taskId: row.task_id,
-      startedAt: new Date(row.started_at),
-      endedAt: row.ended_at === null ? null : new Date(row.ended_at),
-      lastError: row.last_error,
-      failedAttempts: row.failed_attempts,
+      taskId: row.taskId,
+      startedAt: row.startedAt,
+      endedAt: row.endedAt,
+      lastError: row.lastError,
+      failedAttempts: row.failedAttempts,
       messages: loadConversation(storage, row.id),
     }));
 }
 
 export function earliestTaskRunAt(storage: DurableObjectStorage): Date | undefined {
-  const row = storage.sql
-    .exec<{ next: number | null }>("SELECT min(next_run_at) AS next FROM tasks")
-    .one();
-  return row.next === null ? undefined : new Date(row.next);
+  const row = database(storage)
+    .select({ next: min(tasks.nextRunAt) })
+    .from(tasks)
+    .get();
+  return row?.next ?? undefined;
 }

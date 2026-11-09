@@ -26,7 +26,7 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
   return class UserAgent extends DurableObject<Env> {
     constructor(ctx: DurableObjectState, env: Env) {
       super(ctx, env);
-      store.migrate(ctx.storage);
+      void ctx.blockConcurrencyWhile(() => store.migrate(ctx.storage));
     }
 
     /** Adds a task that runs `prompt` on `schedule`. An invalid prompt or schedule comes back as `ok: false`. */
