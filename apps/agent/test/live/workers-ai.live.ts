@@ -3,9 +3,8 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
 import { z } from "zod";
-import { WORKERS_AI_MODEL } from "../../src/index";
 import * as store from "../../src/store";
-import { createWorkersAiModel } from "../../src/workers-ai-model";
+import { createWorkersAiModel, WORKERS_AI_MODEL } from "../../src/workers-ai-model";
 
 const model = createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input));
 

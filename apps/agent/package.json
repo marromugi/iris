@@ -6,12 +6,18 @@
     "postinstall": "wrangler types",
     "typecheck": "wrangler types && tsc",
     "db:generate": "drizzle-kit generate",
+    "d1:generate": "drizzle-kit generate --config drizzle.d1.config.ts",
+    "d1:migrate:local": "wrangler d1 migrations apply iris --local",
+    "dev": "wrangler dev --local --local-protocol https --https-key-path ~/.iris-dev/key.pem --https-cert-path ~/.iris-dev/cert.pem --var ORIGIN:https://localhost:8787",
+    "invite": "tsx scripts/issue-invite.ts",
     "test:live": "vitest run --config vitest.live.config.ts",
     "openapi": "tsx scripts/write-openapi.ts > openapi.json"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
     "@hono/zod-openapi": "1.6.3",
     "@iris/agent": "workspace:*",
+    "@simplewebauthn/server": "14.1.0",
     "croner": "11.0.0",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.17",

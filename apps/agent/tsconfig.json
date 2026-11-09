@@ -10,6 +10,7 @@
     "drizzle",
     "vitest.config.ts",
     "drizzle.config.ts",
+    "drizzle.d1.config.ts",
     "vitest.live.config.ts",
     "scripts",
     "openapi.json"

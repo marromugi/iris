@@ -7,6 +7,9 @@ import {
   type ToolSpec,
 } from "@iris/agent";
 
+/** The Workers AI model every user's agent thinks with. */
+export const WORKERS_AI_MODEL = "@cf/zai-org/glm-4.7-flash";
+
 /** One chat completion call to a Workers AI model that takes and returns the OpenAI-style format. */
 export type ChatCompletion = (input: {
   messages: ChatCompletionMessageParam[];

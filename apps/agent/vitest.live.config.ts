@@ -3,7 +3,8 @@ import { defineConfig } from "vitest/config";
 
 // Calls the real Workers AI through the AI binding, so it uses Workers AI neurons and needs
 // `wrangler login`. Run by hand with `pnpm --filter @iris/agent-worker test:live`; `pnpm test`
-// never picks these files up. Durable Objects stay local.
+// never picks these files up. Every other binding (Durable Objects, D1, KV, the rate limit) stays
+// local, as long as none sets `remote: true` in wrangler.jsonc.
 export default defineConfig({
   plugins: [
     cloudflareTest({
