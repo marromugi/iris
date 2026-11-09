@@ -38,5 +38,5 @@
   // Drizzle migrations import their .sql files as text.
   "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],
   // The sign-in page inlines its browser script, bundled from src/sign-in/client.
-  "build": { "command": "pnpm run build:client", "watch_dir": "src/sign-in/client" },
+  "build": { "command": "pnpm run build:client", "watch_dir": "src" },
 }
