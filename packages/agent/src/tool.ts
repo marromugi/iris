@@ -7,7 +7,11 @@ import type { z } from "zod";
  */
 export type ToolOutcome = { ok: true; content: string } | { ok: false; error: string };
 
-/** A tool the model can call. `input` parses the model's arguments before `run` sees them. */
+/**
+ * A tool the model can call. `input` parses the model's arguments before `run` sees them.
+ * A call's result is saved only after `run` returns, so if the process stops while `run` is
+ * working, the same call runs again when the conversation is resumed.
+ */
 export interface Tool<Input extends z.ZodType = z.ZodType> {
   readonly name: string;
   readonly description: string;

@@ -17,10 +17,8 @@ export {
   type ToolCallPart,
   toolCallPartSchema,
   toolCalls,
-  type ToolResult,
-  type ToolResultsMessage,
-  toolResultSchema,
-  toolResultsMessageSchema,
+  type ToolResultMessage,
+  toolResultMessageSchema,
   type UserMessage,
   userMessageSchema,
 } from "./message";
