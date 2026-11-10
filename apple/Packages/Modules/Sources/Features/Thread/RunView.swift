@@ -27,8 +27,7 @@ struct RunView: View {
                     .id(status)
             default:
                 if case .case3(let writing)? = progress {
-                    Text(writing.text)
-                        .textSelection(.enabled)
+                    StreamingMarkdownView(text: writing.text)
                 }
                 // A failure from an earlier attempt is no longer the news while another attempt is under way.
                 RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
@@ -75,8 +74,7 @@ private struct BlockView: View {
         case .user(let text):
             UserBubble(text: text)
         case .assistant(let text):
-            Text(text)
-                .textSelection(.enabled)
+            MarkdownView(blocks: MarkdownBlock.blocks(of: text))
         case .tools(let uses):
             ToolUsesView(uses: uses)
         }
