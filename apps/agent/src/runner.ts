@@ -19,11 +19,14 @@ export const MAX_EARLIER_MESSAGES = 40;
  * when more work is due), or undefined when nothing is waiting. One piece per wake-up keeps each
  * wake-up within the platform's time limit however much is due.
  *
- * The piece is, first, the run that hasn't ended whose due time came first: one a message started,
- * or one to try again. It is carried on from its saved messages. Otherwise it is the task whose
- * time came first: a run of it starts and the task moves to its next time after now, so a task
- * that missed several times runs once. A run that throws keeps its messages so far and is due
- * again `RETRY_DELAY_MS` later, until it has failed `MAX_FAILED_ATTEMPTS` times and is given up.
+ * The piece is, first, the run next in line whose due time came first: one a message started, or
+ * one to try again. It is carried on from its saved messages. Otherwise it is the task whose time
+ * came first: a run of it starts and the task moves to its next time after now, so a task that
+ * missed several times runs once. A run that throws keeps its messages so far and is due again
+ * `RETRY_DELAY_MS` later, until it has failed `MAX_FAILED_ATTEMPTS` times and is given up.
+ *
+ * An agent's runs are carried on one at a time in the order they started: a run waits while an
+ * earlier run of the same agent hasn't ended, the task's new run included.
  */
 export async function runNext(
   storage: DurableObjectStorage,
@@ -46,12 +49,14 @@ export async function runNext(
       startedAt,
       task: { id: task.id, nextRunAt: nextRunAt(task.schedule, startedAt) },
     });
-    await carryOn(storage, agent, runId, now);
+    if (store.nextDueRun(storage, startedAt) === runId) {
+      await carryOn(storage, agent, runId, now);
+    }
   }
   return nextWakeAt(storage);
 }
 
-/** The earliest of the next task time and the due times of runs that haven't ended. */
+/** The earliest of the next task time and the due times of runs next in line. */
 export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
   const times = [store.earliestTaskRunAt(storage), store.earliestRunDueAt(storage)].filter(
     (time) => time !== undefined,
@@ -64,7 +69,7 @@ export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
 /**
  * What the model reads of the agent's earlier runs, oldest first: the latest whole runs that
  * finished with a reply, as many as fit in `limit` messages. `conversations` comes latest first;
- * a run that didn't finish, because it is still going or was given up, is passed over.
+ * a run without a reply, given up or stopped at its step limit, is passed over.
  */
 export function earlierMessages(conversations: Iterable<Message[]>, limit: number): Message[] {
   const taken: Message[][] = [];

@@ -67,8 +67,9 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     }
 
     /**
-     * Starts a run of the agent on a message the user sent, which the alarm carries on as soon as
-     * it can, and returns the run as it starts. Empty text comes back as `ok: false`.
+     * Starts a run of the agent on a message the user sent, which the alarm carries on once the
+     * agent's earlier runs have ended, and returns the run as it starts. Empty text comes back as
+     * `ok: false`.
      */
     async sendMessage(agentId: string, input: NewMessage): Promise<SendMessageResult | undefined> {
       if (!store.hasAgent(this.ctx.storage, agentId)) {
@@ -85,11 +86,11 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
         text: parsed.data.text,
         startedAt: new Date(),
       });
-      await this.wakeAt(nextWakeAt(this.ctx.storage));
       const run = store.findRun(this.ctx.storage, id);
       if (run === undefined) {
         throw new Error(`Run ${id} was started but isn't stored.`);
       }
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
       return { ok: true, run };
     }
 

@@ -15,3 +15,11 @@ test("takes the latest whole runs that fit, and none older than one that doesn't
   expect(earlierMessages([latest, long, oldest], 5)).toEqual(latest);
   expect(earlierMessages([latest, long, oldest], 8)).toEqual([...oldest, ...long, ...latest]);
 });
+
+test("passes over a run without a reply", () => {
+  const latest = exchange("Latest", "Fine.");
+  const givenUp = exchange("Given up");
+  const oldest = exchange("Oldest", "Fine.");
+
+  expect(earlierMessages([latest, givenUp, oldest], 40)).toEqual([...oldest, ...latest]);
+});

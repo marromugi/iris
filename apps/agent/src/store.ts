@@ -1,6 +1,7 @@
 import { type Message, messageSchema } from "@iris/agent";
-import { and, asc, desc, eq, isNull, lt, lte, max, min, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, lte, max, min, notExists, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
+import { alias, type SQLiteColumn } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
 import { agents, messages, runs, tasks } from "./db/schema";
 import type { Schedule } from "./schedule";
@@ -227,24 +228,62 @@ export function loadConversation(storage: DurableObjectStorage, runId: string): 
     });
 }
 
-/** The ID of the run that hasn't ended whose due time came first, among every agent's runs due by `now`. */
+const earlierRuns = alias(runs, "earlier_runs");
+
+/**
+ * Whether `run` started before `later`. Runs that started in the same millisecond go in the order
+ * of their IDs.
+ */
+function startedBefore(
+  run: { startedAt: SQLiteColumn; id: SQLiteColumn },
+  later: { startedAt: SQLiteColumn | Date; id: SQLiteColumn | string },
+) {
+  return or(
+    lt(run.startedAt, later.startedAt),
+    and(eq(run.startedAt, later.startedAt), lt(run.id, later.id)),
+  );
+}
+
+/**
+ * Runs next in line: each agent's first run that hasn't ended. An agent's runs are carried on one
+ * at a time in the order they started, so each reads the ones before it once they have ended.
+ */
+function nextInLine(storage: DurableObjectStorage) {
+  return and(
+    isNull(runs.endedAt),
+    notExists(
+      database(storage)
+        .select({ id: earlierRuns.id })
+        .from(earlierRuns)
+        .where(
+          and(
+            eq(earlierRuns.agentId, runs.agentId),
+            isNull(earlierRuns.endedAt),
+            startedBefore(earlierRuns, runs),
+          ),
+        ),
+    ),
+  );
+}
+
+/** The ID of the run next in line whose due time came first, among every agent's runs due by `now`. */
 export function nextDueRun(storage: DurableObjectStorage, now: Date): string | undefined {
   const row = database(storage)
     .select({ id: runs.id })
     .from(runs)
-    .where(and(isNull(runs.endedAt), lte(runs.dueAt, now)))
+    .where(and(nextInLine(storage), lte(runs.dueAt, now)))
     .orderBy(asc(runs.dueAt), asc(runs.id))
     .limit(1)
     .get();
   return row?.id;
 }
 
-/** When the earliest run that hasn't ended is due. */
+/** When the earliest run next in line is due. */
 export function earliestRunDueAt(storage: DurableObjectStorage): Date | undefined {
   const row = database(storage)
     .select({ next: min(runs.dueAt) })
     .from(runs)
-    .where(isNull(runs.endedAt))
+    .where(nextInLine(storage))
     .get();
   return row?.next ?? undefined;
 }
@@ -327,7 +366,7 @@ export function recentRuns(storage: DurableObjectStorage, agentId: string, limit
     .select()
     .from(runs)
     .where(eq(runs.agentId, agentId))
-    .orderBy(desc(runs.startedAt), asc(runs.id))
+    .orderBy(desc(runs.startedAt), desc(runs.id))
     .limit(limit)
     .all()
     .map((row) => toRun(storage, row));
@@ -355,10 +394,7 @@ export function* earlierConversations(
     .where(
       and(
         eq(runs.agentId, run.agentId),
-        or(
-          lt(runs.startedAt, run.startedAt),
-          and(eq(runs.startedAt, run.startedAt), lt(runs.id, runId)),
-        ),
+        startedBefore(runs, { startedAt: run.startedAt, id: runId }),
       ),
     )
     .orderBy(desc(runs.startedAt), desc(runs.id))

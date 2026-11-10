@@ -390,37 +390,50 @@ test("sends no message, and sets no alarm, to an agent the user doesn't have or 
   expect(await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm())).toBeNull();
 });
 
-test("a run reads its agent's earlier runs that finished, oldest first, and no others", async () => {
-  const agentId = await firstAgentId();
+test("while a run waits on the model, it is due again only after the retry delay", async () => {
+  const sentAt = new Date("2026-11-10T07:00:00Z");
+  await startRun("sent", await firstAgentId(), "Hello", sentAt);
+
+  const dueDuringCall = await runInDurableObject(userAgent(), async (_, state) => {
+    let due: Date | undefined;
+    scriptedModel.push(() => {
+      due = store.earliestRunDueAt(state.storage);
+      return reply("Hi.");
+    });
+    await runNext(state.storage, testAgent, () => sentAt);
+    return due;
+  });
+
+  // An attempt cut off during the call is tried again then, not at once.
+  expect(dueDuringCall).toEqual(new Date(sentAt.getTime() + RETRY_DELAY_MS));
+});
+
+test("an agent's runs go one at a time in the order they started, each reading its agent's before it", async () => {
   const otherId = await insertAgent("Second");
-  const firstAt = new Date("2026-11-10T07:00:00Z");
+  const sentAt = new Date("2026-11-10T07:00:00Z");
+  const retryAt = new Date(sentAt.getTime() + RETRY_DELAY_MS);
 
   await startRun("other", otherId, "For the other agent", new Date("2026-11-10T06:00:00Z"));
   scriptedModel.push(reply("Other answer."));
   await runNextAt(new Date("2026-11-10T06:00:00Z"));
-  await startRun("first", agentId, "First question", firstAt);
+  await startRun("sent", await firstAgentId(), "First question", sentAt);
   scriptedModel.push(new Error("The model service is unreachable."));
-  await runNextAt(firstAt);
-  await startRun("second", agentId, "Second question", new Date("2026-11-10T07:01:00Z"));
-  scriptedModel.push(reply("Second answer."));
-  await runNextAt(new Date("2026-11-10T07:01:00Z"));
-  // The first run's retry, after the second run finished.
-  scriptedModel.push(reply("First answer."));
-  await runNextAt(new Date(firstAt.getTime() + RETRY_DELAY_MS));
-  await startRun("third", agentId, "Third question", new Date("2026-11-10T07:10:00Z"));
-  scriptedModel.push(reply("Third answer."));
-  await runNextAt(new Date("2026-11-10T07:10:00Z"));
+  await runNextAt(sentAt);
+  // The task's run starts while the sent message's run waits to be tried again.
+  await insertTask(new Date("2026-11-10T07:01:00Z"));
+  const wakeAt = await runNextAt(new Date("2026-11-10T07:01:00Z"));
+  scriptedModel.push(reply("First answer."), reply("You have 3 new emails."));
+  await runNextAt(retryAt);
+  await runNextAt(retryAt);
 
+  expect(wakeAt).toEqual(retryAt);
   expect(modelRequests.slice(1).map((request) => request.messages)).toEqual([
     [{ role: "user", text: "First question" }],
-    [{ role: "user", text: "Second question" }],
     [{ role: "user", text: "First question" }],
     [
       { role: "user", text: "First question" },
       reply("First answer."),
-      { role: "user", text: "Second question" },
-      reply("Second answer."),
-      { role: "user", text: "Third question" },
+      { role: "user", text: "Summarize today's email" },
     ],
   ]);
 });
