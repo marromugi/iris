@@ -2,6 +2,7 @@ import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { nextWakeAt, runNext } from "./runner";
+import { type NewMessage, newMessageSchema } from "./message";
 import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
@@ -9,6 +10,10 @@ import { type NewTask, newTaskSchema } from "./task";
 
 export type AddTaskResult =
   | { readonly ok: true; readonly task: store.Task }
+  | { readonly ok: false; readonly error: string };
+
+export type SendMessageResult =
+  | { readonly ok: true; readonly run: store.Run }
   | { readonly ok: false; readonly error: string };
 
 /**
@@ -59,6 +64,34 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       const removed = store.deleteTask(this.ctx.storage, agentId, taskId);
       await this.wakeAt(nextWakeAt(this.ctx.storage));
       return removed;
+    }
+
+    /**
+     * Starts a run of the agent on a message the user sent, which the alarm carries on once the
+     * agent's earlier runs have ended, and returns the run as it starts. Empty text comes back as
+     * `ok: false`.
+     */
+    async sendMessage(agentId: string, input: NewMessage): Promise<SendMessageResult | undefined> {
+      if (!store.hasAgent(this.ctx.storage, agentId)) {
+        return undefined;
+      }
+      const parsed = newMessageSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      const id = crypto.randomUUID();
+      store.startRun(this.ctx.storage, {
+        id,
+        agentId,
+        text: parsed.data.text,
+        startedAt: new Date(),
+      });
+      const run = store.findRun(this.ctx.storage, id);
+      if (run === undefined) {
+        throw new Error(`Run ${id} was started but isn't stored.`);
+      }
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return { ok: true, run };
     }
 
     /** The agent's tasks, the next to run first. */

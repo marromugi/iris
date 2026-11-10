@@ -1,6 +1,7 @@
 import { type Message, messageSchema } from "@iris/agent";
-import { and, asc, desc, eq, isNull, lte, max, min, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lt, lte, max, min, notExists, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
+import { alias, type SQLiteColumn } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
 import { agents, messages, runs, tasks } from "./db/schema";
 import type { Schedule } from "./schedule";
@@ -158,25 +159,38 @@ export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | un
 }
 
 /**
- * Starts a run of the task, for the task's agent, with its prompt as the first message, and moves
- * the task to its next run time, in one transaction: a task is never started twice for the same time.
+ * Starts a run of the agent with `text` as its first message, due at once. A run of a task also
+ * moves the task to its next run time in the same transaction: a task is never started twice for
+ * the same time. A run without a task is one a message the user sent started.
  */
 export function startRun(
   storage: DurableObjectStorage,
-  run: { id: string; task: Task; startedAt: Date; taskNextRunAt: Date },
+  run: {
+    id: string;
+    agentId: string;
+    text: string;
+    startedAt: Date;
+    task?: { id: string; nextRunAt: Date };
+  },
 ): void {
   database(storage).transaction((tx) => {
-    tx.update(tasks).set({ nextRunAt: run.taskNextRunAt }).where(eq(tasks.id, run.task.id)).run();
+    if (run.task !== undefined) {
+      tx.update(tasks)
+        .set({ nextRunAt: run.task.nextRunAt })
+        .where(eq(tasks.id, run.task.id))
+        .run();
+    }
     tx.insert(runs)
       .values({
         id: run.id,
-        agentId: run.task.agentId,
-        taskId: run.task.id,
+        agentId: run.agentId,
+        taskId: run.task?.id ?? null,
         startedAt: run.startedAt,
+        dueAt: run.startedAt,
       })
       .run();
     tx.insert(messages)
-      .values(messageRow(run.id, 0, { role: "user", text: run.task.prompt }))
+      .values(messageRow(run.id, 0, { role: "user", text: run.text }))
       .run();
   });
 }
@@ -214,20 +228,69 @@ export function loadConversation(storage: DurableObjectStorage, runId: string): 
     });
 }
 
-export interface UnendedRun {
-  readonly id: string;
-  /** When the run last failed, or when it started if it never failed (it was cut off). */
-  readonly lastTriedAt: Date;
+const earlierRuns = alias(runs, "earlier_runs");
+
+/**
+ * Whether `run` started before `later`. Runs that started in the same millisecond go in the order
+ * of their IDs.
+ */
+function startedBefore(
+  run: { startedAt: SQLiteColumn; id: SQLiteColumn },
+  later: { startedAt: SQLiteColumn | Date; id: SQLiteColumn | string },
+) {
+  return or(
+    lt(run.startedAt, later.startedAt),
+    and(eq(run.startedAt, later.startedAt), lt(run.id, later.id)),
+  );
 }
 
-export function unendedRuns(storage: DurableObjectStorage): UnendedRun[] {
-  return database(storage)
-    .select({ id: runs.id, startedAt: runs.startedAt, lastFailedAt: runs.lastFailedAt })
+/**
+ * Runs next in line: each agent's first run that hasn't ended. An agent's runs are carried on one
+ * at a time in the order they started, so each reads the ones before it once they have ended.
+ */
+function nextInLine(storage: DurableObjectStorage) {
+  return and(
+    isNull(runs.endedAt),
+    notExists(
+      database(storage)
+        .select({ id: earlierRuns.id })
+        .from(earlierRuns)
+        .where(
+          and(
+            eq(earlierRuns.agentId, runs.agentId),
+            isNull(earlierRuns.endedAt),
+            startedBefore(earlierRuns, runs),
+          ),
+        ),
+    ),
+  );
+}
+
+/** The ID of the run next in line whose due time came first, among every agent's runs due by `now`. */
+export function nextDueRun(storage: DurableObjectStorage, now: Date): string | undefined {
+  const row = database(storage)
+    .select({ id: runs.id })
     .from(runs)
-    .where(isNull(runs.endedAt))
-    .orderBy(asc(runs.startedAt), asc(runs.id))
-    .all()
-    .map((row) => ({ id: row.id, lastTriedAt: row.lastFailedAt ?? row.startedAt }));
+    .where(and(nextInLine(storage), lte(runs.dueAt, now)))
+    .orderBy(asc(runs.dueAt), asc(runs.id))
+    .limit(1)
+    .get();
+  return row?.id;
+}
+
+/** When the earliest run next in line is due. */
+export function earliestRunDueAt(storage: DurableObjectStorage): Date | undefined {
+  const row = database(storage)
+    .select({ next: min(runs.dueAt) })
+    .from(runs)
+    .where(nextInLine(storage))
+    .get();
+  return row?.next ?? undefined;
+}
+
+/** Sets when the run is next due to be carried on. */
+export function postponeRun(storage: DurableObjectStorage, runId: string, dueAt: Date): void {
+  database(storage).update(runs).set({ dueAt }).where(eq(runs.id, runId)).run();
 }
 
 /** Ends a run that finished or reached its step limit, clearing any earlier failure. */
@@ -240,17 +303,20 @@ export function giveUpRun(storage: DurableObjectStorage, runId: string, endedAt:
   database(storage).update(runs).set({ endedAt }).where(eq(runs.id, runId)).run();
 }
 
-/** Records a failed attempt and returns how many attempts of the run have failed so far. */
+/**
+ * Records a failed attempt, due again at `retryAt`, and returns how many attempts of the run have
+ * failed so far.
+ */
 export function recordRunFailure(
   storage: DurableObjectStorage,
   runId: string,
-  failure: { error: string; failedAt: Date },
+  failure: { error: string; retryAt: Date },
 ): number {
   const row = database(storage)
     .update(runs)
     .set({
       lastError: failure.error,
-      lastFailedAt: failure.failedAt,
+      dueAt: failure.retryAt,
       failedAttempts: sql`${runs.failedAttempts} + 1`,
     })
     .where(eq(runs.id, runId))
@@ -277,24 +343,65 @@ export interface Run {
   readonly messages: Message[];
 }
 
+function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Run {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    lastError: row.lastError,
+    failedAttempts: row.failedAttempts,
+    messages: loadConversation(storage, row.id),
+  };
+}
+
+export function findRun(storage: DurableObjectStorage, id: string): Run | undefined {
+  const row = database(storage).select().from(runs).where(eq(runs.id, id)).get();
+  return row === undefined ? undefined : toRun(storage, row);
+}
+
 /** The agent's latest runs first, each with its conversation. */
 export function recentRuns(storage: DurableObjectStorage, agentId: string, limit: number): Run[] {
   return database(storage)
     .select()
     .from(runs)
     .where(eq(runs.agentId, agentId))
-    .orderBy(desc(runs.startedAt), asc(runs.id))
+    .orderBy(desc(runs.startedAt), desc(runs.id))
     .limit(limit)
     .all()
-    .map((row) => ({
-      id: row.id,
-      taskId: row.taskId,
-      startedAt: row.startedAt,
-      endedAt: row.endedAt,
-      lastError: row.lastError,
-      failedAttempts: row.failedAttempts,
-      messages: loadConversation(storage, row.id),
-    }));
+    .map((row) => toRun(storage, row));
+}
+
+/**
+ * The conversations of the runs of the same agent that started before the run, the latest first.
+ * Each is read from storage only when the caller asks for it.
+ */
+export function* earlierConversations(
+  storage: DurableObjectStorage,
+  runId: string,
+): Generator<Message[], void, undefined> {
+  const run = database(storage)
+    .select({ agentId: runs.agentId, startedAt: runs.startedAt })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .get();
+  if (run === undefined) {
+    throw new Error(`There is no run ${runId} to read the earlier runs of.`);
+  }
+  const earlier = database(storage)
+    .select({ id: runs.id })
+    .from(runs)
+    .where(
+      and(
+        eq(runs.agentId, run.agentId),
+        startedBefore(runs, { startedAt: run.startedAt, id: runId }),
+      ),
+    )
+    .orderBy(desc(runs.startedAt), desc(runs.id))
+    .all();
+  for (const { id } of earlier) {
+    yield loadConversation(storage, id);
+  }
 }
 
 export function earliestTaskRunAt(storage: DurableObjectStorage): Date | undefined {

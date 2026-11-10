@@ -5,10 +5,11 @@ import { afterEach, expect, test } from "vitest";
 import migrations from "../drizzle/migrations";
 import { MAX_FAILED_ATTEMPTS, RETRY_DELAY_MS, runNext } from "../src/runner";
 import * as store from "../src/store";
-import { scriptedModel, testAgent } from "./worker";
+import { modelRequests, scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
   scriptedModel.length = 0;
+  modelRequests.length = 0;
   await reset();
 });
 
@@ -55,6 +56,20 @@ async function insertAgent(name: string): Promise<string> {
     store.insertAgent(state.storage, { id, name, createdAt: new Date(Date.now() + 1000) });
   });
   return id;
+}
+
+/** Starts a run of the agent straight in storage, at a time the test chooses. */
+async function startRun(id: string, agentId: string, text: string, startedAt: Date) {
+  await runInDurableObject(userAgent(), (_, state) => {
+    store.startRun(state.storage, { id, agentId, text, startedAt });
+  });
+}
+
+/** Does the next piece of due work as if it were `now`. */
+function runNextAt(now: Date) {
+  return runInDurableObject(userAgent(), (_, state) =>
+    runNext(state.storage, testAgent, () => now),
+  );
 }
 
 test("every user starts with one agent that hasn't run", async () => {
@@ -299,7 +314,11 @@ test("a task removed while another task's run waits on the model doesn't start",
 });
 
 test("adding a task after a run failed doesn't put off the run's retry", async () => {
-  const failedAt = new Date("2026-11-10T08:00:00Z");
+  // Noon tomorrow: the alarm this test reads must be a time to come.
+  const today = new Date();
+  const failedAt = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + 1, 12),
+  );
   await insertTask(failedAt);
   scriptedModel.push(new Error("The model service is unreachable."));
   await runInDurableObject(userAgent(), (_, state) =>
@@ -316,24 +335,137 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
   );
 });
 
+test("a message starts a run due at once, which the model answers after the agent's earlier runs", async () => {
+  const earlier = new Date(Date.now() - 60_000);
+  await insertTask(earlier);
+  scriptedModel.push(reply("You have 3 new emails."));
+  await runInDurableObject(userAgent(), (_, state) =>
+    runNext(state.storage, testAgent, () => earlier),
+  );
+  const agentId = await firstAgentId();
+
+  const sent = await userAgent().sendMessage(agentId, { text: " Which one is urgent? " });
+
+  expect(sent).toEqual({
+    ok: true,
+    run: {
+      id: expect.any(String),
+      taskId: null,
+      startedAt: expect.any(Date),
+      endedAt: null,
+      lastError: null,
+      failedAttempts: 0,
+      messages: [{ role: "user", text: "Which one is urgent?" }],
+    },
+  });
+  const alarm = await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm());
+  expect(alarm).toBeLessThanOrEqual(Date.now());
+
+  scriptedModel.push(reply("The one from your bank."));
+  expect(await runDurableObjectAlarm(userAgent())).toBe(true);
+
+  expect(modelRequests.at(-1)?.messages).toEqual([
+    { role: "user", text: "Summarize today's email" },
+    reply("You have 3 new emails."),
+    { role: "user", text: "Which one is urgent?" },
+  ]);
+  const [answered] = (await userAgent().recentRuns(agentId)) ?? [];
+  expect(answered?.messages).toEqual([
+    { role: "user", text: "Which one is urgent?" },
+    reply("The one from your bank."),
+  ]);
+  expect(answered?.endedAt).not.toBeNull();
+});
+
+test("sends no message, and sets no alarm, to an agent the user doesn't have or with no text", async () => {
+  const agentId = await firstAgentId();
+
+  expect(await userAgent().sendMessage(crypto.randomUUID(), { text: "Hello" })).toBeUndefined();
+  expect(await userAgent().sendMessage(agentId, { text: "  " })).toEqual({
+    ok: false,
+    error: expect.any(String),
+  });
+
+  expect(await userAgent().recentRuns(agentId)).toEqual([]);
+  expect(await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm())).toBeNull();
+});
+
+test("while a run waits on the model, it is due again only after the retry delay", async () => {
+  const sentAt = new Date("2026-11-10T07:00:00Z");
+  await startRun("sent", await firstAgentId(), "Hello", sentAt);
+
+  const dueDuringCall = await runInDurableObject(userAgent(), async (_, state) => {
+    let due: Date | undefined;
+    scriptedModel.push(() => {
+      due = store.earliestRunDueAt(state.storage);
+      return reply("Hi.");
+    });
+    await runNext(state.storage, testAgent, () => sentAt);
+    return due;
+  });
+
+  // An attempt cut off during the call is tried again then, not at once.
+  expect(dueDuringCall).toEqual(new Date(sentAt.getTime() + RETRY_DELAY_MS));
+});
+
+test("an agent's runs go one at a time in the order they started, each reading its agent's before it", async () => {
+  const otherId = await insertAgent("Second");
+  const sentAt = new Date("2026-11-10T07:00:00Z");
+  const retryAt = new Date(sentAt.getTime() + RETRY_DELAY_MS);
+
+  await startRun("other", otherId, "For the other agent", new Date("2026-11-10T06:00:00Z"));
+  scriptedModel.push(reply("Other answer."));
+  await runNextAt(new Date("2026-11-10T06:00:00Z"));
+  await startRun("sent", await firstAgentId(), "First question", sentAt);
+  scriptedModel.push(new Error("The model service is unreachable."));
+  await runNextAt(sentAt);
+  // The task's run starts while the sent message's run waits to be tried again.
+  await insertTask(new Date("2026-11-10T07:01:00Z"));
+  const wakeAt = await runNextAt(new Date("2026-11-10T07:01:00Z"));
+  scriptedModel.push(reply("First answer."), reply("You have 3 new emails."));
+  await runNextAt(retryAt);
+  await runNextAt(retryAt);
+
+  expect(wakeAt).toEqual(retryAt);
+  expect(modelRequests.slice(1).map((request) => request.messages)).toEqual([
+    [{ role: "user", text: "First question" }],
+    [{ role: "user", text: "First question" }],
+    [
+      { role: "user", text: "First question" },
+      reply("First answer."),
+      { role: "user", text: "Summarize today's email" },
+    ],
+  ]);
+});
+
+/** Empties the storage and applies the first `count` migrations, as an older version of the code left it. */
+function storageMigratedUpTo(storage: DurableObjectStorage, count: number) {
+  const sql = storage.sql;
+  for (const table of ["messages", "runs", "tasks", "agents", "__drizzle_migrations"]) {
+    sql.exec(`DROP TABLE ${table}`);
+  }
+  sql.exec(
+    "CREATE TABLE __drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)",
+  );
+  const sqlByKey: Record<string, string> = migrations.migrations;
+  for (const entry of migrations.journal.entries.slice(0, count)) {
+    const text = sqlByKey[`m${entry.idx.toString().padStart(4, "0")}`];
+    if (text === undefined) {
+      throw new Error(`Migration ${entry.tag} has no SQL.`);
+    }
+    for (const statement of text.split("--> statement-breakpoint")) {
+      sql.exec(statement);
+    }
+    sql.exec("INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('', ?)", entry.when);
+  }
+}
+
 test("the tasks and runs stored before agents become the first agent's", async () => {
   const startedAt = new Date("2026-11-09T08:00:00Z");
   await runInDurableObject(userAgent(), (_, state) => {
     const sql = state.storage.sql;
-    for (const table of ["messages", "runs", "tasks", "agents", "__drizzle_migrations"]) {
-      sql.exec(`DROP TABLE ${table}`);
-    }
-    // Storage as the code before agents left it: the first migration, and a task with one run.
-    sql.exec(
-      "CREATE TABLE __drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)",
-    );
-    for (const statement of migrations.migrations.m0000.split("--> statement-breakpoint")) {
-      sql.exec(statement);
-    }
-    sql.exec(
-      "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('', ?)",
-      migrations.journal.entries[0]?.when,
-    );
+    // Storage as the code before agents left it: a task with one run.
+    storageMigratedUpTo(state.storage, 1);
     sql.exec(
       "INSERT INTO tasks (id, prompt, cron, time_zone, next_run_at) VALUES ('task-1', 'Check mail', '0 8 * * *', 'UTC', ?)",
       Date.parse("2026-11-10T08:00:00Z"),
@@ -358,6 +490,35 @@ test("the tasks and runs stored before agents become the first agent's", async (
   const runs = (await userAgent().recentRuns(agent!.id)) ?? [];
   expect(runs.map((run) => [run.id, run.messages])).toEqual([
     ["run-1", [{ role: "user", text: "Check mail" }]],
+  ]);
+});
+
+test("a run that hasn't ended stays due when it was before runs kept a due time", async () => {
+  const startedAt = Date.parse("2026-11-10T08:00:00Z");
+  const failedAt = Date.parse("2026-11-10T08:10:00Z");
+  const due = await runInDurableObject(userAgent(), (_, state) => {
+    const sql = state.storage.sql;
+    // Storage as the code before due times left it: one run cut off, one that failed, one ended.
+    storageMigratedUpTo(state.storage, 2);
+    const agentId = sql.exec<{ id: string }>("SELECT id FROM agents").one().id;
+    const insert =
+      "INSERT INTO runs (id, agent_id, task_id, started_at, ended_at, last_error, failed_attempts, last_failed_at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)";
+    sql.exec(insert, "cut-off", agentId, startedAt, null, null, 0, null);
+    sql.exec(insert, "failed", agentId, startedAt - 60_000, null, "Unreachable.", 1, failedAt);
+    sql.exec(insert, "ended", agentId, startedAt, startedAt + 1000, null, 0, null);
+
+    store.migrate(state.storage);
+
+    return sql
+      .exec<{ id: string; due_at: number }>(
+        "SELECT id, due_at FROM runs WHERE ended_at IS NULL ORDER BY id",
+      )
+      .toArray();
+  });
+
+  expect(due).toEqual([
+    { id: "cut-off", due_at: startedAt + RETRY_DELAY_MS },
+    { id: "failed", due_at: failedAt + RETRY_DELAY_MS },
   ]);
 });
 
