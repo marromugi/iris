@@ -47,9 +47,9 @@ pnpm --filter @iris/agent-worker dev
 
 `pnpm dev` は `--local` で動くので、リモートのバインディングを使わず、Workers AI も呼ばない。タスクの登録や一覧は確かめられるが、モデルを呼ぶ実行は確かめられない。モデルとのやりとりは `pnpm --filter @iris/agent-worker test:live`（Workers AI の料金がかかる）で見る。
 
-## デプロイの前に
+## デプロイ
 
-`wrangler.jsonc` の D1（`database_id`）と KV（`OAUTH_KV` の `id`）は手元用の仮の値。デプロイの前に D1 データベース `iris` と KV 名前空間を作り、その ID に置き換える。D1 のマイグレーションは本番にも当てる。
+本番は `https://iris-agent.marrromugi-dev.workers.dev`。D1 データベース `iris` と KV 名前空間 `iris-oauth` は作ってあり、その ID が `wrangler.jsonc` にある。D1 のマイグレーションを足したら、デプロイの前に本番にも当てる。
 
 ```sh
 cd apps/agent

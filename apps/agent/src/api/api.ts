@@ -10,7 +10,7 @@ import { addTask } from "./routes/tasks/post";
 export type { UserProps } from "./middlewares/signed-in-user";
 
 /**
- * Where the Worker serves `/api` once deployed; the OpenAPI document names it as the server. The
+ * Where the Worker serves `/api`; the OpenAPI document names it as the server. The
  * Worker's `ORIGIN` in wrangler.jsonc is the same, which the test of openapi.json holds.
  */
 export const PRODUCTION_ORIGIN = "https://iris-agent.marrromugi-dev.workers.dev";

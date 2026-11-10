@@ -13,19 +13,17 @@
     "bindings": [{ "name": "USER_AGENT", "class_name": "UserAgent" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UserAgent"] }],
-  // Users, their passkeys, and invites: what sign-in reads across users. The ID is a stand-in for
-  // local development; deploying needs the real database's ID.
+  // Users, their passkeys, and invites: what sign-in reads across users.
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "iris",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "0799ab4b-f110-40a1-a3c9-278726eb3e53",
       "migrations_dir": "d1-migrations",
     },
   ],
-  // The OAuth provider's clients, grants and tokens, and passkey ceremonies. The ID is a stand-in
-  // for local development; deploying needs the real namespace's ID.
-  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "00000000000000000000000000000000" }],
+  // The OAuth provider's clients, grants and tokens, and passkey ceremonies (namespace iris-oauth).
+  "kv_namespaces": [{ "binding": "OAUTH_KV", "id": "957e7e8c065c4e62b82f94650c60f4cf" }],
   "ratelimits": [
     {
       "name": "SIGN_IN_RATE_LIMIT",
