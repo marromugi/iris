@@ -70,31 +70,13 @@ test("lists the agent a user starts with", async () => {
   ]);
 });
 
-test("adds an agent and lists it after the first", async () => {
-  const userId = await addUser("一郎");
-
-  const added = await post(userId, "/api/agents", { name: "株価の確認" });
-
-  expect(added.status).toBe(201);
-  const agent = await added.json();
-  expect(agent).toEqual({ id: expect.any(String), name: "株価の確認", lastRanAt: null });
-  const listed: { name: string }[] = await (await call(userId, "/api/agents")).json();
-  expect(listed.map((each) => each.name)).toEqual(["エージェント", "株価の確認"]);
-});
-
-test("says why an agent can't be added", async () => {
-  const added = await post(await addUser("一郎"), "/api/agents", { name: " " });
-
-  expect(added.status).toBe(400);
-  expect(await added.json()).toEqual({ message: expect.stringContaining("at name") });
-});
-
 test("adds a task to one agent and lists it for that agent only", async () => {
   const [user1, user2] = [await addUser("一郎"), await addUser("二郎")];
   const agentId = await firstAgentId(user1);
-  const other: { id: string } = await (
-    await post(user1, "/api/agents", { name: "株価の確認" })
-  ).json();
+  const other = crypto.randomUUID();
+  await runInDurableObject(env.USER_AGENT.getByName(user1), (_, state) => {
+    store.insertAgent(state.storage, { id: other, name: "株価の確認", createdAt: new Date() });
+  });
 
   const added = await post(user1, `/api/agents/${agentId}/tasks`, dailyMail);
 
@@ -106,7 +88,7 @@ test("adds a task to one agent and lists it for that agent only", async () => {
     nextRunAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T23:00:00Z$/),
   });
   expect(await (await call(user1, `/api/agents/${agentId}/tasks`)).json()).toEqual([task]);
-  expect(await (await call(user1, `/api/agents/${other.id}/tasks`)).json()).toEqual([]);
+  expect(await (await call(user1, `/api/agents/${other}/tasks`)).json()).toEqual([]);
   expect((await call(user2, `/api/agents/${agentId}/tasks`)).status).toBe(404);
 });
 

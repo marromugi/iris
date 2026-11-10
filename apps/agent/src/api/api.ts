@@ -6,7 +6,6 @@ import { removeTask } from "./routes/agents/[agentId]/tasks/[taskId]/delete";
 import { listTasks } from "./routes/agents/[agentId]/tasks/get";
 import { addTask } from "./routes/agents/[agentId]/tasks/post";
 import { listAgents } from "./routes/agents/get";
-import { addAgent } from "./routes/agents/post";
 import { me } from "./routes/me/get";
 
 export type { UserProps } from "./middlewares/signed-in-user";
@@ -32,7 +31,7 @@ export const agentApi = new OpenAPIHono<ApiEnv>({
 agentApi.use("*", signedInUser);
 agentApi.notFound((c) => c.json({ message: "Not found" }, 404));
 agentApi.onError(answerError);
-agentApi.openapiRoutes([me, listAgents, addAgent, listTasks, addTask, removeTask, recentRuns]);
+agentApi.openapiRoutes([me, listAgents, listTasks, addTask, removeTask, recentRuns]);
 
 agentApi.openAPIRegistry.registerComponent("securitySchemes", "iris", {
   type: "oauth2",

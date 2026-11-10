@@ -1,16 +1,11 @@
 import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
-import { type NewAgent, newAgentSchema } from "./agent";
 import { nextWakeAt, runNext } from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 import { type NewTask, newTaskSchema } from "./task";
-
-export type AddAgentResult =
-  | { readonly ok: true; readonly agent: store.Agent }
-  | { readonly ok: false; readonly error: string };
 
 export type AddTaskResult =
   | { readonly ok: true; readonly task: store.Task }
@@ -32,17 +27,6 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     /** The user's agents in the order they were added. */
     listAgents(): store.Agent[] {
       return store.listAgents(this.ctx.storage);
-    }
-
-    /** Adds an agent. An invalid name comes back as `ok: false`. */
-    addAgent(input: NewAgent): AddAgentResult {
-      const parsed = newAgentSchema.safeParse(input);
-      if (!parsed.success) {
-        return { ok: false, error: z.prettifyError(parsed.error) };
-      }
-      const agent = { id: crypto.randomUUID(), name: parsed.data.name };
-      store.insertAgent(this.ctx.storage, { ...agent, createdAt: new Date() });
-      return { ok: true, agent: { ...agent, lastRanAt: null } };
     }
 
     /** Adds a task the agent runs `prompt` on `schedule`. An invalid prompt or schedule comes back as `ok: false`. */

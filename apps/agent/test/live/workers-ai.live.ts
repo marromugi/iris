@@ -40,7 +40,10 @@ test("a due task runs through the user agent's alarm on the real model", async (
   const agent = env.USER_AGENT.getByName("live-check");
   const dueAt = new Date(Date.now() - 60_000);
   const [first] = await agent.listAgents();
-  const agentId = first?.id ?? "";
+  if (first === undefined) {
+    throw new Error("The user has no agent.");
+  }
+  const agentId = first.id;
   await runInDurableObject(agent, async (_, state) => {
     store.insertTask(state.storage, {
       id: "live-check",

@@ -59,3 +59,6 @@ pnpm --filter @iris/agent-worker invite <名前> --remote   # 本番の D1 に�
 ```
 
 `ORIGIN` は Worker が配られる URL と同じにする（`src/api/api.ts` の `PRODUCTION_ORIGIN` とも同じで、`openapi.json` のテストがそれを確かめる）。
+
+- `/api` のパスや形を変えたものをデプロイするときは、アプリも同じコミットから作り直して入れ替える。前のビルドのアプリは、変わったところを読めなくなる。
+- Durable Object のマイグレーション（`drizzle/`）は、デプロイのあと各ユーザーの Durable Object が次に開いたときに当たる。当たったあとは、そのマイグレーションを知らない前のバージョンの Worker に戻すと、そのユーザーの Durable Object は開けなくなる（`store.migrate` が新しいストレージを拒む）。

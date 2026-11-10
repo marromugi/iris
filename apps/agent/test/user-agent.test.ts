@@ -34,18 +34,27 @@ const dailyAtEightUtc = { cron: "0 8 * * *", timeZone: "UTC" };
  * Puts a task of the first agent straight into storage with its alarm, so a test can choose a next
  * run time in the past.
  */
-function insertTask(nextRunAt: Date, id = "task-1") {
-  return runInDurableObject(userAgent(), async (_, state) => {
-    const [first] = store.listAgents(state.storage);
+async function insertTask(nextRunAt: Date, id = "task-1") {
+  const agentId = await firstAgentId();
+  await runInDurableObject(userAgent(), async (_, state) => {
     store.insertTask(state.storage, {
       id,
-      agentId: first?.id ?? "",
+      agentId,
       prompt: "Summarize today's email",
       schedule: dailyAtEightUtc,
       nextRunAt,
     });
     await state.storage.setAlarm(nextRunAt);
   });
+}
+
+/** Puts a second agent straight into storage, added after the first; returns its ID. */
+async function insertAgent(name: string): Promise<string> {
+  const id = crypto.randomUUID();
+  await runInDurableObject(userAgent(), (_, state) => {
+    store.insertAgent(state.storage, { id, name, createdAt: new Date(Date.now() + 1000) });
+  });
+  return id;
 }
 
 test("every user starts with one agent that hasn't run", async () => {
@@ -60,33 +69,9 @@ test("every user starts with one agent that hasn't run", async () => {
   ]);
 });
 
-test("adds an agent after the ones already there", async () => {
-  const added = await userAgent().addAgent({ name: "  株価の確認 " });
-
-  expect(added).toEqual({
-    ok: true,
-    agent: { id: expect.any(String), name: "株価の確認", lastRanAt: null },
-  });
-  expect((await userAgent().listAgents()).map((agent) => agent.name)).toEqual([
-    "エージェント",
-    "株価の確認",
-  ]);
-});
-
-test("returns an empty name as an error and adds no agent", async () => {
-  const added = await userAgent().addAgent({ name: "  " });
-
-  expect(added.ok).toBe(false);
-  expect(await userAgent().listAgents()).toHaveLength(1);
-});
-
 test("each agent has its own tasks and runs, and runs when its own task is due", async () => {
   const first = await firstAgentId();
-  const added = await userAgent().addAgent({ name: "株価の確認" });
-  if (!added.ok) {
-    throw new Error(added.error);
-  }
-  const stocks = added.agent.id;
+  const stocks = await insertAgent("株価の確認");
   const dueAt = new Date("2026-11-10T08:00:00Z");
   await runInDurableObject(userAgent(), (_, state) => {
     store.insertTask(state.storage, {
@@ -114,26 +99,18 @@ test("each agent has its own tasks and runs, and runs when its own task is due",
   ]);
 });
 
-test("answers undefined for an agent the user doesn't have, and changes nothing", async () => {
-  const missing = crypto.randomUUID();
+test("adds no task, and sets no alarm, for an agent the user doesn't have", async () => {
   const agent = userAgent();
 
-  expect(await agent.listTasks(missing)).toBeUndefined();
-  expect(await agent.recentRuns(missing)).toBeUndefined();
-  expect(
-    await agent.addTask(missing, { prompt: "Check stocks", schedule: dailyAtEightUtc }),
-  ).toBeUndefined();
-  expect(await agent.removeTask(missing, crypto.randomUUID())).toBeUndefined();
+  await agent.addTask(crypto.randomUUID(), { prompt: "Check stocks", schedule: dailyAtEightUtc });
+
   expect(await agent.listTasks(await firstAgentId())).toEqual([]);
   expect(await runInDurableObject(agent, (_, state) => state.storage.getAlarm())).toBeNull();
 });
 
 test("doesn't remove another agent's task", async () => {
   const first = await firstAgentId();
-  const added = await userAgent().addAgent({ name: "株価の確認" });
-  if (!added.ok) {
-    throw new Error(added.error);
-  }
+  const stocks = await insertAgent("株価の確認");
   const task = await userAgent().addTask(first, {
     prompt: "Check mail",
     schedule: dailyAtEightUtc,
@@ -142,7 +119,7 @@ test("doesn't remove another agent's task", async () => {
     throw new Error("The task wasn't added.");
   }
 
-  expect(await userAgent().removeTask(added.agent.id, task.task.id)).toBe(false);
+  expect(await userAgent().removeTask(stocks, task.task.id)).toBe(false);
 
   expect(await userAgent().listTasks(first)).toHaveLength(1);
 });

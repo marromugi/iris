@@ -83,19 +83,6 @@
           "lastRanAt"
         ]
       },
-      "NewAgent": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 50
-          }
-        },
-        "required": [
-          "name"
-        ]
-      },
       "Task": {
         "type": "object",
         "properties": {
@@ -397,74 +384,6 @@
           },
           "403": {
             "description": "The token names no user, or one that no longer exists",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Something went wrong on the server",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "operationId": "addAgent",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NewAgent"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "The agent added",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Agent"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The request doesn't fit the API; the message says why",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
-          },
-          "403": {
-            "description": "The token names no user, or one that no longer exists",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "The body isn't sent as application/json",
             "content": {
               "application/json": {
                 "schema": {
