@@ -1,8 +1,8 @@
 import Backend
 import SwiftUI
 
-/// Where the agent's reply is about to go, while the run waits to start, starts, or thinks: the moving blob, then
-/// phrases typed out and deleted one after another. With Reduce Motion the first phrase stays put.
+/// Where the agent's reply is about to go, while the run waits to start, starts, or thinks: the moving blob, then a
+/// phrase that fades out, changes while nothing shows, and fades back in. With Reduce Motion the first phrase stays.
 struct ThinkingLine: View {
     /// `.running`, `.starting` or `.thinking`; it sets the phrases and how lively the blob is.
     let status: RunStatus
@@ -11,28 +11,28 @@ struct ThinkingLine: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let typewriter = Self.typewriter(for: status)
+        let fader = PhraseFader(phrases: [status.label] + Self.phrases(for: status))
         HStack(spacing: 8) {
-            ThinkingBlob(energy: status == .thinking ? 1 : 0.3)
-            TimelineView(PeriodicTimelineSchedule(from: startedAt, by: reduceMotion ? 3600 : 0.03)) { timeline in
-                let elapsed = Duration.seconds(timeline.date.timeIntervalSince(startedAt))
-                Text(reduceMotion ? typewriter.phrases.first ?? "" : typewriter.text(after: elapsed))
+            ThinkingBlob(energy: status == .thinking ? 1 : 0.4)
+            TimelineView(.animation(paused: reduceMotion)) { timeline in
+                let frame =
+                    reduceMotion
+                    ? (text: fader.phrase(at: 0), opacity: 1)
+                    : fader.frame(after: .seconds(timeline.date.timeIntervalSince(startedAt)))
+                Text(frame.text)
                     .foregroundStyle(.secondary)
+                    .opacity(frame.opacity)
             }
         }
-        // The typed phrases are play; VoiceOver hears what stands.
+        // The phrases are play; VoiceOver hears what stands.
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(status.label)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private static func typewriter(for status: RunStatus) -> Typewriter {
-        switch status {
-        case .thinking:
-            Typewriter(phrases: [status.label, "うーん", "お寿司食べたい", "言葉を選んでいます", "ちょっと待ってね", "コーヒー淹れたい"])
-        default:
-            Typewriter(phrases: [RunStatus.starting.label, "準備しています"])
-        }
+    private static func phrases(for status: RunStatus) -> [String] {
+        let phrases = status == .thinking ? ThinkingPhrases.thinking : ThinkingPhrases.starting
+        return phrases.filter { $0 != status.label }
     }
 }
 
