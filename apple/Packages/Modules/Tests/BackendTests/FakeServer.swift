@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Foundation
+import Synchronization
 
 @testable import Backend
 
@@ -66,6 +67,47 @@ actor FakeServer {
 
     nonisolated var send: Send {
         { request in try await self.handle(request) }
+    }
+
+    nonisolated var openSocket: OpenSocket {
+        { request in FakeSocket(server: self, request: request) }
+    }
+
+    /// How an open events socket behaves: what it sends, and then whether it stays open and answers pings.
+    fileprivate struct SocketScript: Sendable {
+        var messages: [String] = []
+        /// Stays open after its messages until the app closes it, instead of being closed by the server.
+        var staysOpen = false
+        var answersPings = true
+    }
+
+    private var socketScript = SocketScript()
+    private var dropsSockets = false
+
+    /// Sends these on each events socket once it is open, before the server closes it.
+    func sendOnEvents(_ messages: [String]) { socketScript.messages = messages }
+    /// Keeps each events socket open after its messages, and leaves its pings unanswered, as a dead connection does.
+    func goSilentOnSockets() {
+        socketScript.staysOpen = true
+        socketScript.answersPings = false
+    }
+    /// Can't be reached for a socket, as when offline.
+    func dropSockets() { dropsSockets = true }
+
+    /// Answers the upgrade as the real server does: 401 for a token it did not issue last, 403 for one naming no user,
+    /// and 404 for an agent the user does not have; otherwise how the socket behaves.
+    fileprivate func openEvents(_ request: URLRequest) -> Result<SocketScript, SocketRefusal> {
+        requests.append(request)
+        if dropsSockets { return .failure(SocketRefusal(status: nil, failure: .offline)) }
+        let authorization = request.value(forHTTPHeaderField: "Authorization")
+        guard !refusesEveryToken, let accessToken = grant?.accessToken, authorization == "Bearer \(accessToken)" else {
+            return .failure(SocketRefusal(status: 401, failure: .unexpected))
+        }
+        if namesNoUser { return .failure(SocketRefusal(status: 403, failure: .unexpected)) }
+        guard request.url?.path == "/api/agents/\(Self.agentID)/events" else {
+            return .failure(SocketRefusal(status: 404, failure: .unexpected))
+        }
+        return .success(socketScript)
     }
 
     /// What the sign-in sheet would come back with for `url`: the page's code for the state it was sent. For an app the
@@ -213,5 +255,66 @@ actor FakeServer {
             if parts.count == 2 { form[parts[0]] = parts[1] }
         }
         return form
+    }
+}
+
+/// The events socket the fake server opens: refused as the server answers, or the messages it holds, one per read, and
+/// then closed or held open as the server's script says.
+private final class FakeSocket: EventSocket {
+    private struct State {
+        var script = FakeServer.SocketScript()
+        var closed = false
+        var waiting: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let server: FakeServer
+    private let request: URLRequest
+    private let state = Mutex(State())
+
+    init(server: FakeServer, request: URLRequest) {
+        self.server = server
+        self.request = request
+    }
+
+    func open() async throws(SocketRefusal) {
+        switch await server.openEvents(request) {
+        case .success(let script): state.withLock { $0.script = script }
+        case .failure(let refusal): throw refusal
+        }
+    }
+
+    func receive() async throws -> String? {
+        let (message, staysOpen) = state.withLock { state in
+            state.script.messages.isEmpty
+                ? (nil, state.script.staysOpen) : (state.script.messages.removeFirst(), false)
+        }
+        if let message { return message }
+        if staysOpen { await untilClosed() }
+        return nil
+    }
+
+    func ping() async throws {
+        guard !state.withLock({ $0.script.answersPings }) else { return }
+        await untilClosed()
+        throw URLError(.cancelled)
+    }
+
+    func close() {
+        let waiting = state.withLock { state in
+            state.closed = true
+            defer { state.waiting = [] }
+            return state.waiting
+        }
+        for continuation in waiting { continuation.resume() }
+    }
+
+    private func untilClosed() async {
+        await withCheckedContinuation { continuation in
+            let closed = state.withLock { state in
+                if !state.closed { state.waiting.append(continuation) }
+                return state.closed
+            }
+            if closed { continuation.resume() }
+        }
     }
 }

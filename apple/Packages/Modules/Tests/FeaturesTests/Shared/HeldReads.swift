@@ -41,6 +41,13 @@ actor HeldReads: AgentBackend {
     func removeTask(id: String) async throws(AppError) { try await backend.removeTask(id: id) }
     func sendMessage(_ text: String) async throws(AppError) -> Run { try await backend.sendMessage(text) }
 
+    func followEvents(
+        onOpen: @Sendable () async -> Void,
+        onEvent: @Sendable (RunEvent) async -> Void
+    ) async throws(AppError) {
+        try await backend.followEvents(onOpen: onOpen, onEvent: onEvent)
+    }
+
     private func hold() async {
         await withCheckedContinuation { continuation in
             held.append(continuation)

@@ -2,8 +2,8 @@ import Backend
 import SwiftUI
 
 /// One agent's runs as one thread, oldest first, opening at the latest, with a field at the bottom to send the agent a
-/// message. While a run is still going, the thread reads it again until its reply comes. The agent's tasks are a step
-/// away.
+/// message. While it is shown, the agent's events keep it current: each run as it changes, and while one is carried on,
+/// whether it is starting or thinking, and its reply as it is written. The agent's tasks are a step away.
 struct ThreadScreen: View {
     let agent: any AgentBackend
     let name: String
@@ -20,7 +20,7 @@ struct ThreadScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 48) {
                     ForEach(runs.reversed(), id: \.id) { run in
-                        RunView(run: run)
+                        RunView(run: run, progress: thread.progress[run.id])
                     }
                 }
                 .padding()
@@ -57,10 +57,7 @@ struct ThreadScreen: View {
         } message: { problem in
             Text(problem.message ?? "")
         }
-        .task {
-            await thread.load()
-            await thread.keepCurrent()
-        }
+        .task { await thread.follow() }
     }
 }
 

@@ -123,6 +123,24 @@
             }
             """)
 
+        /// The model is asked and hasn't written anything yet.
+        static let thinking = RunProgress.case2(.init(_type: .thinking))
+
+        /// The model is writing, with `text` so far.
+        static func writing(_ text: String) -> RunProgress {
+            .case3(.init(_type: .writing, text: text))
+        }
+
+        /// What the events socket says when `run` changed.
+        static func changed(_ run: Run) -> RunEvent {
+            .case1(.init(_type: .run, run: run))
+        }
+
+        /// What the events socket says about how `run` is getting on.
+        static func progress(_ progress: RunProgress, of run: Run) -> RunEvent {
+            .case2(.init(_type: .progress, runId: run.id, progress: progress))
+        }
+
         /// Many agents, for seeing that the home holds up when there are more than fit on the screen.
         static let agents: [Agent] =
             [

@@ -19,4 +19,24 @@ struct RunStatusTests {
 
         #expect(RunStatus(of: run) == status)
     }
+
+    @Test(
+        arguments: [
+            (nil, RunProgress.case1(.init(_type: .starting)), RunStatus.starting),
+            (nil, Samples.thinking, .thinking),
+            ("The model did not answer in time.", Samples.writing("Hel"), .writing),
+        ] as [(String?, RunProgress, RunStatus)])
+    func comesFromHowTheRunIsGettingOnWhileItIsCarriedOnAgain(
+        lastError: String?, progress: RunProgress, status: RunStatus
+    ) {
+        var run = Samples.weatherRun
+        run.endedAt = nil
+        run.lastError = lastError
+
+        #expect(RunStatus(of: run, progress: progress) == status)
+    }
+
+    @Test func anEndedRunIsFinishedWhateverProgressWasLastHeard() {
+        #expect(RunStatus(of: Samples.weatherRun, progress: Samples.writing("Hel")) == .finished)
+    }
 }
