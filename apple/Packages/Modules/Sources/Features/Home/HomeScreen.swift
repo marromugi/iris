@@ -5,7 +5,7 @@ import SwiftUI
 struct HomeScreen: View {
     let directory: any AgentDirectory
     let onSignOut: () -> Void
-    @State private var agents = Loadable<[AgentSummary]>.loading
+    @State private var agents = Loadable<[Agent]>.loading
 
     var body: some View {
         LoadableContent(
@@ -32,14 +32,14 @@ struct HomeScreen: View {
                 AccountMenu(onSignOut: onSignOut)
             }
         }
-        .navigationDestination(for: AgentSummary.self) { agent in
+        .navigationDestination(for: Agent.self) { agent in
             ThreadScreen(agent: directory.agent(id: agent.id), name: agent.name)
         }
         .task { await load() }
     }
 
     private func load() async {
-        agents = await agents.reading { () async throws(AppError) -> [AgentSummary] in try await directory.agents() }
+        agents = await agents.reading { () async throws(AppError) -> [Agent] in try await directory.agents() }
     }
 }
 
@@ -85,7 +85,7 @@ private struct AccountMenu: View {
 #if DEBUG
     #Preview("エージェント 1 つ") {
         NavigationStack {
-            HomeScreen(directory: SingleAgentDirectory(backend: FakeAgentBackend())) {}
+            HomeScreen(directory: FakeAgentDirectory(listed: Array(Samples.agents.prefix(1)))) {}
         }
     }
 
@@ -97,7 +97,7 @@ private struct AccountMenu: View {
 
     #Preview("読み込めない") {
         NavigationStack {
-            HomeScreen(directory: SingleAgentDirectory(backend: FakeAgentBackend(.init(failure: .offline)))) {}
+            HomeScreen(directory: FakeAgentDirectory(failure: .offline)) {}
         }
     }
 #endif

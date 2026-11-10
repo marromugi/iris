@@ -108,14 +108,14 @@
             """)
 
         /// Many agents, for seeing that the home holds up when there are more than fit on the screen.
-        static let agents: [AgentSummary] =
+        static let agents: [Agent] =
             [
-                AgentSummary(id: "mail", name: "メールの整理", lastRanAt: moment("2026-11-10T00:00:00Z")),
-                AgentSummary(id: "stocks", name: "株価の確認", lastRanAt: moment("2026-11-09T23:50:00Z")),
-                AgentSummary(id: "news", name: "ニュースのまとめ", lastRanAt: moment("2026-11-09T20:00:00Z")),
-                AgentSummary(id: "new", name: "まだ動いていないエージェント", lastRanAt: nil),
+                Agent(id: "mail", name: "メールの整理", lastRanAt: moment("2026-11-10T00:00:00Z")),
+                Agent(id: "stocks", name: "株価の確認", lastRanAt: moment("2026-11-09T23:50:00Z")),
+                Agent(id: "news", name: "ニュースのまとめ", lastRanAt: moment("2026-11-09T20:00:00Z")),
+                Agent(id: "new", name: "まだ動いていないエージェント", lastRanAt: nil),
             ]
-            + (1...16).map { AgentSummary(id: "pod-\($0)", name: "Pod \($0)", lastRanAt: moment("2026-11-01T00:00:00Z")) }
+            + (1...16).map { Agent(id: "pod-\($0)", name: "Pod \($0)", lastRanAt: moment("2026-11-01T00:00:00Z")) }
 
         static func moment(_ text: String) -> Date {
             guard let date = try? Date(text, strategy: .iso8601) else {
