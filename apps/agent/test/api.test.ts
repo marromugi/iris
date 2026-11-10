@@ -103,6 +103,7 @@ test("answers 404 for an agent the user doesn't have, and 400 for an ID that isn
       method: "DELETE",
     }),
     await call(userId, `/api/agents/${missing}/runs`),
+    await post(userId, `/api/agents/${missing}/messages`, { text: "Hello" }),
   ];
 
   for (const response of responses) {
@@ -195,6 +196,28 @@ test("lists an agent's latest runs with their conversations, and when it last ra
   expect(await (await call(userId, "/api/agents")).json()).toEqual([
     { id: agentId, name: "エージェント", lastRanAt: run?.startedAt },
   ]);
+});
+
+test("sends a message to an agent, which starts one of its runs, and says why one can't be sent", async () => {
+  const userId = await addUser("一郎");
+  const agentId = await firstAgentId(userId);
+
+  const sent = await post(userId, `/api/agents/${agentId}/messages`, { text: "Hello" });
+  const empty = await post(userId, `/api/agents/${agentId}/messages`, { text: " " });
+
+  expect(sent.status).toBe(202);
+  const run = await sent.json();
+  expect(run).toEqual({
+    id: expect.any(String),
+    taskId: null,
+    startedAt: expect.any(String),
+    endedAt: null,
+    lastError: null,
+    failedAttempts: 0,
+    messages: [{ role: "user", text: "Hello" }],
+  });
+  expect(await (await call(userId, `/api/agents/${agentId}/runs`)).json()).toEqual([run]);
+  expect(empty.status).toBe(400);
 });
 
 test("refuses a request that reaches it without a signed-in user", async () => {

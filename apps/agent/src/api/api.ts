@@ -1,6 +1,7 @@
 import { OpenAPIHono, z } from "@hono/zod-openapi";
 import { answerError } from "./errors";
 import { type ApiEnv, signedInUser } from "./middlewares/signed-in-user";
+import { sendMessage } from "./routes/agents/[agentId]/messages/post";
 import { recentRuns } from "./routes/agents/[agentId]/runs/get";
 import { removeTask } from "./routes/agents/[agentId]/tasks/[taskId]/delete";
 import { listTasks } from "./routes/agents/[agentId]/tasks/get";
@@ -31,7 +32,7 @@ export const agentApi = new OpenAPIHono<ApiEnv>({
 agentApi.use("*", signedInUser);
 agentApi.notFound((c) => c.json({ message: "Not found" }, 404));
 agentApi.onError(answerError);
-agentApi.openapiRoutes([me, listAgents, listTasks, addTask, removeTask, recentRuns]);
+agentApi.openapiRoutes([me, listAgents, listTasks, addTask, removeTask, recentRuns, sendMessage]);
 
 agentApi.openAPIRegistry.registerComponent("securitySchemes", "iris", {
   type: "oauth2",
@@ -48,7 +49,7 @@ export function agentApiDocument(origin: string) {
       title: "iris",
       version: "1",
       description:
-        "A user's agents, with each one's scheduled tasks and their runs. Errors are { message }, except 401, which comes from the OAuth layer.",
+        "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer.",
     },
     servers: [{ url: origin }],
     security: [{ iris: [] }],

@@ -1,4 +1,4 @@
-import type { AssistantMessage, Model } from "@iris/agent";
+import type { AssistantMessage, Model, ModelRequest } from "@iris/agent";
 import { createUserAgent } from "../src/user-agent";
 
 /**
@@ -7,7 +7,11 @@ import { createUserAgent } from "../src/user-agent";
  */
 export const scriptedModel: (AssistantMessage | Error | (() => AssistantMessage))[] = [];
 
-const model: Model = async () => {
+/** The requests the test model was called with, in order. */
+export const modelRequests: ModelRequest[] = [];
+
+const model: Model = async (request) => {
+  modelRequests.push(request);
   const next = scriptedModel.shift();
   if (next === undefined) {
     throw new Error("The model was called more times than the test scripted.");

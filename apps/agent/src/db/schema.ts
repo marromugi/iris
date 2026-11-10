@@ -23,7 +23,7 @@ export const runs = sqliteTable("runs", {
   endedAt: integer("ended_at", { mode: "timestamp_ms" }),
   lastError: text("last_error"),
   failedAttempts: integer("failed_attempts").notNull().default(0),
-  lastFailedAt: integer("last_failed_at", { mode: "timestamp_ms" }),
+  dueAt: integer("due_at", { mode: "timestamp_ms" }).notNull(),
 });
 
 export const messages = sqliteTable(

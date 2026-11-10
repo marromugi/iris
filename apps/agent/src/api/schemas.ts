@@ -84,7 +84,10 @@ const messageSchema = z
 export const runSchema = z
   .object({
     id: z.uuid(),
-    taskId: z.uuid().nullable(),
+    taskId: z
+      .uuid()
+      .nullable()
+      .meta({ description: "The task that started it; null when a message sent to the agent did" }),
     startedAt: timeSchema,
     endedAt: timeSchema.nullable(),
     lastError: z.string().nullable(),
