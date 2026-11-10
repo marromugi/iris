@@ -2,17 +2,17 @@ import Foundation
 import SwiftUI
 
 /// Markdown drawn as blocks: headings, paragraphs, list items, quotes, code, and rules, with emphasis, inline code and
-/// links inside them. `fadingTail` gives the opacity of the last characters of the last block, newest last, so text
-/// that just came in fades in.
+/// links inside them. `fadingTail` gives the opacity of the last characters of the last block's text, newest last, so
+/// text that just came in fades in; a code block or rule fades as a whole.
 struct MarkdownView: View {
     let blocks: [MarkdownBlock]
     var fadingTail: [FadingText] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Blocks only grow at the end, so their place is their identity.
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 MarkdownBlockView(block: block, fadingTail: index == blocks.count - 1 ? fadingTail : [])
-                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -33,19 +33,18 @@ private struct MarkdownBlockView: View {
     var body: some View {
         switch block {
         case .heading(let level, let text):
-            InlineText(text: text, fadingTail: fadingTail)
+            InlineText(text: text, style: .primary, fadingTail: fadingTail)
                 .font(level == 1 ? .title3.bold() : level == 2 ? .headline : .subheadline.bold())
         case .paragraph(let text):
-            InlineText(text: text, fadingTail: fadingTail)
+            InlineText(text: text, style: .primary, fadingTail: fadingTail)
         case .item(let marker, let depth, let text):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(marker).foregroundStyle(.secondary)
-                InlineText(text: text, fadingTail: fadingTail)
+                InlineText(text: text, style: .primary, fadingTail: fadingTail)
             }
             .padding(.leading, CGFloat(depth) * 16)
         case .quote(let text):
-            InlineText(text: text, fadingTail: fadingTail)
-                .foregroundStyle(.secondary)
+            InlineText(text: text, style: .secondary, fadingTail: fadingTail)
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) {
                     Capsule().fill(.separator).frame(width: 3)
@@ -57,15 +56,18 @@ private struct MarkdownBlockView: View {
                     .padding(12)
             }
             .background(.fill.tertiary, in: .rect(cornerRadius: 10))
+            .opacity(fadingTail.first?.opacity ?? 1)
         case .rule:
             Divider()
+                .opacity(fadingTail.first?.opacity ?? 1)
         }
     }
 }
 
-/// A block's text with its inline Markdown, the fading tail drawn with its own opacities.
+/// A block's text with its inline Markdown, in `style`, the fading tail drawn with its own opacities.
 private struct InlineText: View {
     let text: String
+    let style: HierarchicalShapeStyle
     let fadingTail: [FadingText]
 
     var body: some View {
@@ -76,8 +78,8 @@ private struct InlineText: View {
             pieces.insert((String(rest.suffix(count)), fading.opacity), at: 0)
             rest = String(rest.dropLast(count))
         }
-        return pieces.reduce(Text(Self.attributed(rest))) { shown, piece in
-            Text("\(shown)\(Text(Self.attributed(piece.0)).foregroundStyle(.primary.opacity(piece.1)))")
+        return pieces.reduce(Text(Self.attributed(rest)).foregroundStyle(style)) { shown, piece in
+            Text("\(shown)\(Text(Self.attributed(piece.0)).foregroundStyle(style.opacity(piece.1)))")
         }
     }
 

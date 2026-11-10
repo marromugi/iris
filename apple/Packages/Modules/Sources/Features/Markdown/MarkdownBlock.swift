@@ -1,3 +1,5 @@
+import Foundation
+
 /// One block of Markdown as the app draws it. Text inside a block keeps its inline Markdown (emphasis, code, links),
 /// which the view reads; a code block's text is shown as it is.
 enum MarkdownBlock: Equatable {
@@ -9,12 +11,23 @@ enum MarkdownBlock: Equatable {
     case code(language: String, text: String)
     case rule
 
-    /// The blocks of `text`, in order. A code fence that isn't closed runs to the end.
+    /// The text the block shows, apart from its marker; a rule shows none.
+    var text: String {
+        switch self {
+        case .heading(_, let text), .paragraph(let text), .item(_, _, let text), .quote(let text), .code(_, let text):
+            text
+        case .rule:
+            ""
+        }
+    }
+
+    /// The blocks of `text`, in order. A code fence that isn't closed runs to the end. An indented line right after
+    /// a list item continues that item.
     static func blocks(of text: String) -> [MarkdownBlock] {
         var blocks: [MarkdownBlock] = []
         var paragraph: [String] = []
         var quote: [String] = []
-        var code: (language: String, lines: [String])?
+        var code: (language: String, indent: Int, lines: [String])?
 
         func endParagraph() {
             if !paragraph.isEmpty { blocks.append(.paragraph(paragraph.joined(separator: "\n"))) }
@@ -25,22 +38,25 @@ enum MarkdownBlock: Equatable {
             quote = []
         }
 
-        for line in text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\t", with: "  ")
+        for line in normalized.split(separator: "\n", omittingEmptySubsequences: false) {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let indent = line.prefix { $0 == " " }.count
             if var open = code {
-                if trimmed.hasPrefix("```") {
+                if SettledMarkdown.isClosingFence(line) {
                     blocks.append(.code(language: open.language, text: open.lines.joined(separator: "\n")))
                     code = nil
                 } else {
-                    open.lines.append(line)
+                    // Inside a list item the fence is indented, and so is its code; the code shows without it.
+                    open.lines.append(String(line.dropFirst(min(open.indent, indent))))
                     code = open
                 }
                 continue
             }
-            if trimmed.hasPrefix("```") {
+            if SettledMarkdown.isOpeningFence(line) {
                 endParagraph()
                 endQuote()
-                code = (String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces), [])
+                code = (String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces), indent, [])
                 continue
             }
             if trimmed.hasPrefix(">") {
@@ -57,9 +73,11 @@ enum MarkdownBlock: Equatable {
             } else if ["---", "***", "___"].contains(trimmed) {
                 endParagraph()
                 blocks.append(.rule)
-            } else if let item = Self.item(line) {
+            } else if let item = Self.item(String(line)) {
                 endParagraph()
                 blocks.append(item)
+            } else if indent > 0, paragraph.isEmpty, case .item(let marker, let depth, let itemText)? = blocks.last {
+                blocks[blocks.count - 1] = .item(marker: marker, depth: depth, text: itemText + "\n" + trimmed)
             } else {
                 paragraph.append(trimmed)
             }
