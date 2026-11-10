@@ -22,7 +22,9 @@
             """
             {
               "id": "8e2a4c6b-1d3f-4a5b-9c7d-2e4f6a8b0c1d",
+              "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": "\(weatherTask.id)",
+              "postId": null,
               "startedAt": "2026-11-09T22:00:00Z",
               "endedAt": "2026-11-09T22:00:07Z",
               "lastError": null,
@@ -45,7 +47,9 @@
             """
             {
               "id": "2f4e6a8c-0b1d-4e3f-8a5c-7d9e1f3a5b7c",
+              "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": null,
+              "postId": null,
               "startedAt": "2026-11-10T00:00:00Z",
               "endedAt": "2026-11-10T00:04:00Z",
               "lastError": null,
@@ -77,7 +81,9 @@
             """
             {
               "id": "5a7b9c1d-3e5f-4a6b-8c0d-2e4f6a8b0c1e",
+              "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": "\(newsTask.id)",
+              "postId": null,
               "startedAt": "2026-11-09T20:00:00Z",
               "endedAt": null,
               "lastError": "The model did not answer in time.",
@@ -92,7 +98,9 @@
             """
             {
               "id": "7d3c1f0e-2b4a-4c8e-9f6d-1a2b3c4d5e6f",
+              "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": null,
+              "postId": null,
               "startedAt": "2026-11-08T20:00:00Z",
               "endedAt": "2026-11-08T20:20:00Z",
               "lastError": "The model did not answer in time.",
@@ -112,7 +120,9 @@
             """
             {
               "id": "9c1e3a5b-7d9f-4b1c-8e2a-4c6e8a0b2d4f",
+              "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": null,
+              "postId": null,
               "startedAt": "2026-11-10T00:05:00Z",
               "endedAt": null,
               "lastError": null,

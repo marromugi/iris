@@ -10,6 +10,11 @@ import { addTask } from "./routes/agents/[agentId]/tasks/post";
 import { listAgents } from "./routes/agents/get";
 import { addAgent } from "./routes/agents/post";
 import { me } from "./routes/me/get";
+import { threadEntries } from "./routes/threads/[threadId]/entries/get";
+import { openThreadEvents, THREAD_EVENTS_PATH } from "./routes/threads/[threadId]/events/get";
+import { sendPost } from "./routes/threads/[threadId]/posts/post";
+import { listThreads } from "./routes/threads/get";
+import { addGroup } from "./routes/threads/post";
 import { runEventSchema } from "./schemas";
 
 export type { UserProps } from "./middlewares/signed-in-user";
@@ -44,8 +49,13 @@ agentApi.openapiRoutes([
   removeTask,
   recentRuns,
   sendMessage,
+  listThreads,
+  addGroup,
+  threadEntries,
+  sendPost,
 ]);
 agentApi.get(EVENTS_PATH, openEvents);
+agentApi.get(THREAD_EVENTS_PATH, openThreadEvents);
 agentApi.openAPIRegistry.register("RunEvent", runEventSchema);
 
 agentApi.openAPIRegistry.registerComponent("securitySchemes", "iris", {
@@ -63,7 +73,7 @@ export function agentApiDocument(origin: string) {
       title: "iris",
       version: "1",
       description:
-        "A user's agents, which they can add, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent).",
+        "A user's agents, which they can add, and their threads: each agent's one-to-one thread and groups of agents. In a thread the user sends posts, and the members named with @, or all of them when none is, reply with runs; an agent's scheduled tasks also start runs in its one-to-one thread. /api/agents/{agentId}/messages, runs and events work on the agent's one-to-one thread. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/threads/{threadId}/events with a WebSocket upgrade opens a socket that sends the thread's posts, its runs as they change, and how the one being carried on is getting on (RunEvent); /api/agents/{agentId}/events does the same for the agent's one-to-one thread without posts.",
     },
     servers: [{ url: origin }],
     security: [{ iris: [] }],

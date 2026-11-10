@@ -2,6 +2,8 @@ import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { type NewAgent, newAgentSchema } from "./agent";
+import { type NewGroup, newGroupSchema } from "./group";
+import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
 import { nextWakeAt, runNext } from "./runner";
@@ -22,12 +24,24 @@ export type SendMessageResult =
   | { readonly ok: true; readonly run: store.Run }
   | { readonly ok: false; readonly error: string };
 
+export type AddGroupResult =
+  | { readonly ok: true; readonly thread: store.Thread }
+  | { readonly ok: false; readonly error: string };
+
+export type PostResult =
+  | { readonly ok: true; readonly post: store.Post; readonly runs: store.Run[] }
+  | { readonly ok: false; readonly error: string };
+
+export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
+
 /**
- * Builds the Durable Object class for one user. One object per user holds that user's agents,
- * and each agent's tasks and runs; `agentFor` gives the model and tools every run uses. Its
- * `fetch` opens a WebSocket on which an agent's runs are sent as they happen (`RunBroadcast`).
+ * Builds the Durable Object class for one user. One object per user holds that user's agents and
+ * threads (each agent's own one-to-one thread, and groups), the posts sent in them, and the tasks
+ * and runs that happen in them; `agentFor` gives the model and tools every run uses. Its `fetch`
+ * opens a WebSocket on which a thread's runs and posts are sent as they happen (`RunBroadcast`).
  *
- * The methods that take an agent's ID answer undefined when the user has no agent with it.
+ * The methods that take an agent's or a thread's ID answer undefined when the user has none with
+ * it. A method on an agent works on the agent's own one-to-one thread.
  */
 export function createUserAgent(agentFor: (env: Env) => Agent) {
   return class UserAgent extends DurableObject<Env> {
@@ -40,20 +54,22 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     }
 
     /**
-     * Opens the WebSocket for the events of the agent named by the `agentId` search parameter:
-     * 101 with the socket, 404 when the user has no such agent, 426 for a request that isn't a
-     * WebSocket upgrade.
+     * Opens the WebSocket for the events of the thread named by the `threadId` search parameter,
+     * which hears runs and posts, or of the one-to-one thread of the agent named by `agentId`,
+     * which hears runs only: 101 with the socket, 404 when the user has no such thread or agent,
+     * 426 for a request that isn't a WebSocket upgrade.
      */
     override async fetch(request: Request): Promise<Response> {
-      const agentId = new URL(request.url).searchParams.get("agentId");
-      if (agentId === null || !store.hasAgent(this.ctx.storage, agentId)) {
+      const params = new URL(request.url).searchParams;
+      const opened = this.socketThread(params.get("threadId"), params.get("agentId"));
+      if (opened === undefined) {
         return new Response(null, { status: 404 });
       }
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return new Response(null, { status: 426 });
       }
       const { 0: client, 1: server } = new WebSocketPair();
-      this.broadcast.accept(agentId, server);
+      this.broadcast.accept(opened.threadId, server, opened.hears);
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -72,6 +88,71 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     /** The user's agents in the order they were added. */
     listAgents(): store.Agent[] {
       return store.listAgents(this.ctx.storage);
+    }
+
+    /** The user's threads, the latest activity first. */
+    listThreads(): store.Thread[] {
+      return store.listThreads(this.ctx.storage);
+    }
+
+    /**
+     * Makes a group of two or more of the user's agents. An invalid name, too few agents, or an
+     * agent the user doesn't have comes back as `ok: false`.
+     */
+    addGroup(input: NewGroup): AddGroupResult {
+      const parsed = newGroupSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      const known = store.knownAgents(this.ctx.storage, parsed.data.agentIds);
+      const unknown = parsed.data.agentIds.filter((id) => !known.includes(id));
+      if (unknown.length > 0) {
+        return { ok: false, error: `The user has no agent ${unknown.join(", ")}` };
+      }
+      const id = crypto.randomUUID();
+      store.insertGroup(this.ctx.storage, {
+        id,
+        name: parsed.data.name,
+        agentIds: parsed.data.agentIds,
+        createdAt: new Date(),
+      });
+      const thread = store.findThread(this.ctx.storage, id);
+      if (thread === undefined) {
+        throw new Error(`Group ${id} was added but isn't stored.`);
+      }
+      return { ok: true, thread };
+    }
+
+    /**
+     * Sends a post in the thread, and starts a run of each member that replies to it: those
+     * named with @, or every member when none is. Returns the post and its runs as they start.
+     * Empty text comes back as `ok: false`.
+     */
+    async post(threadId: string, input: NewMessage): Promise<PostResult | undefined> {
+      const thread = store.findThread(this.ctx.storage, threadId);
+      if (thread === undefined) {
+        return undefined;
+      }
+      const parsed = newMessageSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      const names = new Map(
+        store.listAgents(this.ctx.storage).map((agent) => [agent.id, agent.name]),
+      );
+      const members = thread.agentIds.map((id) => ({ id, name: names.get(id) ?? "" }));
+      return {
+        ok: true,
+        ...(await this.startPost(threadId, parsed.data.text, repliers(parsed.data.text, members))),
+      };
+    }
+
+    /** The thread's latest posts and runs together, the latest first, at most `limit` of them. */
+    threadEntries(threadId: string, limit: number): ThreadEntry[] | undefined {
+      if (store.findThread(this.ctx.storage, threadId) === undefined) {
+        return undefined;
+      }
+      return store.threadEntries(this.ctx.storage, threadId, limit);
     }
 
     /** Adds an agent with its own one-to-one thread. An invalid name comes back as `ok: false`. */
@@ -120,9 +201,9 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     }
 
     /**
-     * Starts a run of the agent in its one-to-one thread on a message the user sent, which the
-     * alarm carries on once the thread's earlier runs have ended, and returns the run as it
-     * starts. Empty text comes back as `ok: false`.
+     * Sends a post in the agent's one-to-one thread and starts the agent's run that replies to
+     * it, which the alarm carries on once the thread's earlier runs have ended, and returns the
+     * run as it starts. Empty text comes back as `ok: false`.
      */
     async sendMessage(agentId: string, input: NewMessage): Promise<SendMessageResult | undefined> {
       const threadId = store.agentThreadId(this.ctx.storage, agentId);
@@ -133,20 +214,11 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       if (!parsed.success) {
         return { ok: false, error: z.prettifyError(parsed.error) };
       }
-      const id = crypto.randomUUID();
-      store.startRun(this.ctx.storage, {
-        id,
-        agentId,
-        threadId,
-        text: parsed.data.text,
-        startedAt: new Date(),
-      });
-      const run = store.findRun(this.ctx.storage, id);
+      const { runs } = await this.startPost(threadId, parsed.data.text, [agentId]);
+      const [run] = runs;
       if (run === undefined) {
-        throw new Error(`Run ${id} was started but isn't stored.`);
+        throw new Error(`The post to agent ${agentId} started no run.`);
       }
-      this.broadcast.changed(id);
-      await this.wakeAt(nextWakeAt(this.ctx.storage));
       return { ok: true, run };
     }
 
@@ -158,12 +230,16 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       return store.listTasks(this.ctx.storage, agentId);
     }
 
-    /** The agent's latest runs first, at most `limit` of them, each with its conversation. */
+    /**
+     * The latest runs of the agent's one-to-one thread first, at most `limit` of them, each with
+     * its conversation.
+     */
     recentRuns(agentId: string, limit = DEFAULT_RECENT_RUNS): store.Run[] | undefined {
-      if (!store.hasAgent(this.ctx.storage, agentId)) {
+      const threadId = store.agentThreadId(this.ctx.storage, agentId);
+      if (threadId === undefined) {
         return undefined;
       }
-      return store.recentRuns(this.ctx.storage, agentId, limit);
+      return store.recentRuns(this.ctx.storage, threadId, limit);
     }
 
     override async alarm(): Promise<void> {
@@ -178,6 +254,42 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       } finally {
         this.broadcast.idle();
       }
+    }
+
+    /** The thread a socket is opened on, and what it hears; undefined when the user has no such thread or agent. */
+    private socketThread(
+      threadId: string | null,
+      agentId: string | null,
+    ): { threadId: string; hears: "runs" | "runs-and-posts" } | undefined {
+      if (threadId !== null) {
+        return store.findThread(this.ctx.storage, threadId) === undefined
+          ? undefined
+          : { threadId, hears: "runs-and-posts" };
+      }
+      const agentThreadId =
+        agentId === null ? undefined : store.agentThreadId(this.ctx.storage, agentId);
+      return agentThreadId === undefined ? undefined : { threadId: agentThreadId, hears: "runs" };
+    }
+
+    /** Adds the post with a run of each of `agentIds` replying to it, tells the sockets, and sets the alarm. */
+    private async startPost(
+      threadId: string,
+      text: string,
+      agentIds: readonly string[],
+    ): Promise<{ post: store.Post; runs: store.Run[] }> {
+      const post: store.Post = { id: crypto.randomUUID(), threadId, text, createdAt: new Date() };
+      const runIds = store.insertPost(this.ctx.storage, post, agentIds);
+      this.broadcast.posted(post);
+      const runs = runIds.map((id) => {
+        const run = store.findRun(this.ctx.storage, id);
+        if (run === undefined) {
+          throw new Error(`Run ${id} was started but isn't stored.`);
+        }
+        this.broadcast.changed(id);
+        return run;
+      });
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return { post, runs };
     }
 
     private async wakeAt(time: Date | undefined): Promise<void> {

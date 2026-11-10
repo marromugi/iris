@@ -1,9 +1,22 @@
-import { type Message, messageSchema } from "@iris/agent";
-import { and, asc, desc, eq, isNull, lt, lte, max, min, notExists, or, sql } from "drizzle-orm";
+import { type Message, messageSchema, nextAction } from "@iris/agent";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  max,
+  min,
+  notExists,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
-import { alias, type SQLiteColumn } from "drizzle-orm/sqlite-core";
+import { alias } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
-import { agents, messages, runs, tasks, threads } from "./db/schema";
+import { agents, messages, posts, runs, tasks, threadMembers, threads } from "./db/schema";
 import type { Schedule } from "./schedule";
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
@@ -76,17 +89,108 @@ function migrationText(index: number): string | undefined {
   return sqlByKey[`m${index.toString().padStart(4, "0")}`];
 }
 
-/** Adds an agent together with its own one-to-one thread. */
+/** Adds an agent together with its own one-to-one thread, of which it is the member. */
 export function insertAgent(
   storage: DurableObjectStorage,
   agent: { id: string; name: string; createdAt: Date },
 ): void {
+  const threadId = crypto.randomUUID();
   database(storage).transaction((tx) => {
     tx.insert(agents).values(agent).run();
     tx.insert(threads)
-      .values({ id: crypto.randomUUID(), agentId: agent.id, createdAt: agent.createdAt })
+      .values({ id: threadId, agentId: agent.id, createdAt: agent.createdAt })
+      .run();
+    tx.insert(threadMembers).values({ threadId, agentId: agent.id }).run();
+  });
+}
+
+/** Adds a group thread with the agents as its members. The caller checks that the agents are the user's. */
+export function insertGroup(
+  storage: DurableObjectStorage,
+  group: { id: string; name: string; agentIds: readonly string[]; createdAt: Date },
+): void {
+  database(storage).transaction((tx) => {
+    tx.insert(threads).values({ id: group.id, name: group.name, createdAt: group.createdAt }).run();
+    tx.insert(threadMembers)
+      .values(group.agentIds.map((agentId) => ({ threadId: group.id, agentId })))
       .run();
   });
+}
+
+/**
+ * A thread as the home lists it: a group with its name, or an agent's one-to-one thread with the
+ * agent's name and ID. `lastActivityAt` is when it was made, a post was sent, or a run started,
+ * whichever came last.
+ */
+export interface Thread {
+  readonly id: string;
+  readonly name: string;
+  /** The agent whose one-to-one thread this is; null for a group. */
+  readonly agentId: string | null;
+  /** The members in the order they were added as agents. */
+  readonly agentIds: readonly string[];
+  readonly lastActivityAt: Date;
+}
+
+/** The user's threads, the latest activity first. */
+export function listThreads(storage: DurableObjectStorage): Thread[] {
+  const db = database(storage);
+  const lastPostAt = new Map(
+    db
+      .select({ threadId: posts.threadId, at: max(posts.createdAt) })
+      .from(posts)
+      .groupBy(posts.threadId)
+      .all()
+      .map((row) => [row.threadId, row.at]),
+  );
+  const lastRunAt = new Map(
+    db
+      .select({ threadId: runs.threadId, at: max(runs.startedAt) })
+      .from(runs)
+      .groupBy(runs.threadId)
+      .all()
+      .map((row) => [row.threadId, row.at]),
+  );
+  const members = threadMembersById(storage);
+  const agentNames = new Map(listAgents(storage).map((agent) => [agent.id, agent.name]));
+  return db
+    .select()
+    .from(threads)
+    .all()
+    .map((row): Thread => {
+      const times = [row.createdAt, lastPostAt.get(row.id), lastRunAt.get(row.id)]
+        .filter((time) => time !== undefined && time !== null)
+        .map((time) => time.getTime());
+      return {
+        id: row.id,
+        name: row.name ?? agentNames.get(row.agentId ?? "") ?? "",
+        agentId: row.agentId,
+        agentIds: members.get(row.id) ?? [],
+        lastActivityAt: new Date(Math.max(...times)),
+      };
+    })
+    .toSorted(
+      (a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime() || a.id.localeCompare(b.id),
+    );
+}
+
+/** One of the user's threads by its ID. */
+export function findThread(storage: DurableObjectStorage, id: string): Thread | undefined {
+  return listThreads(storage).find((thread) => thread.id === id);
+}
+
+/** Each thread's member IDs, in the order the agents were added. */
+function threadMembersById(storage: DurableObjectStorage): Map<string, string[]> {
+  const byThread = new Map<string, string[]>();
+  for (const row of database(storage)
+    .select({ threadId: threadMembers.threadId, agentId: threadMembers.agentId })
+    .from(threadMembers)
+    .innerJoin(agents, eq(agents.id, threadMembers.agentId))
+    .orderBy(asc(agents.createdAt), asc(agents.id))
+    .all()) {
+    byThread.set(row.threadId, [...(byThread.get(row.threadId) ?? []), row.agentId]);
+  }
+  return byThread;
 }
 
 /** The ID of the agent's own one-to-one thread; undefined when the user has no such agent. */
@@ -180,7 +284,7 @@ export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | un
 /**
  * Starts a run of the agent with `text` as its first message, due at once. A run of a task also
  * moves the task to its next run time in the same transaction: a task is never started twice for
- * the same time. A run without a task is one a message the user sent started.
+ * the same time. Runs that reply to a post are started with `insertPost`.
  */
 export function startRun(
   storage: DurableObjectStorage,
@@ -214,6 +318,51 @@ export function startRun(
       .values(messageRow(run.id, 0, { role: "user", text: run.text }))
       .run();
   });
+}
+
+/** What the user said in a thread. */
+export interface Post {
+  readonly id: string;
+  readonly threadId: string;
+  readonly text: string;
+  readonly createdAt: Date;
+}
+
+/**
+ * Adds a post and starts a run of each of `agentIds` that replies to it, all due at once and
+ * started when the post was made. Each run's first message is the post's text. Returns the runs'
+ * IDs in the order of `agentIds`.
+ */
+export function insertPost(
+  storage: DurableObjectStorage,
+  post: Post,
+  agentIds: readonly string[],
+): string[] {
+  const runIds = agentIds.map(() => crypto.randomUUID());
+  database(storage).transaction((tx) => {
+    tx.insert(posts).values(post).run();
+    for (const [index, agentId] of agentIds.entries()) {
+      const runId = runIds[index] ?? "";
+      tx.insert(runs)
+        .values({
+          id: runId,
+          agentId,
+          threadId: post.threadId,
+          postId: post.id,
+          startedAt: post.createdAt,
+          dueAt: post.createdAt,
+        })
+        .run();
+      tx.insert(messages)
+        .values(messageRow(runId, 0, { role: "user", text: post.text }))
+        .run();
+    }
+  });
+  return runIds;
+}
+
+export function findPost(storage: DurableObjectStorage, id: string): Post | undefined {
+  return database(storage).select().from(posts).where(eq(posts.id, id)).get();
 }
 
 function messageRow(runId: string, seq: number, message: Message): typeof messages.$inferInsert {
@@ -252,22 +401,10 @@ export function loadConversation(storage: DurableObjectStorage, runId: string): 
 const earlierRuns = alias(runs, "earlier_runs");
 
 /**
- * Whether `run` started before `later`. Runs that started in the same millisecond go in the order
- * of their IDs.
- */
-function startedBefore(
-  run: { startedAt: SQLiteColumn; id: SQLiteColumn },
-  later: { startedAt: SQLiteColumn | Date; id: SQLiteColumn | string },
-) {
-  return or(
-    lt(run.startedAt, later.startedAt),
-    and(eq(run.startedAt, later.startedAt), lt(run.id, later.id)),
-  );
-}
-
-/**
- * Runs next in line: each thread's first run that hasn't ended. A thread's runs are carried on one
- * at a time in the order they started, so each reads the ones before it once they have ended.
+ * Runs next in line: the runs of each thread that no run started earlier in the same thread is
+ * still ahead of. A run waits until the thread's runs that started before it have ended, so it
+ * reads them; runs that started together, such as the replies to one post, don't wait for each
+ * other.
  */
 function nextInLine(storage: DurableObjectStorage) {
   return and(
@@ -280,7 +417,7 @@ function nextInLine(storage: DurableObjectStorage) {
           and(
             eq(earlierRuns.threadId, runs.threadId),
             isNull(earlierRuns.endedAt),
-            startedBefore(earlierRuns, runs),
+            lt(earlierRuns.startedAt, runs.startedAt),
           ),
         ),
     ),
@@ -352,7 +489,10 @@ export function recordRunFailure(
 export interface Run {
   readonly id: string;
   readonly agentId: string;
+  readonly threadId: string;
   readonly taskId: string | null;
+  /** The post it replies to; null for a run a task started. */
+  readonly postId: string | null;
   readonly startedAt: Date;
   /**
    * Set once the run has finished, reached its step limit, or been given up after failing too
@@ -369,7 +509,9 @@ function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Ru
   return {
     id: row.id,
     agentId: row.agentId,
+    threadId: row.threadId,
     taskId: row.taskId,
+    postId: row.postId,
     startedAt: row.startedAt,
     endedAt: row.endedAt,
     lastError: row.lastError,
@@ -378,12 +520,12 @@ function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Ru
   };
 }
 
-export function agentOfRun(storage: DurableObjectStorage, runId: string): string | undefined {
+export function threadOfRun(storage: DurableObjectStorage, runId: string): string | undefined {
   return database(storage)
-    .select({ agentId: runs.agentId })
+    .select({ threadId: runs.threadId })
     .from(runs)
     .where(eq(runs.id, runId))
-    .get()?.agentId;
+    .get()?.threadId;
 }
 
 export function findRun(storage: DurableObjectStorage, id: string): Run | undefined {
@@ -391,12 +533,12 @@ export function findRun(storage: DurableObjectStorage, id: string): Run | undefi
   return row === undefined ? undefined : toRun(storage, row);
 }
 
-/** The agent's latest runs first, each with its conversation. */
-export function recentRuns(storage: DurableObjectStorage, agentId: string, limit: number): Run[] {
+/** The thread's latest runs first, each with its conversation. */
+export function recentRuns(storage: DurableObjectStorage, threadId: string, limit: number): Run[] {
   return database(storage)
     .select()
     .from(runs)
-    .where(eq(runs.agentId, agentId))
+    .where(eq(runs.threadId, threadId))
     .orderBy(desc(runs.startedAt), desc(runs.id))
     .limit(limit)
     .all()
@@ -404,36 +546,146 @@ export function recentRuns(storage: DurableObjectStorage, agentId: string, limit
 }
 
 /**
- * The conversations of the runs of the same agent in the same thread that started before the run,
- * the latest first. Each is read from storage only when the caller asks for it.
+ * What was said in the run's thread before it, as its agent reads it, the latest first, each
+ * entry to be kept whole. An entry is a post together with the replies to it that ended with
+ * one, or a run a task started that ended with a reply. The agent's own reply is its
+ * conversation (without the post, which comes first); another agent's is its reply as a user
+ * message after the agent's name. A post without such a reply, and a run without one (given up,
+ * or stopped at its step limit), are passed over. Only what came before the run started counts,
+ * so replies to the same post don't read each other. Conversations are read from storage only
+ * when the caller asks for their entry.
  */
-export function* earlierConversations(
+export function* earlierInThread(
   storage: DurableObjectStorage,
   runId: string,
 ): Generator<Message[], void, undefined> {
-  const run = database(storage)
+  const db = database(storage);
+  const run = db
     .select({ agentId: runs.agentId, threadId: runs.threadId, startedAt: runs.startedAt })
     .from(runs)
     .where(eq(runs.id, runId))
     .get();
   if (run === undefined) {
-    throw new Error(`There is no run ${runId} to read the earlier runs of.`);
+    throw new Error(`There is no run ${runId} to read the earlier part of the thread for.`);
   }
-  const earlier = database(storage)
-    .select({ id: runs.id })
+  const agentNames = new Map(listAgents(storage).map((agent) => [agent.id, agent.name]));
+  const earlierRunRows = db
+    .select({
+      id: runs.id,
+      agentId: runs.agentId,
+      postId: runs.postId,
+      startedAt: runs.startedAt,
+      endedAt: runs.endedAt,
+    })
     .from(runs)
-    .where(
-      and(
-        eq(runs.agentId, run.agentId),
-        eq(runs.threadId, run.threadId),
-        startedBefore(runs, { startedAt: run.startedAt, id: runId }),
-      ),
-    )
-    .orderBy(desc(runs.startedAt), desc(runs.id))
+    .where(and(eq(runs.threadId, run.threadId), lt(runs.startedAt, run.startedAt)))
+    .orderBy(asc(runs.endedAt), asc(runs.id))
     .all();
-  for (const { id } of earlier) {
-    yield loadConversation(storage, id);
+  type EarlierRun = (typeof earlierRunRows)[number];
+  const entries: ({ at: Date } & ({ post: Post; replies: EarlierRun[] } | { run: EarlierRun }))[] =
+    db
+      .select()
+      .from(posts)
+      .where(and(eq(posts.threadId, run.threadId), lt(posts.createdAt, run.startedAt)))
+      .all()
+      .map((post) => ({
+        at: post.createdAt,
+        post,
+        replies: earlierRunRows.filter((row) => row.postId === post.id),
+      }));
+  for (const row of earlierRunRows) {
+    if (row.postId === null) {
+      entries.push({ at: row.startedAt, run: row });
+    }
   }
+  /** The run as the agent reads it, or undefined when it didn't end with a reply. */
+  const read = (row: EarlierRun): Message[] | undefined => {
+    const conversation = loadConversation(storage, row.id);
+    if (conversation.length === 0 || nextAction(conversation).type !== "done") {
+      return undefined;
+    }
+    if (row.agentId !== run.agentId) {
+      const name = agentNames.get(row.agentId) ?? "";
+      return [{ role: "user", text: `${name}: ${replyText(conversation)}` }];
+    }
+    return row.postId === null ? conversation : conversation.slice(1);
+  };
+  for (const entry of entries.toSorted((a, b) => b.at.getTime() - a.at.getTime())) {
+    if ("run" in entry) {
+      const messagesRead = read(entry.run);
+      if (messagesRead !== undefined) {
+        yield messagesRead;
+      }
+      continue;
+    }
+    const replies = entry.replies.flatMap((reply) => read(reply) ?? []);
+    if (replies.length > 0) {
+      yield [{ role: "user", text: entry.post.text }, ...replies];
+    }
+  }
+}
+
+/** The text of a finished conversation's last message. */
+function replyText(conversation: readonly Message[]): string {
+  const last = conversation.at(-1);
+  return last?.role === "assistant"
+    ? last.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("")
+    : "";
+}
+
+/**
+ * The latest `limit` posts and runs of the thread together, the latest first. A post comes before
+ * the runs that reply to it.
+ */
+export function threadEntries(
+  storage: DurableObjectStorage,
+  threadId: string,
+  limit: number,
+): (
+  | { readonly type: "post"; readonly post: Post }
+  | { readonly type: "run"; readonly run: Run }
+)[] {
+  const db = database(storage);
+  const latestPosts = db
+    .select()
+    .from(posts)
+    .where(eq(posts.threadId, threadId))
+    .orderBy(desc(posts.createdAt), desc(posts.id))
+    .limit(limit)
+    .all()
+    .map((post) => ({ type: "post" as const, post, at: post.createdAt.getTime(), order: 0 }));
+  const latestRuns = db
+    .select()
+    .from(runs)
+    .where(eq(runs.threadId, threadId))
+    .orderBy(desc(runs.startedAt), desc(runs.id))
+    .limit(limit)
+    .all()
+    .map((row) => ({
+      type: "run" as const,
+      run: toRun(storage, row),
+      at: row.startedAt.getTime(),
+      order: 1,
+    }));
+  return [...latestPosts, ...latestRuns]
+    .toSorted((a, b) => b.at - a.at || b.order - a.order)
+    .slice(0, limit)
+    .map((entry) =>
+      entry.type === "post" ? { type: "post", post: entry.post } : { type: "run", run: entry.run },
+    );
+}
+
+/** Which of `agentIds` are the user's agents. */
+export function knownAgents(storage: DurableObjectStorage, agentIds: readonly string[]): string[] {
+  if (agentIds.length === 0) {
+    return [];
+  }
+  return database(storage)
+    .select({ id: agents.id })
+    .from(agents)
+    .where(inArray(agents.id, [...agentIds]))
+    .all()
+    .map((row) => row.id);
 }
 
 export function earliestTaskRunAt(storage: DurableObjectStorage): Date | undefined {

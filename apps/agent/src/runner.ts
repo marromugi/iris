@@ -1,4 +1,4 @@
-import { type Agent, type Message, type ModelProgress, nextAction, run } from "@iris/agent";
+import { type Agent, type Message, type ModelProgress, run } from "@iris/agent";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 
@@ -11,7 +11,7 @@ export const RETRY_DELAY_MS = 5 * 60 * 1000;
 /** How many failed attempts a run gets before it is given up, so a run that keeps failing can't keep calling the model. */
 export const MAX_FAILED_ATTEMPTS = 3;
 
-/** How many messages of the agent's earlier runs the model reads at most, before the run's own. */
+/** How many messages of what came before in the thread the model reads at most, before the run's own. */
 export const MAX_EARLIER_MESSAGES = 40;
 
 /** How a run is getting on while it is carried on: picked up, then the model's progress on each message. */
@@ -57,8 +57,9 @@ function safely(watcher: RunWatcher): RunWatcher {
  * missed several times runs once. A run that throws keeps its messages so far and is due again
  * `RETRY_DELAY_MS` later, until it has failed `MAX_FAILED_ATTEMPTS` times and is given up.
  *
- * A thread's runs are carried on one at a time in the order they started: a run waits while an
- * earlier run in the same thread hasn't ended, the task's new run included.
+ * A run waits while a run of the same thread that started before it hasn't ended, the task's new
+ * run included; runs that started together, such as the replies to one post, don't wait for each
+ * other.
  */
 export async function runNext(
   storage: DurableObjectStorage,
@@ -103,22 +104,18 @@ export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
 }
 
 /**
- * What the model reads of the agent's earlier runs, oldest first: the latest whole runs that
- * finished with a reply, as many as fit in `limit` messages. `conversations` comes latest first;
- * a run without a reply, given up or stopped at its step limit, is passed over.
+ * What the model reads of what came before the run, oldest first: the latest whole entries of
+ * `earlier`, which comes latest first, as many as fit in `limit` messages.
  */
-export function earlierMessages(conversations: Iterable<Message[]>, limit: number): Message[] {
+export function earlierMessages(earlier: Iterable<Message[]>, limit: number): Message[] {
   const taken: Message[][] = [];
   let count = 0;
-  for (const conversation of conversations) {
-    if (nextAction(conversation).type !== "done") {
-      continue;
-    }
-    if (count + conversation.length > limit) {
+  for (const entry of earlier) {
+    if (count + entry.length > limit) {
       break;
     }
-    taken.push(conversation);
-    count += conversation.length;
+    taken.push(entry);
+    count += entry.length;
   }
   return taken.toReversed().flat();
 }
@@ -133,10 +130,7 @@ async function carryOn(
   store.postponeRun(storage, runId, new Date(now().getTime() + RETRY_DELAY_MS));
   watcher.progress(runId, { type: "starting" });
   try {
-    const earlier = earlierMessages(
-      store.earlierConversations(storage, runId),
-      MAX_EARLIER_MESSAGES,
-    );
+    const earlier = earlierMessages(store.earlierInThread(storage, runId), MAX_EARLIER_MESSAGES);
     const conversation = store.loadConversation(storage, runId);
     let seq = conversation.length;
     const onProgress = (progress: ModelProgress) => watcher.progress(runId, progress);

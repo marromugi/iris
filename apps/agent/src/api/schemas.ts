@@ -7,7 +7,7 @@ import {
   userMessageSchema,
 } from "@iris/agent";
 import { scheduleSchema } from "../schedule";
-import type { Agent, Run, Task } from "../store";
+import type { Agent, Post, Run, Task, Thread } from "../store";
 
 /** A response body in JSON with the given schema. */
 export function json<S extends z.ZodType>(schema: S, description: string) {
@@ -37,6 +37,43 @@ export function agentJson(agent: Agent): z.infer<typeof agentSchema> {
     name: agent.name,
     lastRanAt: agent.lastRanAt === null ? null : timeJson(agent.lastRanAt),
   };
+}
+
+export const threadSchema = z
+  .object({
+    id: z.uuid(),
+    name: z
+      .string()
+      .meta({ description: "The group's name, or the agent's in its one-to-one thread" }),
+    agentId: z
+      .uuid()
+      .nullable()
+      .meta({ description: "The agent whose one-to-one thread this is; null for a group" }),
+    agentIds: z
+      .array(z.uuid())
+      .meta({ description: "The members, in the order they were added as agents" }),
+    lastActivityAt: timeSchema.meta({
+      description: "When it was made, a post was sent, or a run started, whichever came last",
+    }),
+  })
+  .meta({ id: "Thread" });
+
+export function threadJson(thread: Thread): z.infer<typeof threadSchema> {
+  return {
+    id: thread.id,
+    name: thread.name,
+    agentId: thread.agentId,
+    agentIds: [...thread.agentIds],
+    lastActivityAt: timeJson(thread.lastActivityAt),
+  };
+}
+
+export const postSchema = z
+  .object({ id: z.uuid(), text: z.string(), createdAt: timeSchema })
+  .meta({ id: "Post", description: "What the user said in a thread" });
+
+export function postJson(post: Post): z.infer<typeof postSchema> {
+  return { id: post.id, text: post.text, createdAt: timeJson(post.createdAt) };
 }
 
 export const taskSchema = z
@@ -84,10 +121,15 @@ const messageSchema = z
 export const runSchema = z
   .object({
     id: z.uuid(),
+    agentId: z.uuid().meta({ description: "The agent it is a run of" }),
     taskId: z
       .uuid()
       .nullable()
-      .meta({ description: "The task that started it; null when a message sent to the agent did" }),
+      .meta({ description: "The task that started it; null when a post did" }),
+    postId: z.uuid().nullable().meta({
+      description:
+        "The post it replies to, which is also its first message; null when a task started it",
+    }),
     startedAt: timeSchema,
     endedAt: timeSchema.nullable(),
     lastError: z.string().nullable(),
@@ -99,7 +141,9 @@ export const runSchema = z
 export function runJson(run: Run): z.infer<typeof runSchema> {
   return {
     id: run.id,
+    agentId: run.agentId,
     taskId: run.taskId,
+    postId: run.postId,
     startedAt: timeJson(run.startedAt),
     endedAt: run.endedAt === null ? null : timeJson(run.endedAt),
     lastError: run.lastError,
@@ -127,6 +171,13 @@ const runProgressSchema = z
   ])
   .meta({ id: "RunProgress" });
 
+export const threadEntrySchema = z
+  .discriminatedUnion("type", [
+    z.object({ type: z.literal("post"), post: postSchema }),
+    z.object({ type: z.literal("run"), run: runSchema }),
+  ])
+  .meta({ id: "ThreadEntry", description: "A post or a run of a thread" });
+
 export const runEventSchema = z
   .discriminatedUnion("type", [
     z.object({ type: z.literal("run"), run: runSchema }).meta({
@@ -136,11 +187,15 @@ export const runEventSchema = z
     z.object({ type: z.literal("progress"), runId: z.uuid(), progress: runProgressSchema }).meta({
       description: `How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every ${WRITING_EVERY_MS} ms; the run's next run event has the whole message.`,
     }),
+    z.object({ type: z.literal("post"), post: postSchema }).meta({
+      description:
+        "A post was sent in the thread. Only a socket opened at /api/threads/{threadId}/events hears these; the runs that reply to it follow as run events",
+    }),
   ])
   .meta({
     id: "RunEvent",
     description:
-      "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing. Nothing is sent about what happened before the socket opened, apart from the progress of a run being carried on: open the socket, then read the runs.",
+      "One event on the WebSocket at /api/threads/{threadId}/events, or at /api/agents/{agentId}/events for the agent's one-to-one thread without posts, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing. Nothing is sent about what happened before the socket opened, apart from the progress of a run being carried on: open the socket, then read the runs.",
   });
 
 export type RunEvent = z.infer<typeof runEventSchema>;

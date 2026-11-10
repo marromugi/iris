@@ -202,7 +202,9 @@ test("lists an agent's latest runs with their conversations, and when it last ra
   const [run]: { startedAt: string }[] = await runs.json();
   expect(run).toEqual({
     id: expect.any(String),
+    agentId,
     taskId: "8f2a6c1e-3b4d-4e5f-9a0b-1c2d3e4f5a6b",
+    postId: null,
     startedAt: expect.any(String),
     endedAt: expect.any(String),
     lastError: null,
@@ -228,7 +230,9 @@ test("sends a message to an agent, which starts one of its runs, and says why on
   const run = await sent.json();
   expect(run).toEqual({
     id: expect.any(String),
+    agentId,
     taskId: null,
+    postId: expect.any(String),
     startedAt: expect.any(String),
     endedAt: null,
     lastError: null,
@@ -261,14 +265,9 @@ test("an agent's event socket hears a sent message's run start, get on, and end"
   await runDurableObjectAlarm(env.USER_AGENT.getByName(userId));
   const events = await socket.heard(6);
 
-  expect(events.map((event) => (event.type === "run" ? "run" : event.progress.type))).toEqual([
-    "run",
-    "starting",
-    "thinking",
-    "writing",
-    "run",
-    "run",
-  ]);
+  expect(
+    events.map((event) => (event.type === "progress" ? event.progress.type : event.type)),
+  ).toEqual(["run", "starting", "thinking", "writing", "run", "run"]);
   expect(events[3]).toEqual({
     type: "progress",
     runId: sent.id,
@@ -288,6 +287,58 @@ test("an agent's event socket hears a sent message's run start, get on, and end"
     426,
     { message: "Open this as a WebSocket" },
   ]);
+});
+
+test("makes a group, lists it with the one-to-one threads, and posts in it", async () => {
+  const userId = await addUser("一郎");
+  const first = await firstAgentId(userId);
+  const second: { id: string } = await (await post(userId, "/api/agents", { name: "株価" })).json();
+
+  const made = await post(userId, "/api/threads", { name: "チーム", agentIds: [first, second.id] });
+  const tooFew = await post(userId, "/api/threads", { name: "一人", agentIds: [first] });
+  const group: { id: string } = await made.json();
+  const sent = await post(userId, `/api/threads/${group.id}/posts`, { text: "@株価 今日は？" });
+  const listed: { name: string }[] = await (await call(userId, "/api/threads")).json();
+  const entries: { type: string }[] = await (
+    await call(userId, `/api/threads/${group.id}/entries?limit=5`)
+  ).json();
+  const missing = await call(userId, `/api/threads/${crypto.randomUUID()}/entries`);
+
+  expect(made.status).toBe(201);
+  expect(group).toEqual({
+    id: expect.any(String),
+    name: "チーム",
+    agentId: null,
+    agentIds: [first, second.id],
+    lastActivityAt: expect.any(String),
+  });
+  expect(tooFew.status).toBe(400);
+  expect(sent.status).toBe(202);
+  expect(await sent.json()).toEqual({
+    post: { id: expect.any(String), text: "@株価 今日は？", createdAt: expect.any(String) },
+    runs: [expect.objectContaining({ agentId: second.id, taskId: null, endedAt: null })],
+  });
+  expect(listed.map((thread) => thread.name)).toEqual(["チーム", "株価", "エージェント"]);
+  expect(entries.map((entry) => entry.type)).toEqual(["run", "post"]);
+  expect(missing.status).toBe(404);
+});
+
+test("a thread's event socket hears a post, then the runs that reply to it", async () => {
+  const userId = await addUser("一郎");
+  const first = await firstAgentId(userId);
+  const [thread]: { id: string }[] = await (await call(userId, "/api/threads")).json();
+  const opened = await call(userId, `/api/threads/${thread?.id}/events`, {
+    headers: { Upgrade: "websocket" },
+  });
+  const socket = listen(opened.webSocket);
+
+  scriptedModel.push({ role: "assistant", parts: [{ type: "text", text: "Hello." }] });
+  await post(userId, `/api/threads/${thread?.id}/posts`, { text: "Hi" });
+  const events = await socket.heard(2);
+
+  expect(opened.status).toBe(101);
+  expect(events.slice(0, 2).map((event) => event.type)).toEqual(["post", "run"]);
+  expect(events[1]).toMatchObject({ type: "run", run: { agentId: first } });
 });
 
 test("refuses a request that reaches it without a signed-in user", async () => {

@@ -103,7 +103,8 @@
             try answers.withLock { answers throws(AppError) in
                 if let failure = answers.failure { throw failure }
                 let run = Run(
-                    id: "sent-\(answers.runs.count + 1)", startedAt: answers.sentAt, failedAttempts: 0,
+                    id: "sent-\(answers.runs.count + 1)", agentId: "sample-agent", startedAt: answers.sentAt,
+                    failedAttempts: 0,
                     messages: [.case1(.init(role: .user, text: text))])
                 answers.runs.insert(run, at: 0)
                 return run

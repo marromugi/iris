@@ -29,6 +29,13 @@
       "when": 1794326380639,
       "tag": "0003_threads",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794327996235,
+      "tag": "0004_groups",
+      "breakpoints": true
     }
   ]
 }

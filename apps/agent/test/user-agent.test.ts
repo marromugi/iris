@@ -377,7 +377,7 @@ test("a socket that opens while a run is being written hears the text so far at 
     const broadcast = new RunBroadcast(state);
     broadcast.progress(runId, { type: "writing", text: "Hel" });
     const { 0: client, 1: server } = new WebSocketPair();
-    broadcast.accept(agentId, server);
+    broadcast.accept(agentThread(state.storage, agentId), server, "runs");
     const [event] = await listen(client).heard(1);
     return event;
   });
@@ -393,7 +393,7 @@ test("writing that comes too soon goes out once the interval is over, as the lat
   const heard = await runInDurableObject(userAgent(), async (_, state) => {
     const broadcast = new RunBroadcast(state);
     const { 0: client, 1: server } = new WebSocketPair();
-    broadcast.accept(agentId, server);
+    broadcast.accept(agentThread(state.storage, agentId), server, "runs");
     const socket = listen(client);
     broadcast.progress(runId, { type: "writing", text: "Hel" });
     broadcast.progress(runId, { type: "writing", text: "Hello" });
@@ -449,7 +449,9 @@ test("a message starts a run due at once, which the model answers after the agen
     run: {
       id: expect.any(String),
       agentId,
+      threadId: expect.any(String),
       taskId: null,
+      postId: expect.any(String),
       startedAt: expect.any(Date),
       endedAt: null,
       lastError: null,
@@ -540,7 +542,16 @@ test("a thread's runs go one at a time in the order they started, each reading t
 /** Empties the storage and applies the first `count` migrations, as an older version of the code left it. */
 function storageMigratedUpTo(storage: DurableObjectStorage, count: number) {
   const sql = storage.sql;
-  for (const table of ["messages", "runs", "tasks", "threads", "agents", "__drizzle_migrations"]) {
+  for (const table of [
+    "messages",
+    "runs",
+    "tasks",
+    "posts",
+    "thread_members",
+    "threads",
+    "agents",
+    "__drizzle_migrations",
+  ]) {
     sql.exec(`DROP TABLE ${table}`);
   }
   sql.exec(
@@ -676,6 +687,50 @@ test("each agent stored before threads gets its own, where its tasks and runs th
     expect(runs).toEqual([thread]);
   }
   expect(moved[0]?.thread).not.toBe(moved[1]?.thread);
+});
+
+test("a run a message started before posts becomes a post it replies to; a task's run doesn't", async () => {
+  const startedAt = Date.parse("2026-11-10T08:00:00Z");
+  const moved = await runInDurableObject(userAgent(), (_, state) => {
+    const sql = state.storage.sql;
+    // Storage as the code before posts left it: one run a message started, one a task did.
+    storageMigratedUpTo(state.storage, 4);
+    const agentId = sql.exec<{ id: string }>("SELECT id FROM agents").one().id;
+    const threadId = sql.exec<{ id: string }>("SELECT id FROM threads").one().id;
+    const insert =
+      "INSERT INTO runs (id, agent_id, thread_id, task_id, started_at, due_at) VALUES (?, ?, ?, ?, ?, ?)";
+    sql.exec(insert, "sent", agentId, threadId, null, startedAt, startedAt);
+    sql.exec(insert, "scheduled", agentId, threadId, "task-1", startedAt, startedAt);
+    for (const [runId, text] of [
+      ["sent", "Hi"],
+      ["scheduled", "Check mail"],
+    ]) {
+      sql.exec(
+        "INSERT INTO messages (run_id, seq, format, body) VALUES (?, 0, 1, ?)",
+        runId,
+        JSON.stringify({ role: "user", text }),
+      );
+    }
+
+    store.migrate(state.storage);
+
+    return {
+      posts: sql.exec("SELECT id, thread_id, text, created_at FROM posts").toArray(),
+      runs: sql.exec("SELECT id, post_id FROM runs ORDER BY id").toArray(),
+      members: sql.exec("SELECT thread_id, agent_id FROM thread_members").toArray(),
+      threadId,
+      agentId,
+    };
+  });
+
+  expect(moved.posts).toEqual([
+    { id: "sent", thread_id: moved.threadId, text: "Hi", created_at: startedAt },
+  ]);
+  expect(moved.runs).toEqual([
+    { id: "scheduled", post_id: null },
+    { id: "sent", post_id: "sent" },
+  ]);
+  expect(moved.members).toEqual([{ thread_id: moved.threadId, agent_id: moved.agentId }]);
 });
 
 test("refuses storage that a newer version of the code migrated", async () => {
