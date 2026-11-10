@@ -2,7 +2,8 @@ import Backend
 import SwiftUI
 
 /// One run in a thread: what started it (a schedule and its prompt, or the message the user sent), then the
-/// conversation, the message being written while the run is carried on, then how the run stands.
+/// conversation, then, until the model writes, the thinking line where the reply will go; once it writes, the message
+/// so far and how the run stands.
 struct RunView: View {
     let run: Run
     /// How the run is getting on, while it is carried on.
@@ -19,14 +20,18 @@ struct RunView: View {
             ForEach(conversation.blocks) { block in
                 BlockView(kind: block.kind)
             }
-            if case .case3(let writing)? = progress {
-                Text(writing.text)
-                    .textSelection(.enabled)
+            let status = RunStatus(of: run, progress: progress)
+            switch status {
+            case .running, .starting, .thinking:
+                ThinkingLine(status: status)
+            default:
+                if case .case3(let writing)? = progress {
+                    Text(writing.text)
+                        .textSelection(.enabled)
+                }
+                // A failure from an earlier attempt is no longer the news while another attempt is under way.
+                RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
             }
-            // A failure from an earlier attempt is no longer the news while another attempt is under way.
-            RunEnd(
-                status: RunStatus(of: run, progress: progress), endedAt: run.endedAt,
-                lastError: progress == nil ? run.lastError : nil)
         }
     }
 }

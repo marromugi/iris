@@ -18,6 +18,7 @@ swift test              # Backend と Features のテスト
 apple/scripts/lint.sh   # 整形の確認
 ```
 
+- 考え中の丸は Metal のシェーダー（`ThinkingBlob.metal`）なので、ビルドには Metal のツールチェーンが要る。入っていなければ `xcodebuild -downloadComponent MetalToolchain` で入れる。
 - Xcode で初めて開くと、OpenAPIGenerator のプラグインを信頼するか聞かれる。コマンドラインで `xcodebuild` するときは `-skipPackagePluginValidation` を付ける。
 - 署名をまったくしないビルド（`CODE_SIGNING_ALLOWED=NO`）はキーチェーンに書けず（-34018）、サインインが残らない。シミュレーターで試すビルドは `CODE_SIGN_IDENTITY=-`（アドホック署名）で作る。
 
