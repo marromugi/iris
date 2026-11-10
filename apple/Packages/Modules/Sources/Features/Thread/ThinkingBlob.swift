@@ -1,15 +1,18 @@
 import SwiftUI
 
-/// A small blob drawn by a Metal shader (`ThinkingBlob.metal`) that keeps moving while the agent works. `energy`, from 0
-/// to 1, sets how lively it is. With Reduce Motion it holds still.
+/// A small blob drawn by a Metal shader (`ThinkingBlob.metal`) that grows, wobbles, and shrinks away, taking a new
+/// organic shape each time it comes back, while the agent works. `energy`, from 0 to 1, sets how lively it is. With
+/// Reduce Motion it holds still, fully grown.
 struct ThinkingBlob: View {
     let energy: Double
 
+    @State private var startedAt = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(paused: reduceMotion)) { timeline in
-            let time = Float(timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3600))
+            // Held still, it stays in the middle of a cycle, where it is fully grown.
+            let time = reduceMotion ? 1.2 : Float(timeline.date.timeIntervalSince(startedAt))
             let energy = Float(energy)
             Rectangle()
                 .visualEffect { content, proxy in

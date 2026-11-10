@@ -11,7 +11,7 @@ struct Typewriter: Equatable {
     /// The text showing `elapsed` after the first phrase starts.
     func text(after elapsed: Duration) -> String {
         let cycle = phrases.reduce(Duration.zero) { $0 + length(of: $1) }
-        guard cycle > .zero else { return "" }
+        guard cycle > .zero, elapsed >= .zero else { return "" }
         var left = Duration.nanoseconds(elapsed.nanoseconds % cycle.nanoseconds)
         for phrase in phrases {
             let length = length(of: phrase)
