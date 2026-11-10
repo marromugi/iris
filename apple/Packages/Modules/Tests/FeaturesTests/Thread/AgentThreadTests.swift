@@ -44,6 +44,38 @@ struct AgentThreadTests {
         #expect(thread.runs.value?.count == 4)
     }
 
+    @Test func aMessageThatDoesNotGoThroughGoesBeforeWhatWasWrittenSince() async {
+        let backend = HeldSends(FakeAgentBackend())
+        let thread = AgentThread(backend: backend)
+        await thread.load()
+        thread.draft = "1 通目"
+
+        let sending = thread.send()
+        await backend.heldSend()
+        thread.draft = "2 通目"
+        await backend.fail(with: .offline)
+        await sending?.value
+
+        #expect(thread.draft == "1 通目\n2 通目")
+    }
+
+    @Test func aRunAReadAlreadyBroughtIsNotShownTwice() async {
+        let backend = HeldSends(FakeAgentBackend())
+        let thread = AgentThread(backend: backend)
+        await thread.load()
+        thread.draft = "こんにちは"
+
+        let sending = thread.send()
+        await backend.heldSend()
+        await thread.load()
+        await backend.release()
+        await sending?.value
+
+        let ids = thread.runs.value?.map(\.id) ?? []
+        #expect(ids.count == 5)
+        #expect(Set(ids).count == ids.count)
+    }
+
     @Test func aMessageTheServerRefusesTheSignInForOffersToSignInAgain() async {
         let backend = FakeAgentBackend()
         let thread = AgentThread(backend: backend)
@@ -77,6 +109,17 @@ struct AgentThreadTests {
         #expect(thread.runs.value?.map(\.id) == [Samples.sentRun.id, Samples.mailRun.id])
     }
 
+    @Test func aRunWaitingToBeTriedAgainIsReadAgainToo() async {
+        let backend = FakeAgentBackend(.init(runs: [Samples.retryingRun]))
+        let thread = AgentThread(backend: backend)
+        await thread.load()
+        backend.answer { $0.runs.insert(Samples.weatherRun, at: 0) }
+
+        await thread.readAgainIfGoing()
+
+        #expect(thread.runs.value?.map(\.id) == [Samples.weatherRun.id, Samples.retryingRun.id])
+    }
+
     @Test func aReadThatStartedBeforeAMessageWentThroughIsDropped() async {
         let backend = HeldReads(FakeAgentBackend())
         let thread = AgentThread(backend: backend)
@@ -93,4 +136,50 @@ struct AgentThreadTests {
 
         #expect(thread.runs.value?.count == 5)
     }
+}
+
+/// Holds every message sent once the agent has started its run, as the server does before it answers, until the test
+/// lets the answer through or fails it.
+private actor HeldSends: AgentBackend {
+    private let backend: FakeAgentBackend
+    private var held: CheckedContinuation<AppError?, Never>?
+    private var waitingForHeld: [CheckedContinuation<Void, Never>] = []
+
+    init(_ backend: FakeAgentBackend) {
+        self.backend = backend
+    }
+
+    /// Returns once a message is being held.
+    func heldSend() async {
+        guard held == nil else { return }
+        await withCheckedContinuation { waitingForHeld.append($0) }
+    }
+
+    func release() async {
+        await heldSend()
+        held?.resume(returning: nil)
+        held = nil
+    }
+
+    func fail(with error: AppError) async {
+        await heldSend()
+        held?.resume(returning: error)
+        held = nil
+    }
+
+    func sendMessage(_ text: String) async throws(AppError) -> Run {
+        let run = try await backend.sendMessage(text)
+        let failure = await withCheckedContinuation { continuation in
+            held = continuation
+            for waiting in waitingForHeld { waiting.resume() }
+            waitingForHeld = []
+        }
+        if let failure { throw failure }
+        return run
+    }
+
+    func tasks() async throws(AppError) -> [ScheduledTask] { try await backend.tasks() }
+    func addTask(_ task: NewTask) async throws(AppError) -> ScheduledTask { try await backend.addTask(task) }
+    func removeTask(id: String) async throws(AppError) { try await backend.removeTask(id: id) }
+    func recentRuns(limit: Int) async throws(AppError) -> [Run] { try await backend.recentRuns(limit: limit) }
 }
