@@ -6,40 +6,44 @@ static float noiseHash(float n) {
     return fract(sin(n * 127.1) * 43758.5453);
 }
 
-// A blob in one colour, the colour of what it is drawn over, that grows out of nothing, wobbles, and shrinks back to
-// nothing, over and over. Each time it grows back it takes a new organic shape, chosen while it can't be seen. Its
-// edge is crisp, and a soft shade drifts across it. `energy`, from 0 to 1, makes the cycle shorter and the wobble
-// stronger.
+// The shape a cycle aims for: how far each of 2, 3 and 4 lobes bulges, where it points, and how fast it turns.
+static float lobeAmount(float cycle, int lobes) {
+    return 0.035 + 0.075 * noiseHash(cycle * 7.0 + float(lobes));
+}
+
+static float lobeTurn(float cycle, int lobes) {
+    return noiseHash(cycle * 7.0 + float(lobes) + 3.1) * 6.2831;
+}
+
+// A blob in one colour, the colour of what it is drawn over, that never stops changing shape: it flows from one
+// organic shape into the next, turns, and breathes a little. Its edge is crisp, and a soft shade drifts across it.
+// `energy`, from 0 to 1, makes all of it quicker.
 [[ stitchable ]] half4 thinkingBlob(float2 position, half4 color, float2 size, float time, float energy) {
     float2 uv = position / size * 2.0 - 1.0;
 
-    float period = 3.6 - 1.2 * energy;
+    float pace = 0.6 + 1.2 * energy;
+    float period = 2.6 - 1.2 * energy;
     float cycle = floor(time / period);
-    float phase = fract(time / period);
-    float scale = smoothstep(0.0, 0.18, phase) * (1.0 - smoothstep(0.82, 1.0, phase));
-    if (scale < 0.001) {
-        return half4(0.0);
-    }
+    float blend = smoothstep(0.0, 1.0, fract(time / period));
+    float breathe = 1.0 - 0.07 * (0.5 + 0.5 * sin(time * 2.4 * pace));
 
-    float radius = length(uv) / scale;
-    float angle = atan2(uv.y, uv.x);
+    float radius = length(uv) / breathe;
+    float angle = atan2(uv.y, uv.x) + time * 0.5 * pace;
     float wobble = 0.0;
     for (int lobes = 2; lobes <= 4; lobes++) {
-        float seed = cycle * 7.0 + float(lobes);
-        float amount = (0.03 + 0.06 * noiseHash(seed)) * (0.6 + 0.4 * energy);
-        float turn = noiseHash(seed + 3.1) * 6.2831;
-        float spin = (noiseHash(seed + 5.7) - 0.5) * 2.0 * (0.5 + energy);
-        wobble += amount * sin(float(lobes) * angle + turn + time * spin);
+        float amount = mix(lobeAmount(cycle, lobes), lobeAmount(cycle + 1.0, lobes), blend);
+        float turn = mix(lobeTurn(cycle, lobes), lobeTurn(cycle + 1.0, lobes), blend);
+        wobble += amount * sin(float(lobes) * angle + turn + time * pace * (0.7 + 0.2 * float(lobes)));
     }
-    float edge = 0.72 + wobble;
-    // About a pixel and a half of softening, so the edge stays crisp at any size.
-    float soft = 3.0 / max(size.x, 1.0) / scale;
+    float edge = 0.66 + wobble;
+    // About a point and a half of softening, so the edge stays crisp at any size.
+    float soft = 3.0 / max(size.x, 1.0) / breathe;
     float alpha = 1.0 - smoothstep(edge - soft, edge, radius);
 
     // A shade that drifts across the blob: full ink on one side, lighter on the other.
-    float drift = time * (0.3 + 0.8 * energy);
+    float drift = time * 0.5 * pace;
     float2 towards = float2(cos(drift), sin(drift));
-    float shade = 0.72 + 0.28 * smoothstep(-0.9, 0.9, dot(uv / max(scale, 0.001), towards));
+    float shade = 0.72 + 0.28 * smoothstep(-0.7, 0.7, dot(uv, towards));
 
     float ink = alpha * shade * float(color.a);
     return half4(color.rgb / max(color.a, half(0.001)) * half(ink), half(ink));

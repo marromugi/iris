@@ -2,7 +2,7 @@ import Backend
 
 /// How a run stands: from whether it ended and whether its last attempt failed, and while it is carried on, from how
 /// the events socket says it is getting on.
-enum RunStatus: Equatable {
+enum RunStatus: Hashable {
     case running
     /// Picked up, and about to ask the model.
     case starting

@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// A small blob drawn by a Metal shader (`ThinkingBlob.metal`) that grows, wobbles, and shrinks away, taking a new
-/// organic shape each time it comes back, while the agent works. It is in the text's colour, so it follows light and
-/// dark. `energy`, from 0 to 1, sets how lively it is. With Reduce Motion it holds still, fully grown.
+/// A small blob drawn by a Metal shader (`ThinkingBlob.metal`) that keeps flowing from one organic shape into the
+/// next, turning and breathing, while the agent works. It is in the text's colour, so it follows light and dark.
+/// `energy`, from 0 to 1, sets how lively it is. With Reduce Motion it holds still.
 struct ThinkingBlob: View {
     let energy: Double
 
@@ -11,8 +11,7 @@ struct ThinkingBlob: View {
 
     var body: some View {
         TimelineView(.animation(paused: reduceMotion)) { timeline in
-            // Held still, it stays in the middle of a cycle, where it is fully grown.
-            let time = reduceMotion ? 1.2 : Float(timeline.date.timeIntervalSince(startedAt))
+            let time = reduceMotion ? 0 : Float(timeline.date.timeIntervalSince(startedAt))
             let energy = Float(energy)
             Rectangle()
                 .fill(.primary)
