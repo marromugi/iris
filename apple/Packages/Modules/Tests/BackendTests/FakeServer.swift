@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Foundation
+import Synchronization
 
 @testable import Backend
 
@@ -66,6 +67,30 @@ actor FakeServer {
 
     nonisolated var send: Send {
         { request in try await self.handle(request) }
+    }
+
+    nonisolated var openSocket: OpenSocket {
+        { request in FakeSocket(server: self, request: request) }
+    }
+
+    /// What the events socket sends once it is open, before the server closes it.
+    private var eventMessages: [String] = []
+
+    func sendOnEvents(_ messages: [String]) { eventMessages = messages }
+
+    /// Answers the upgrade as the real server does: 401 for a token it did not issue last, 403 for one naming no user,
+    /// and 404 for an agent the user does not have; otherwise the messages it holds.
+    fileprivate func openEvents(_ request: URLRequest) -> Result<[String], SocketRefusal> {
+        requests.append(request)
+        let authorization = request.value(forHTTPHeaderField: "Authorization")
+        guard !refusesEveryToken, let accessToken = grant?.accessToken, authorization == "Bearer \(accessToken)" else {
+            return .failure(SocketRefusal(status: 401, failure: .unexpected))
+        }
+        if namesNoUser { return .failure(SocketRefusal(status: 403, failure: .unexpected)) }
+        guard request.url?.path == "/api/agents/\(Self.agentID)/events" else {
+            return .failure(SocketRefusal(status: 404, failure: .unexpected))
+        }
+        return .success(eventMessages)
     }
 
     /// What the sign-in sheet would come back with for `url`: the page's code for the state it was sent. For an app the
@@ -214,4 +239,29 @@ actor FakeServer {
         }
         return form
     }
+}
+
+/// The events socket the fake server opens: refused as the server answers, or the messages it holds, one per read.
+private final class FakeSocket: EventSocket {
+    private let server: FakeServer
+    private let request: URLRequest
+    private let messages = Mutex<[String]>([])
+
+    init(server: FakeServer, request: URLRequest) {
+        self.server = server
+        self.request = request
+    }
+
+    func open() async throws(SocketRefusal) {
+        switch await server.openEvents(request) {
+        case .success(let sent): messages.withLock { $0 = sent }
+        case .failure(let refusal): throw refusal
+        }
+    }
+
+    func receive() async throws -> String? {
+        messages.withLock { $0.isEmpty ? nil : $0.removeFirst() }
+    }
+
+    func close() {}
 }

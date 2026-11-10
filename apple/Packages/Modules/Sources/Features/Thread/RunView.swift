@@ -2,9 +2,11 @@ import Backend
 import SwiftUI
 
 /// One run in a thread: what started it (a schedule and its prompt, or the message the user sent), then the
-/// conversation, then how the run stands.
+/// conversation, the message being written while the run is carried on, then how the run stands.
 struct RunView: View {
     let run: Run
+    /// How the run is getting on, while it is carried on.
+    var progress: RunProgress?
 
     var body: some View {
         let conversation = Conversation(run.messages)
@@ -17,7 +19,14 @@ struct RunView: View {
             ForEach(conversation.blocks) { block in
                 BlockView(kind: block.kind)
             }
-            RunEnd(status: RunStatus(of: run), endedAt: run.endedAt, lastError: run.lastError)
+            if case .case3(let writing)? = progress {
+                Text(writing.text)
+                    .textSelection(.enabled)
+            }
+            // A failure from an earlier attempt is no longer the news while another attempt is under way.
+            RunEnd(
+                status: RunStatus(of: run, progress: progress), endedAt: run.endedAt,
+                lastError: progress == nil ? run.lastError : nil)
         }
     }
 }
@@ -123,6 +132,18 @@ private struct RunEnd: View {
     #Preview("返事待ち") {
         ScrollView {
             RunView(run: Samples.sentRun).padding()
+        }
+    }
+
+    #Preview("考え中") {
+        ScrollView {
+            RunView(run: Samples.sentRun, progress: Samples.thinking).padding()
+        }
+    }
+
+    #Preview("書いている途中") {
+        ScrollView {
+            RunView(run: Samples.sentRun, progress: Samples.writing("下書きを作りました。件名は「請求書の")).padding()
         }
     }
 

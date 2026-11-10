@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Foundation
+import Synchronization
 import Testing
 
 @testable import Backend
@@ -10,7 +11,7 @@ struct IrisBackendTests {
     let agent = FakeServer.agentID
 
     func backend(now: Date = Date()) -> IrisBackend {
-        IrisBackend(origin: server.origin, store: store, send: server.send, now: { now })
+        IrisBackend(origin: server.origin, store: store, send: server.send, openSocket: server.openSocket, now: { now })
     }
 
     func signIn(_ backend: IrisBackend) async throws {
@@ -232,6 +233,52 @@ struct IrisBackendTests {
         await #expect(throws: AppError.refused(message: "✖ Too small: expected string to have >=1 characters\n  → at text")) {
             try await backend.sendMessage(" ", to: agent)
         }
+    }
+
+    @Test func followsAnAgentsEventsOnItsSocketUntilTheServerClosesIt() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.sendOnEvents([
+            #"{"type":"run","run":{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","taskId":null,"startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"こんにちは"}]}}"#,
+            #"{"type":"progress","runId":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","progress":{"type":"writing","text":"こん"}}"#,
+        ])
+        let heard = Mutex<[String]>([])
+
+        try await backend.followEvents(of: agent) {
+            heard.withLock { $0.append("open") }
+        } onEvent: { event in
+            heard.withLock {
+                switch event {
+                case .case1(let changed): $0.append("run \(changed.run.id)")
+                case .case2(let progress):
+                    guard case .case3(let writing) = progress.progress else { return }
+                    $0.append("writing \(writing.text)")
+                }
+            }
+        }
+
+        #expect(
+            heard.withLock { $0 } == ["open", "run 6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f", "writing こん"])
+        let opened = try #require(await server.requests.last)
+        #expect(opened.url?.absoluteString == "wss://iris.test/api/agents/\(agent)/events")
+        #expect(opened.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+    }
+
+    @Test func opensTheSocketAgainWithARefreshedTokenAndSignsOutWhenThatIsRefusedToo() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.revokeAccessToken()
+
+        try await backend.followEvents(of: agent, onOpen: {}, onEvent: { _ in })
+        await server.refuseEveryToken()
+
+        let tokens = await server.requests.filter { $0.url?.path.hasSuffix("/events") == true }
+            .map { $0.value(forHTTPHeaderField: "Authorization") }
+        #expect(tokens == ["Bearer access-1", "Bearer access-2"])
+        await #expect(throws: AppError.signedOut) {
+            try await backend.followEvents(of: agent, onOpen: {}, onEvent: { _ in })
+        }
+        #expect(await !backend.isSignedIn)
     }
 
     @Test func aCallWithoutASignInIsSignedOut() async throws {

@@ -13,18 +13,24 @@ public final class IrisBackend: Sendable {
         }
     }()
 
-    private let vault: SignInVault
+    let vault: SignInVault
     let client: Client
+    let origin: URL
+    let openSocket: OpenSocket
 
-    /// `origin` is the server's origin; `send` carries every request (`URLSession` by default).
+    /// `origin` is the server's origin; `send` carries every request and `openSocket` every WebSocket (`URLSession` by
+    /// default).
     public init(
         origin: URL,
         store: some CredentialStore,
         send: @escaping Send = { request in try await URLSession.shared.data(for: request) },
+        openSocket: @escaping OpenSocket = { request in URLSessionEventSocket(request: request) },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         vault = SignInVault(origin: origin, store: store, send: send, now: now)
         client = Client(serverURL: origin, transport: AuthorizedTransport(vault: vault, send: send))
+        self.origin = origin
+        self.openSocket = openSocket
     }
 
     /// Whether the app holds a sign-in. The server may still refuse it; calls then throw `.signedOut`.

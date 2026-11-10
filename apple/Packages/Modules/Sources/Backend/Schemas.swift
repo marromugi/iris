@@ -14,5 +14,9 @@ public typealias NewMessage = Components.Schemas.NewMessage
 public typealias Run = Components.Schemas.Run
 /// One message of a run's conversation: the user's prompt, the assistant's answer, or a tool's result.
 public typealias RunMessage = Components.Schemas.Message
+/// What an agent's events socket sends: a run as it is now, or how the run being carried on is getting on.
+public typealias RunEvent = Components.Schemas.RunEvent
+/// How a run being carried on is getting on: picked up, thinking, or writing with the text so far.
+public typealias RunProgress = Components.Schemas.RunProgress
 
 extension Agent: Identifiable {}

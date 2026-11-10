@@ -1,10 +1,25 @@
 import Backend
 import Foundation
+import Synchronization
 import Testing
 
 @testable import Features
 
 struct AgentThreadTests {
+    /// The sent message's run, once the agent replied.
+    let answered = {
+        var run = Samples.sentRun
+        run.endedAt = Samples.moment("2026-11-10T00:05:09Z")
+        return run
+    }()
+
+    /// Returns once `condition` holds, giving up after a second.
+    func eventually(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     @Test func sendingPutsTheRunItStartsAtTheEndOfTheThreadAndEmptiesTheField() async throws {
         let thread = AgentThread(backend: FakeAgentBackend())
         await thread.load()
@@ -17,7 +32,6 @@ struct AgentThreadTests {
         #expect(Conversation(latest.messages).prompt == "請求書の件、返信の下書きを作って。")
         #expect(thread.runs.value?.count == 5)
         #expect(thread.draft.isEmpty)
-        #expect(thread.hasRunGoing)
     }
 
     @Test func sendsNothingForAFieldWithOnlySpaces() async {
@@ -89,38 +103,95 @@ struct AgentThreadTests {
         #expect(thread.sendProblem == nil)
     }
 
-    @Test func readsAgainOnlyWhileARunIsGoing() async {
-        let backend = FakeAgentBackend(.init(runs: [Samples.sentRun, Samples.mailRun]))
-        let thread = AgentThread(backend: backend)
+    @Test func aRunHeardTakesItsPlaceAndItsProgressIsOver() async {
+        let thread = AgentThread(backend: FakeAgentBackend(.init(runs: [Samples.sentRun, Samples.mailRun])))
         await thread.load()
-        let answered = {
-            var run = Samples.sentRun
-            run.endedAt = Samples.moment("2026-11-10T00:05:09Z")
-            return run
-        }()
-        backend.answer { $0.runs[0] = answered }
 
-        await thread.readAgainIfGoing()
-        let afterReply = thread.runs.value?.first?.endedAt
-        backend.answer { $0.runs.insert(Samples.weatherRun, at: 0) }
-        await thread.readAgainIfGoing()
+        thread.hear(Samples.progress(Samples.thinking, of: Samples.sentRun))
+        let whileThinking = thread.progress[Samples.sentRun.id]
+        thread.hear(Samples.changed(answered))
 
-        #expect(afterReply == answered.endedAt)
-        #expect(thread.runs.value?.map(\.id) == [Samples.sentRun.id, Samples.mailRun.id])
+        #expect(whileThinking == Samples.thinking)
+        #expect(thread.runs.value?.first?.endedAt == answered.endedAt)
+        #expect(thread.progress.isEmpty)
     }
 
-    @Test func aRunWaitingToBeTriedAgainIsReadAgainToo() async {
-        let backend = FakeAgentBackend(.init(runs: [Samples.retryingRun]))
-        let thread = AgentThread(backend: backend)
+    @Test func aNewRunHeardGoesInByWhenItStarted() async {
+        let thread = AgentThread(backend: FakeAgentBackend(.init(runs: [Samples.sentRun, Samples.mailRun])))
         await thread.load()
-        backend.answer { $0.runs.insert(Samples.weatherRun, at: 0) }
 
-        await thread.readAgainIfGoing()
+        thread.hear(Samples.changed(Samples.weatherRun))
 
-        #expect(thread.runs.value?.map(\.id) == [Samples.weatherRun.id, Samples.retryingRun.id])
+        #expect(thread.runs.value?.map(\.id) == [Samples.sentRun.id, Samples.mailRun.id, Samples.weatherRun.id])
     }
 
-    @Test func aReadThatStartedBeforeAMessageWentThroughIsDropped() async {
+    @Test func aRunHeardWhileAReadIsOnItsWayStaysAsItCame() async {
+        let backend = HeldReads(FakeAgentBackend(.init(runs: [Samples.sentRun])))
+        let thread = AgentThread(backend: backend)
+        let firstRead = Task { await thread.load() }
+        await backend.release()
+        await firstRead.value
+
+        let read = Task { await thread.load() }
+        await backend.heldRead()
+        thread.hear(Samples.changed(answered))
+        await backend.release()
+        await read.value
+
+        #expect(thread.runs.value?.first?.endedAt == answered.endedAt)
+    }
+
+    @Test func followingReadsTheRunsOnceTheSocketIsOpenAndHearsWhatItSays() async {
+        let backend = FakeAgentBackend(.init(runs: [Samples.sentRun]))
+        let thread = AgentThread(backend: backend)
+
+        let following = Task { await thread.follow() }
+        await eventually { thread.runs.value != nil }
+        backend.hear(Samples.progress(Samples.writing("下書き"), of: Samples.sentRun))
+        await eventually { thread.progress[Samples.sentRun.id] != nil }
+        following.cancel()
+        await following.value
+
+        #expect(thread.runs.value?.map(\.id) == [Samples.sentRun.id])
+        #expect(thread.progress[Samples.sentRun.id] == Samples.writing("下書き"))
+    }
+
+    @Test func opensTheSocketAgainAfterTheServerClosesItAndLetsItsProgressGo() async {
+        let backend = FakeAgentBackend(.init(runs: [Samples.sentRun]))
+        let waits = Mutex<[Duration]>([])
+        let thread = AgentThread(backend: backend) { delay in waits.withLock { $0.append(delay) } }
+
+        let following = Task { await thread.follow() }
+        await eventually { backend.socketsOpened == 1 && thread.runs.value != nil }
+        backend.hear(Samples.progress(Samples.thinking, of: Samples.sentRun))
+        await eventually { !thread.progress.isEmpty }
+        backend.closeSocket()
+        await eventually { backend.socketsOpened == 2 }
+        following.cancel()
+        await following.value
+
+        #expect(waits.withLock { $0 } == [AgentThread.reopenDelay(afterFailures: 0)])
+        #expect(thread.progress.isEmpty)
+    }
+
+    @Test func waitsLongerAfterEachFailureInARowAndStopsWhenTheSignInEnds() async {
+        let backend = FakeAgentBackend(.init(failure: .offline))
+        let waits = Mutex<[Duration]>([])
+        let thread = AgentThread(backend: backend) { delay in
+            let count = waits.withLock {
+                $0.append(delay)
+                return $0.count
+            }
+            if count == 3 { backend.answer { $0.failure = .signedOut } }
+        }
+
+        await thread.follow()
+
+        #expect(waits.withLock { $0 } == [.seconds(2), .seconds(4), .seconds(8)])
+        #expect(thread.runs.failure == .signedOut)
+    }
+
+    @Test func aRunSentWhileAReadIsOnItsWayStaysAfterTheReadLands() async {
         let backend = HeldReads(FakeAgentBackend())
         let thread = AgentThread(backend: backend)
         let firstRead = Task { await thread.load() }
@@ -182,4 +253,11 @@ private actor HeldSends: AgentBackend {
     func addTask(_ task: NewTask) async throws(AppError) -> ScheduledTask { try await backend.addTask(task) }
     func removeTask(id: String) async throws(AppError) { try await backend.removeTask(id: id) }
     func recentRuns(limit: Int) async throws(AppError) -> [Run] { try await backend.recentRuns(limit: limit) }
+
+    func followEvents(
+        onOpen: @Sendable () async -> Void,
+        onEvent: @Sendable (RunEvent) async -> Void
+    ) async throws(AppError) {
+        try await backend.followEvents(onOpen: onOpen, onEvent: onEvent)
+    }
 }

@@ -24,4 +24,11 @@ nonisolated struct ServerAgent: AgentBackend {
     func sendMessage(_ text: String) async throws(AppError) -> Run {
         try await backend.sendMessage(text, to: id)
     }
+
+    func followEvents(
+        onOpen: @Sendable () async -> Void,
+        onEvent: @Sendable (RunEvent) async -> Void
+    ) async throws(AppError) {
+        try await backend.followEvents(of: id, onOpen: onOpen, onEvent: onEvent)
+    }
 }
