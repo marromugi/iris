@@ -4,26 +4,37 @@ import {
   jsonValueSchema,
   type Message,
   type Model,
+  type ModelProgress,
   type ToolSpec,
 } from "@iris/agent";
+import { z } from "zod";
 
 /** The Workers AI model every user's agent thinks with. */
 export const WORKERS_AI_MODEL = "@cf/zai-org/glm-4.7-flash";
 
-/** One chat completion call to a Workers AI model that takes and returns the OpenAI-style format. */
-export type ChatCompletion = (input: {
+/**
+ * One streamed chat completion call to a Workers AI model that takes and returns the OpenAI-style
+ * format. The stream is server-sent events: `data: ` lines of chunks, ending with `data: [DONE]`.
+ */
+export type ChatCompletionStream = (input: {
   messages: ChatCompletionMessageParam[];
   tools?: ChatCompletionTool[];
-}) => Promise<ChatCompletionsOutput>;
+  stream: true;
+}) => Promise<ReadableStream>;
 
 /**
- * A `Model` backed by a Workers AI chat completions model. The Workers AI format stays in this
- * module. Rejects when the call does, and when the reply has no message or an empty one (no
- * text, refusal or tool call, as when the model runs out of tokens while reasoning).
+ * A `Model` backed by a Workers AI chat completions model, read as it streams: it reports
+ * thinking as soon as it is asked and while the model reasons, and writing with the text so far.
+ * The Workers AI format stays in this module. Rejects when the call or the stream does, on a chunk
+ * it can't read, when the stream ends before a finish reason (cut off), and when the reply has no
+ * message or an empty one (no text, refusal or tool call, as when the model runs out of tokens
+ * while reasoning).
  */
-export function createWorkersAiModel(complete: ChatCompletion): Model {
+export function createWorkersAiModel(complete: ChatCompletionStream): Model {
   return async (request) => {
-    const output = await complete({
+    const report = progressReporter(request.onProgress);
+    report({ type: "thinking" });
+    const stream = await complete({
       messages: [
         ...(request.system === undefined
           ? []
@@ -32,19 +43,161 @@ export function createWorkersAiModel(complete: ChatCompletion): Model {
       ],
       // Left out when empty: OpenAI-style APIs may reject an empty list of tools.
       ...(request.tools.length > 0 ? { tools: request.tools.map(toChatTool) } : {}),
+      stream: true,
     });
-    const choice = output.choices[0];
-    if (choice === undefined) {
-      throw new Error(`Workers AI model ${output.model} returned no message.`);
+    const reply = new Reply();
+    for await (const chunk of chunks(stream)) {
+      reply.add(chunk, report);
     }
-    const message = fromChatMessage(choice.message);
-    if (message.parts.length === 0) {
+    return reply.message();
+  };
+}
+
+/** Passes progress on, leaving out a report of thinking right after another. */
+function progressReporter(onProgress: ((progress: ModelProgress) => void) | undefined) {
+  let thinking = false;
+  return (progress: ModelProgress) => {
+    if (progress.type === "thinking" && thinking) {
+      return;
+    }
+    thinking = progress.type === "thinking";
+    onProgress?.(progress);
+  };
+}
+
+// The part of a chunk this module reads. A chunk without choices, such as the last one with only
+// the usage, adds nothing.
+const chunkSchema = z.object({
+  model: z.string().optional(),
+  choices: z
+    .array(
+      z.object({
+        delta: z
+          .object({
+            content: z.string().nullish(),
+            refusal: z.string().nullish(),
+            reasoning: z.string().nullish(),
+            reasoning_content: z.string().nullish(),
+            tool_calls: z
+              .array(
+                z.object({
+                  index: z.number(),
+                  id: z.string().nullish(),
+                  function: z
+                    .object({ name: z.string().nullish(), arguments: z.string().nullish() })
+                    .nullish(),
+                }),
+              )
+              .nullish(),
+          })
+          .nullish(),
+        finish_reason: z.string().nullish(),
+      }),
+    )
+    .optional(),
+});
+
+type Chunk = z.infer<typeof chunkSchema>;
+
+/** The chunks of a server-sent events stream, until `[DONE]` or the stream's end. */
+async function* chunks(stream: ReadableStream): AsyncGenerator<Chunk, void, undefined> {
+  let buffered = "";
+  for await (const text of stream.pipeThrough(new TextDecoderStream())) {
+    buffered += text;
+    const lines = buffered.split("\n");
+    buffered = lines.pop() ?? "";
+    for (const line of lines) {
+      const data = dataOf(line);
+      if (data === "[DONE]") {
+        return;
+      }
+      if (data !== undefined) {
+        yield chunkSchema.parse(JSON.parse(data));
+      }
+    }
+  }
+  const data = dataOf(buffered);
+  if (data !== undefined && data !== "[DONE]") {
+    yield chunkSchema.parse(JSON.parse(data));
+  }
+}
+
+/** What a `data:` line carries; undefined for any other line of the stream, or one that carries nothing. */
+function dataOf(line: string): string | undefined {
+  const trimmed = line.trim();
+  const data = trimmed.startsWith("data:") ? trimmed.slice("data:".length).trim() : "";
+  return data === "" ? undefined : data;
+}
+
+/** The assistant's message as its chunks add up. */
+class Reply {
+  private model = WORKERS_AI_MODEL;
+  private choices = 0;
+  private text = "";
+  private refusal = "";
+  private readonly calls = new Map<number, { id: string; name: string; arguments: string }>();
+  private finishReason: string | undefined;
+
+  add(chunk: Chunk, report: (progress: ModelProgress) => void): void {
+    this.model = chunk.model ?? this.model;
+    const choice = chunk.choices?.[0];
+    if (choice === undefined) {
+      return;
+    }
+    this.choices += 1;
+    this.finishReason = choice.finish_reason ?? this.finishReason;
+    const delta = choice.delta;
+    // Thinking means nothing of this message is written yet; reasoning after the text has begun is
+    // part of writing it.
+    if ((delta?.reasoning || delta?.reasoning_content) && this.text === "" && this.refusal === "") {
+      report({ type: "thinking" });
+    }
+    if (delta?.content || delta?.refusal) {
+      this.text += delta.content ?? "";
+      this.refusal += delta.refusal ?? "";
+      report({
+        type: "writing",
+        text: [this.text, this.refusal].filter((t) => t !== "").join("\n"),
+      });
+    }
+    for (const call of delta?.tool_calls ?? []) {
+      const sofar = this.calls.get(call.index) ?? { id: "", name: "", arguments: "" };
+      this.calls.set(call.index, {
+        id: call.id ?? sofar.id,
+        name: call.function?.name ?? sofar.name,
+        arguments: sofar.arguments + (call.function?.arguments ?? ""),
+      });
+    }
+  }
+
+  message(): AssistantMessage {
+    if (this.choices === 0) {
+      throw new Error(`Workers AI model ${this.model} returned no message.`);
+    }
+    if (this.finishReason === undefined) {
+      throw new Error(`Workers AI model ${this.model}'s reply stopped before it finished.`);
+    }
+    const parts: AssistantMessage["parts"] = [];
+    for (const text of [this.text, this.refusal]) {
+      if (text !== "") {
+        parts.push({ type: "text", text });
+      }
+    }
+    for (const [, call] of [...this.calls].toSorted(([a], [b]) => a - b)) {
+      parts.push({
+        type: "tool-call",
+        id: call.id,
+        name: call.name,
+        input: parseArguments(call.arguments),
+      });
+    }
+    if (parts.length === 0) {
       throw new Error(
-        `Workers AI model ${output.model} returned an empty message (finish reason: ${choice.finish_reason}).`,
+        `Workers AI model ${this.model} returned an empty message (finish reason: ${this.finishReason}).`,
       );
     }
-    return message;
-  };
+    return { role: "assistant", parts };
+  }
 }
 
 function toChatMessage(message: Message): ChatCompletionMessageParam {
@@ -83,29 +236,6 @@ function toChatTool(tool: ToolSpec): ChatCompletionTool {
     type: "function",
     function: { name: tool.name, description: tool.description, parameters },
   };
-}
-
-function fromChatMessage(message: ChatCompletionResponseMessage): AssistantMessage {
-  const parts: AssistantMessage["parts"] = [];
-  if (message.content !== null && message.content !== "") {
-    parts.push({ type: "text", text: message.content });
-  }
-  if (message.refusal !== null && message.refusal !== "") {
-    parts.push({ type: "text", text: message.refusal });
-  }
-  for (const call of message.tool_calls ?? []) {
-    parts.push(
-      call.type === "function"
-        ? {
-            type: "tool-call",
-            id: call.id,
-            name: call.function.name,
-            input: parseArguments(call.function.arguments),
-          }
-        : { type: "tool-call", id: call.id, name: call.custom.name, input: call.custom.input },
-    );
-  }
-  return { role: "assistant", parts };
 }
 
 /**

@@ -3,9 +3,13 @@ import { createUserAgent } from "../src/user-agent";
 
 /**
  * What the test model does on each call, in order: reply with a message, fail with an error, or
- * do something while the call is in flight and then reply.
+ * do something while the call is in flight (report progress, wait) and then reply.
  */
-export const scriptedModel: (AssistantMessage | Error | (() => AssistantMessage))[] = [];
+export const scriptedModel: (
+  | AssistantMessage
+  | Error
+  | ((request: ModelRequest) => AssistantMessage | Promise<AssistantMessage>)
+)[] = [];
 
 /** The requests the test model was called with, in order. */
 export const modelRequests: ModelRequest[] = [];
@@ -19,7 +23,7 @@ const model: Model = async (request) => {
   if (next instanceof Error) {
     throw next;
   }
-  return typeof next === "function" ? next() : next;
+  return typeof next === "function" ? next(request) : next;
 };
 
 export const testAgent = { model, tools: [] };

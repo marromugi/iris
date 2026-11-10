@@ -6,7 +6,7 @@ import {
   type ToolResultMessage,
   toolCalls,
 } from "./message";
-import type { Model, ToolSpec } from "./model";
+import type { Model, ModelProgress, ToolSpec } from "./model";
 import type { Tool } from "./tool";
 
 /** How many messages one `run` adds at most, so a model that keeps calling tools can't run forever. */
@@ -20,6 +20,8 @@ export interface Agent {
 
 export interface RunOptions {
   readonly maxSteps?: number;
+  /** Hears how the model is getting on with each message it writes, before the message is yielded. */
+  readonly onProgress?: (progress: ModelProgress) => void;
 }
 
 export type NextAction =
@@ -72,6 +74,7 @@ export function nextAction(messages: readonly Message[]): NextAction {
 export async function step(
   agent: Agent,
   messages: readonly Message[],
+  onProgress?: (progress: ModelProgress) => void,
 ): Promise<Message | undefined> {
   const tools = toolsByName(agent.tools);
   const action = nextAction(messages);
@@ -83,6 +86,7 @@ export async function step(
       system: agent.system,
       messages,
       tools: [...tools.values()].map(toolSpec),
+      ...(onProgress === undefined ? {} : { onProgress }),
     });
     const parsed = assistantMessageSchema.safeParse(reply);
     if (!parsed.success) {
@@ -113,7 +117,7 @@ export async function* run(
   // Each step gets a new array, so a conversation already handed to the model never changes.
   let conversation = messages;
   for (let count = 0; count < maxSteps; count += 1) {
-    const message = await step(agent, conversation);
+    const message = await step(agent, conversation, options.onProgress);
     if (message === undefined) {
       return;
     }

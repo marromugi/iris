@@ -1,4 +1,4 @@
-import { type Agent, type Message, nextAction, run } from "@iris/agent";
+import { type Agent, type Message, type ModelProgress, nextAction, run } from "@iris/agent";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 
@@ -13,6 +13,38 @@ export const MAX_FAILED_ATTEMPTS = 3;
 
 /** How many messages of the agent's earlier runs the model reads at most, before the run's own. */
 export const MAX_EARLIER_MESSAGES = 40;
+
+/** How a run is getting on while it is carried on: picked up, then the model's progress on each message. */
+export type RunProgress = { readonly type: "starting" } | ModelProgress;
+
+/** Hears what happens to runs while `runNext` works, for anyone watching them as they happen. */
+export interface RunWatcher {
+  /** A run started, got a message, or ended or failed an attempt; read it again to see how. */
+  changed(runId: string): void;
+  progress(runId: string, progress: RunProgress): void;
+}
+
+const nobodyWatching: RunWatcher = { changed() {}, progress() {} };
+
+/** The watcher with its failures logged instead of thrown: watching a run never changes how the run goes. */
+function safely(watcher: RunWatcher): RunWatcher {
+  return {
+    changed(runId) {
+      try {
+        watcher.changed(runId);
+      } catch (error) {
+        console.error(`Telling the watcher that run ${runId} changed failed.`, error);
+      }
+    },
+    progress(runId, progress) {
+      try {
+        watcher.progress(runId, progress);
+      } catch (error) {
+        console.error(`Telling the watcher how run ${runId} is getting on failed.`, error);
+      }
+    },
+  };
+}
 
 /**
  * Does one piece of work that is due, then returns when to wake up next (a time already passed
@@ -32,10 +64,12 @@ export async function runNext(
   storage: DurableObjectStorage,
   agent: Agent,
   now: () => Date,
+  watching: RunWatcher = nobodyWatching,
 ): Promise<Date | undefined> {
+  const watcher = safely(watching);
   const due = store.nextDueRun(storage, now());
   if (due !== undefined) {
-    await carryOn(storage, agent, due, now);
+    await carryOn(storage, agent, due, now, watcher);
     return nextWakeAt(storage);
   }
   const task = store.nextDueTask(storage, now());
@@ -49,8 +83,9 @@ export async function runNext(
       startedAt,
       task: { id: task.id, nextRunAt: nextRunAt(task.schedule, startedAt) },
     });
+    watcher.changed(runId);
     if (store.nextDueRun(storage, startedAt) === runId) {
-      await carryOn(storage, agent, runId, now);
+      await carryOn(storage, agent, runId, now, watcher);
     }
   }
   return nextWakeAt(storage);
@@ -92,8 +127,10 @@ async function carryOn(
   agent: Agent,
   runId: string,
   now: () => Date,
+  watcher: RunWatcher,
 ): Promise<void> {
   store.postponeRun(storage, runId, new Date(now().getTime() + RETRY_DELAY_MS));
+  watcher.progress(runId, { type: "starting" });
   try {
     const earlier = earlierMessages(
       store.earlierConversations(storage, runId),
@@ -101,11 +138,14 @@ async function carryOn(
     );
     const conversation = store.loadConversation(storage, runId);
     let seq = conversation.length;
-    for await (const message of run(agent, [...earlier, ...conversation])) {
+    const onProgress = (progress: ModelProgress) => watcher.progress(runId, progress);
+    for await (const message of run(agent, [...earlier, ...conversation], { onProgress })) {
       store.appendMessage(storage, runId, seq, message);
       seq += 1;
+      watcher.changed(runId);
     }
     store.endRun(storage, runId, now());
+    watcher.changed(runId);
   } catch (error) {
     const failedAt = now();
     const failed = store.recordRunFailure(storage, runId, {
@@ -118,5 +158,6 @@ async function carryOn(
     } else {
       console.error(`Run ${runId} failed and will be tried again later.`, error);
     }
+    watcher.changed(runId);
   }
 }

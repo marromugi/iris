@@ -26,5 +26,5 @@ export {
   type UserMessage,
   userMessageSchema,
 } from "./message";
-export type { Model, ModelRequest, ToolSpec } from "./model";
+export type { Model, ModelProgress, ModelRequest, ToolSpec } from "./model";
 export { defineTool, type Tool, type ToolOutcome } from "./tool";

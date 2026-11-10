@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { z } from "zod";
 import { type Agent, nextAction, run } from "./agent";
 import type { AssistantMessage, Message, ToolCallPart } from "./message";
-import type { Model, ModelRequest } from "./model";
+import type { Model, ModelProgress, ModelRequest } from "./model";
 import { defineTool } from "./tool";
 
 async function collect(messages: AsyncIterable<Message>): Promise<Message[]> {
@@ -71,6 +71,22 @@ test("ends when the assistant replies without calling a tool", async () => {
   const added = await collect(run({ model, tools: [] }, [user("Hi")]));
 
   expect(added).toEqual([reply("Hello!")]);
+});
+
+const reportingModel: Model = async (request) => {
+  request.onProgress?.({ type: "thinking" });
+  request.onProgress?.({ type: "writing", text: "Hel" });
+  return reply("Hello.");
+};
+
+test("passes the model's progress on as it writes each message", async () => {
+  const heard: ModelProgress[] = [];
+
+  await collect(
+    run({ model: reportingModel, tools: [] }, [user("Hi")], { onProgress: (p) => heard.push(p) }),
+  );
+
+  expect(heard).toEqual([{ type: "thinking" }, { type: "writing", text: "Hel" }]);
 });
 
 test("runs a called tool with its parsed input and sends the result back to the model", async () => {
