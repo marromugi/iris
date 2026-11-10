@@ -8,7 +8,7 @@
     final class FakeAgentBackend: AgentBackend {
         struct Answers: Sendable {
             var tasks = [Samples.newsTask, Samples.weatherTask]
-            var runs = [Samples.weatherRun, Samples.retryingRun, Samples.gaveUpRun]
+            var runs = [Samples.mailRun, Samples.weatherRun, Samples.retryingRun, Samples.gaveUpRun]
             var failure: AppError?
             /// When a task added here runs next.
             var nextRunAt = Samples.moment("2026-11-12T00:00:00Z")
@@ -50,10 +50,10 @@
             }
         }
 
-        func recentRuns() async throws(AppError) -> [Run] {
+        func recentRuns(limit: Int) async throws(AppError) -> [Run] {
             try answers.withLock { answers throws(AppError) in
                 if let failure = answers.failure { throw failure }
-                return answers.runs
+                return Array(answers.runs.prefix(limit))
             }
         }
     }

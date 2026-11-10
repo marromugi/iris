@@ -124,7 +124,7 @@ private actor HeldReads: AgentBackend {
 
     func addTask(_ task: NewTask) async throws(AppError) -> ScheduledTask { try await backend.addTask(task) }
     func removeTask(id: String) async throws(AppError) { try await backend.removeTask(id: id) }
-    func recentRuns() async throws(AppError) -> [Run] { try await backend.recentRuns() }
+    func recentRuns(limit: Int) async throws(AppError) -> [Run] { try await backend.recentRuns(limit: limit) }
 }
 
 extension Loadable {

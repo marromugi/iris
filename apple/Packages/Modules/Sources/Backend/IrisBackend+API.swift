@@ -34,9 +34,9 @@ extension IrisBackend {
         }
     }
 
-    /// The user's latest runs first, as many as the server sends by default, each with its conversation.
-    public func recentRuns() async throws(AppError) -> [Run] {
-        switch try await call({ try await client.recentRuns() }) {
+    /// The user's latest `limit` runs, latest first, each with its conversation. The server takes 1 to 100.
+    public func recentRuns(limit: Int) async throws(AppError) -> [Run] {
+        switch try await call({ try await client.recentRuns(query: .init(limit: limit)) }) {
         case .ok(let ok): return try decoded { try ok.body.json }
         case .badRequest(let refused): throw try refusal { try refused.body.json }
         case .internalServerError(let failed): throw try refusal { try failed.body.json }

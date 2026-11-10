@@ -2,22 +2,22 @@ import AuthenticationServices
 import Backend
 import SwiftUI
 
-/// The whole app: the sign-in until the user is signed in, then their tasks and runs.
+/// The whole app: the sign-in until the user is signed in, then their agents.
 public struct IrisRoot: View {
     // Both kept from the first time the view is made, so the session and the screens share one sign-in.
     @State private var session: Session
-    @State private var agent: any AgentBackend
+    @State private var agents: any AgentDirectory
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
 
     /// The app against the server at `origin`, keeping the sign-in in the Keychain.
     public init(origin: URL) {
         let backend = IrisBackend(origin: origin, store: KeychainCredentialStore())
-        self.init(session: Session(backend: backend), agent: backend)
+        self.init(session: Session(backend: backend), agents: SingleAgentDirectory(backend: backend))
     }
 
-    init(session: Session, agent: any AgentBackend) {
+    init(session: Session, agents: any AgentDirectory) {
         _session = State(initialValue: session)
-        _agent = State(initialValue: agent)
+        _agents = State(initialValue: agents)
     }
 
     public var body: some View {
@@ -35,8 +35,10 @@ public struct IrisRoot: View {
                 session.signIn(authenticate: authenticate)
             }
         case .signedIn:
-            MainTabs(agent: agent) {
-                Task { await session.signOut() }
+            NavigationStack {
+                HomeScreen(directory: agents) {
+                    Task { await session.signOut() }
+                }
             }
         }
     }

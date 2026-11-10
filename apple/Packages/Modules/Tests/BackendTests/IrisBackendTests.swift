@@ -142,7 +142,7 @@ struct IrisBackendTests {
         let later = backend(now: signedInAt.addingTimeInterval(3600))
 
         async let first = later.tasks()
-        async let second = later.recentRuns()
+        async let second = later.recentRuns(limit: 20)
         _ = try await (first, second)
 
         let refreshes = await server.requests.filter { $0.url?.path == "/token" }.count - 1
@@ -182,11 +182,11 @@ struct IrisBackendTests {
         #expect(try await backend.tasks().isEmpty)
     }
 
-    @Test func readsRunsWithTheirConversations() async throws {
+    @Test func readsAsManyRunsAsAskedWithTheirConversations() async throws {
         let backend = backend()
         try await signIn(backend)
 
-        let runs = try await backend.recentRuns()
+        let runs = try await backend.recentRuns(limit: 1)
 
         let run = try #require(runs.first)
         #expect(run.endedAt == Date(timeIntervalSince1970: 1_794_261_607))
@@ -198,6 +198,7 @@ struct IrisBackendTests {
         #expect(call.name == "weather")
         #expect(call.input?.value as? [String: String] == ["city": "Tokyo"])
         #expect(run.messages.count == 4)
+        #expect(await server.requests.last { $0.url?.path == "/api/runs" }?.url?.query == "limit=1")
     }
 
     @Test func aCallWithoutASignInIsSignedOut() async throws {
