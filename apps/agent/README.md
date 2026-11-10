@@ -1,6 +1,6 @@
 # agent（iris の Worker）
 
-ユーザーごとのエージェントを動かす Cloudflare Worker。ユーザー 1 人に Durable Object（`UserAgent`）が 1 つあり、その人のタスクと実行の記録を持つ。アプリは `/api` で読み書きする。`/api` の定義は `openapi.json` に書き出してあり、アプリのクライアントはここから作る。
+ユーザーごとのエージェントを動かす Cloudflare Worker。ユーザー 1 人に Durable Object（`UserAgent`）が 1 つあり、その人のエージェントと、エージェントごとのタスクと実行の記録を持つ。はじめは誰でもエージェントを 1 つ持っている。アプリは `/api` で読み書きする。`/api` の定義は `openapi.json` に書き出してあり、アプリのクライアントはここから作る。
 
 ## サインイン
 

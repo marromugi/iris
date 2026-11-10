@@ -1,7 +1,14 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const agents = sqliteTable("agents", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull(),
   prompt: text("prompt").notNull(),
   cron: text("cron").notNull(),
   timeZone: text("time_zone").notNull(),
@@ -10,6 +17,7 @@ export const tasks = sqliteTable("tasks", {
 
 export const runs = sqliteTable("runs", {
   id: text("id").primaryKey(),
+  agentId: text("agent_id").notNull(),
   taskId: text("task_id"),
   startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
   endedAt: integer("ended_at", { mode: "timestamp_ms" }),

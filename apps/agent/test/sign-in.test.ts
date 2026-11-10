@@ -43,7 +43,11 @@ describe("a new user", () => {
     const sheet = await openSignInSheet();
     const registered = await sheet.register(phone, key);
     const tokens = await sheet.finish(registered.body.redirectTo);
-    const added = await callApi(sheet.call, tokens.access_token, "/tasks", {
+    const [agent]: { id: string }[] = await (
+      await callApi(sheet.call, tokens.access_token, "/agents")
+    ).json();
+    const tasks = `/agents/${agent?.id}/tasks`;
+    const added = await callApi(sheet.call, tokens.access_token, tasks, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -51,7 +55,7 @@ describe("a new user", () => {
         schedule: { cron: "0 8 * * *", timeZone: "Asia/Tokyo" },
       }),
     });
-    const listed = await callApi(sheet.call, tokens.access_token, "/tasks");
+    const listed = await callApi(sheet.call, tokens.access_token, tasks);
     const refreshed = await sheet.refresh(tokens.refresh_token);
 
     expect(sheet.page).toContain("パスキーでサインイン");

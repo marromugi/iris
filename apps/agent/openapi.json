@@ -3,7 +3,7 @@
   "info": {
     "title": "iris",
     "version": "1",
-    "description": "A user's scheduled tasks and their runs. Errors are { message }, except 401, which comes from the OAuth layer."
+    "description": "A user's agents, with each one's scheduled tasks and their runs. Errors are { message }, except 401, which comes from the OAuth layer."
   },
   "servers": [
     {
@@ -56,6 +56,44 @@
         },
         "required": [
           "message"
+        ]
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "lastRanAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When its latest run started; null until it first runs"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "lastRanAt"
+        ]
+      },
+      "NewAgent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50
+          }
+        },
+        "required": [
+          "name"
         ]
       },
       "Task": {
@@ -337,18 +375,18 @@
         }
       }
     },
-    "/api/tasks": {
+    "/api/agents": {
       "get": {
-        "operationId": "listTasks",
+        "operationId": "listAgents",
         "responses": {
           "200": {
-            "description": "The user's tasks, the next to run first",
+            "description": "The user's agents in the order they were added",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Task"
+                    "$ref": "#/components/schemas/Agent"
                   }
                 }
               }
@@ -380,24 +418,24 @@
         }
       },
       "post": {
-        "operationId": "addTask",
+        "operationId": "addAgent",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NewTask"
+                "$ref": "#/components/schemas/NewAgent"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "The task added",
+            "description": "The agent added",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Task"
+                  "$ref": "#/components/schemas/Agent"
                 }
               }
             }
@@ -448,10 +486,182 @@
         }
       }
     },
-    "/api/tasks/{taskId}": {
+    "/api/agents/{agentId}/tasks": {
+      "get": {
+        "operationId": "listTasks",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent's tasks, the next to run first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Task"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No agent of this user has this ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addTask",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewTask"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The task added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No agent of this user has this ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body isn't sent as application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agentId}/tasks/{taskId}": {
       "delete": {
         "operationId": "removeTask",
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          },
           {
             "schema": {
               "type": "string",
@@ -490,7 +700,7 @@
             }
           },
           "404": {
-            "description": "No task of this user has this ID",
+            "description": "No agent of this user has this ID, or No task of this agent has this ID",
             "content": {
               "application/json": {
                 "schema": {
@@ -512,10 +722,19 @@
         }
       }
     },
-    "/api/runs": {
+    "/api/agents/{agentId}/runs": {
       "get": {
         "operationId": "recentRuns",
         "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          },
           {
             "schema": {
               "type": "integer",
@@ -530,7 +749,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The user's latest runs first, each with its conversation",
+            "description": "The agent's latest runs first, each with its conversation",
             "content": {
               "application/json": {
                 "schema": {
@@ -557,6 +776,16 @@
           },
           "403": {
             "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No agent of this user has this ID",
             "content": {
               "application/json": {
                 "schema": {

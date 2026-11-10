@@ -1,8 +1,8 @@
 import { type Message, messageSchema } from "@iris/agent";
-import { asc, desc, eq, isNull, lte, min, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, lte, max, min, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import migrations from "../drizzle/migrations";
-import { messages, runs, tasks } from "./db/schema";
+import { agents, messages, runs, tasks } from "./db/schema";
 import type { Schedule } from "./schedule";
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
@@ -12,8 +12,16 @@ function database(storage: DurableObjectStorage) {
   return drizzle(storage);
 }
 
+/** One of the user's agents, with when its latest run started (null until it first runs). */
+export interface Agent {
+  readonly id: string;
+  readonly name: string;
+  readonly lastRanAt: Date | null;
+}
+
 export interface Task {
   readonly id: string;
+  readonly agentId: string;
   readonly prompt: string;
   readonly schedule: Schedule;
   readonly nextRunAt: Date;
@@ -65,9 +73,37 @@ function migrationText(index: number): string | undefined {
   return sqlByKey[`m${index.toString().padStart(4, "0")}`];
 }
 
+export function insertAgent(
+  storage: DurableObjectStorage,
+  agent: { id: string; name: string; createdAt: Date },
+): void {
+  database(storage).insert(agents).values(agent).run();
+}
+
+/** The user's agents in the order they were added. */
+export function listAgents(storage: DurableObjectStorage): Agent[] {
+  return database(storage)
+    .select({ id: agents.id, name: agents.name, lastRanAt: max(runs.startedAt) })
+    .from(agents)
+    .leftJoin(runs, eq(runs.agentId, agents.id))
+    .groupBy(agents.id)
+    .orderBy(asc(agents.createdAt), asc(agents.id))
+    .all();
+}
+
+export function hasAgent(storage: DurableObjectStorage, id: string): boolean {
+  const row = database(storage)
+    .select({ id: agents.id })
+    .from(agents)
+    .where(eq(agents.id, id))
+    .get();
+  return row !== undefined;
+}
+
 function toTask(row: typeof tasks.$inferSelect): Task {
   return {
     id: row.id,
+    agentId: row.agentId,
     prompt: row.prompt,
     schedule: { cron: row.cron, timeZone: row.timeZone },
     nextRunAt: row.nextRunAt,
@@ -79,6 +115,7 @@ export function insertTask(storage: DurableObjectStorage, task: Task): void {
     .insert(tasks)
     .values({
       id: task.id,
+      agentId: task.agentId,
       prompt: task.prompt,
       cron: task.schedule.cron,
       timeZone: task.schedule.timeZone,
@@ -87,24 +124,28 @@ export function insertTask(storage: DurableObjectStorage, task: Task): void {
     .run();
 }
 
-/** Deletes the task and says whether there was one. Runs it already started stay. */
-export function deleteTask(storage: DurableObjectStorage, id: string): boolean {
-  return (
-    database(storage).delete(tasks).where(eq(tasks.id, id)).returning({ id: tasks.id }).all()
-      .length > 0
-  );
+/** Deletes the agent's task and says whether it had one. Runs it already started stay. */
+export function deleteTask(storage: DurableObjectStorage, agentId: string, id: string): boolean {
+  const deleted = database(storage)
+    .delete(tasks)
+    .where(and(eq(tasks.agentId, agentId), eq(tasks.id, id)))
+    .returning({ id: tasks.id })
+    .all();
+  return deleted.length > 0;
 }
 
-export function listTasks(storage: DurableObjectStorage): Task[] {
+/** The agent's tasks, the next to run first. */
+export function listTasks(storage: DurableObjectStorage, agentId: string): Task[] {
   return database(storage)
     .select()
     .from(tasks)
+    .where(eq(tasks.agentId, agentId))
     .orderBy(asc(tasks.nextRunAt), asc(tasks.id))
     .all()
     .map(toTask);
 }
 
-/** The task whose run time came first, among those due by `now`. */
+/** The task whose run time came first, among every agent's tasks due by `now`. */
 export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | undefined {
   const row = database(storage)
     .select()
@@ -117,8 +158,8 @@ export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | un
 }
 
 /**
- * Starts a run of the task with its prompt as the first message, and moves the task to its next
- * run time, in one transaction: a task is never started twice for the same time.
+ * Starts a run of the task, for the task's agent, with its prompt as the first message, and moves
+ * the task to its next run time, in one transaction: a task is never started twice for the same time.
  */
 export function startRun(
   storage: DurableObjectStorage,
@@ -126,7 +167,14 @@ export function startRun(
 ): void {
   database(storage).transaction((tx) => {
     tx.update(tasks).set({ nextRunAt: run.taskNextRunAt }).where(eq(tasks.id, run.task.id)).run();
-    tx.insert(runs).values({ id: run.id, taskId: run.task.id, startedAt: run.startedAt }).run();
+    tx.insert(runs)
+      .values({
+        id: run.id,
+        agentId: run.task.agentId,
+        taskId: run.task.id,
+        startedAt: run.startedAt,
+      })
+      .run();
     tx.insert(messages)
       .values(messageRow(run.id, 0, { role: "user", text: run.task.prompt }))
       .run();
@@ -229,11 +277,12 @@ export interface Run {
   readonly messages: Message[];
 }
 
-/** The latest runs first, each with its conversation. */
-export function recentRuns(storage: DurableObjectStorage, limit: number): Run[] {
+/** The agent's latest runs first, each with its conversation. */
+export function recentRuns(storage: DurableObjectStorage, agentId: string, limit: number): Run[] {
   return database(storage)
     .select()
     .from(runs)
+    .where(eq(runs.agentId, agentId))
     .orderBy(desc(runs.startedAt), asc(runs.id))
     .limit(limit)
     .all()

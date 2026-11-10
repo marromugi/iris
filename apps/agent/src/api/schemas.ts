@@ -7,7 +7,7 @@ import {
   userMessageSchema,
 } from "@iris/agent";
 import { scheduleSchema } from "../schedule";
-import type { Run, Task } from "../store";
+import type { Agent, Run, Task } from "../store";
 
 /** A response body in JSON with the given schema. */
 export function json<S extends z.ZodType>(schema: S, description: string) {
@@ -21,6 +21,24 @@ function timeJson(time: Date): string {
   return time.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
+export const agentSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    lastRanAt: timeSchema
+      .nullable()
+      .meta({ description: "When its latest run started; null until it first runs" }),
+  })
+  .meta({ id: "Agent" });
+
+export function agentJson(agent: Agent): z.infer<typeof agentSchema> {
+  return {
+    id: agent.id,
+    name: agent.name,
+    lastRanAt: agent.lastRanAt === null ? null : timeJson(agent.lastRanAt),
+  };
+}
+
 export const taskSchema = z
   .object({
     id: z.uuid(),
@@ -31,7 +49,12 @@ export const taskSchema = z
   .meta({ id: "Task" });
 
 export function taskJson(task: Task): z.infer<typeof taskSchema> {
-  return { ...task, nextRunAt: timeJson(task.nextRunAt) };
+  return {
+    id: task.id,
+    prompt: task.prompt,
+    schedule: task.schedule,
+    nextRunAt: timeJson(task.nextRunAt),
+  };
 }
 
 // An assistant message's part types as @iris/agent defines them. Typed as exactly these two, so
