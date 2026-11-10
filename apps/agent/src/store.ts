@@ -545,18 +545,20 @@ export function recentRuns(storage: DurableObjectStorage, threadId: string, limi
     .map((row) => toRun(storage, row));
 }
 
-/** One thing said in a thread before a run, as the run's model reads it, with where it goes in time. */
-type Earlier = { readonly at: Date; readonly order: number; readonly messages: Message[] };
-
 /**
- * What was said in the run's thread before it, as its agent reads it, the latest first; each
- * entry is kept whole. A post is the user's message. A run of the same agent that ended with a
- * reply is its whole conversation, without the post it replies to, which comes on its own. A run
- * of another agent that ended with a reply is that reply as a user message after the agent's
- * name. Runs without a reply, given up or stopped at their step limit, are passed over. Only what
- * came before the run started counts, so replies to the same post don't read each other.
+ * What was said in the run's thread before it, as its agent reads it, the latest first, each
+ * entry to be kept whole. An entry is a post together with the replies to it that ended with
+ * one, or a run a task started that ended with a reply. The agent's own reply is its
+ * conversation (without the post, which comes first); another agent's is its reply as a user
+ * message after the agent's name. A post without such a reply, and a run without one (given up,
+ * or stopped at its step limit), are passed over. Only what came before the run started counts,
+ * so replies to the same post don't read each other. Conversations are read from storage only
+ * when the caller asks for their entry.
  */
-export function earlierInThread(storage: DurableObjectStorage, runId: string): Message[][] {
+export function* earlierInThread(
+  storage: DurableObjectStorage,
+  runId: string,
+): Generator<Message[], void, undefined> {
   const db = database(storage);
   const run = db
     .select({ agentId: runs.agentId, threadId: runs.threadId, startedAt: runs.startedAt })
@@ -567,45 +569,60 @@ export function earlierInThread(storage: DurableObjectStorage, runId: string): M
     throw new Error(`There is no run ${runId} to read the earlier part of the thread for.`);
   }
   const agentNames = new Map(listAgents(storage).map((agent) => [agent.id, agent.name]));
-  const earlier: Earlier[] = db
-    .select()
-    .from(posts)
-    .where(and(eq(posts.threadId, run.threadId), lt(posts.createdAt, run.startedAt)))
-    .all()
-    .map((post) => ({
-      at: post.createdAt,
-      order: 0,
-      messages: [{ role: "user", text: post.text }],
-    }));
-  for (const row of db
-    .select()
+  const earlierRunRows = db
+    .select({
+      id: runs.id,
+      agentId: runs.agentId,
+      postId: runs.postId,
+      startedAt: runs.startedAt,
+      endedAt: runs.endedAt,
+    })
     .from(runs)
     .where(and(eq(runs.threadId, run.threadId), lt(runs.startedAt, run.startedAt)))
-    .all()) {
+    .orderBy(asc(runs.endedAt), asc(runs.id))
+    .all();
+  type EarlierRun = (typeof earlierRunRows)[number];
+  const entries: ({ at: Date } & ({ post: Post; replies: EarlierRun[] } | { run: EarlierRun }))[] =
+    db
+      .select()
+      .from(posts)
+      .where(and(eq(posts.threadId, run.threadId), lt(posts.createdAt, run.startedAt)))
+      .all()
+      .map((post) => ({
+        at: post.createdAt,
+        post,
+        replies: earlierRunRows.filter((row) => row.postId === post.id),
+      }));
+  for (const row of earlierRunRows) {
+    if (row.postId === null) {
+      entries.push({ at: row.startedAt, run: row });
+    }
+  }
+  /** The run as the agent reads it, or undefined when it didn't end with a reply. */
+  const read = (row: EarlierRun): Message[] | undefined => {
     const conversation = loadConversation(storage, row.id);
     if (conversation.length === 0 || nextAction(conversation).type !== "done") {
+      return undefined;
+    }
+    if (row.agentId !== run.agentId) {
+      const name = agentNames.get(row.agentId) ?? "";
+      return [{ role: "user", text: `${name}: ${replyText(conversation)}` }];
+    }
+    return row.postId === null ? conversation : conversation.slice(1);
+  };
+  for (const entry of entries.toSorted((a, b) => b.at.getTime() - a.at.getTime())) {
+    if ("run" in entry) {
+      const messagesRead = read(entry.run);
+      if (messagesRead !== undefined) {
+        yield messagesRead;
+      }
       continue;
     }
-    const own = row.agentId === run.agentId;
-    const messagesRead: Message[] = own
-      ? row.postId === null
-        ? conversation
-        : conversation.slice(1)
-      : [
-          {
-            role: "user",
-            text: `${agentNames.get(row.agentId) ?? ""}: ${replyText(conversation)}`,
-          },
-        ];
-    earlier.push({
-      at: row.startedAt,
-      order: (row.endedAt ?? row.startedAt).getTime(),
-      messages: messagesRead,
-    });
+    const replies = entry.replies.flatMap((reply) => read(reply) ?? []);
+    if (replies.length > 0) {
+      yield [{ role: "user", text: entry.post.text }, ...replies];
+    }
   }
-  return earlier
-    .toSorted((a, b) => b.at.getTime() - a.at.getTime() || b.order - a.order)
-    .map((entry) => entry.messages);
 }
 
 /** The text of a finished conversation's last message. */

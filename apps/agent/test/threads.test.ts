@@ -152,3 +152,25 @@ test("a thread's entries are its posts and runs, the latest first, each post aft
   ).toEqual([sent.runs[0]?.agentId, "@メール 今日は？"]);
   expect(await userAgent().threadEntries(crypto.randomUUID(), 10)).toBeUndefined();
 });
+
+/** A time on one morning, by its minute. */
+const at = (minute: number) => new Date(Date.UTC(2026, 10, 10, 8, minute));
+
+test("a post is read together with its replies, and passed over when none ended with one", async () => {
+  const [first] = await userAgent().listAgents();
+  const agentId = first?.id ?? "";
+  const read = await runInDurableObject(userAgent(), (_, state) => {
+    const threadId = store.agentThreadId(state.storage, agentId) ?? "";
+    const send = (id: string, text: string, minute: number) =>
+      store.insertPost(state.storage, { id, threadId, text, createdAt: at(minute) }, [agentId]);
+    const [answered = ""] = send("answered", "X", 0);
+    store.appendMessage(state.storage, answered, 1, reply("Answer to X."));
+    store.endRun(state.storage, answered, at(1));
+    const [givenUp = ""] = send("given-up", "Y", 2);
+    store.giveUpRun(state.storage, givenUp, at(3));
+    const [current = ""] = send("current", "Z", 4);
+    return [...store.earlierInThread(state.storage, current)];
+  });
+
+  expect(read).toEqual([[{ role: "user", text: "X" }, reply("Answer to X.")]]);
+});

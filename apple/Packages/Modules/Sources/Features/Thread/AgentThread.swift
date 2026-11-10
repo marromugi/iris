@@ -137,6 +137,9 @@ final class AgentThread {
             place(changed.run)
         case .case2(let getting):
             progress[getting.runId] = getting.progress
+        case .case3:
+            // Posts come only on a thread's socket, not the agent's this screen opens.
+            break
         }
     }
 
