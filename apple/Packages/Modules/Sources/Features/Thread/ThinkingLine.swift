@@ -2,19 +2,29 @@ import Backend
 import SwiftUI
 
 /// Where the agent's reply is about to go, while the run waits to start, starts, or thinks: the moving blob, then a
-/// phrase that fades out, changes while nothing shows, and fades back in. With Reduce Motion the first phrase stays.
+/// phrase that fades out, changes while nothing shows, and fades back in, the status's own name first. With Reduce
+/// Motion the name stays. A new status starts the line over, so nothing changes while it shows.
 struct ThinkingLine: View {
     /// `.running`, `.starting` or `.thinking`; it sets the phrases and how lively the blob is.
     let status: RunStatus
+
+    private static let waiting = PhraseFader(phrases: ThinkingPhrases.waiting)
+    private static let starting = PhraseFader(phrases: ThinkingPhrases.starting)
+    private static let thinking = PhraseFader(phrases: ThinkingPhrases.thinking)
 
     @State private var startedAt = Date()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let fader = PhraseFader(phrases: [status.label] + Self.phrases(for: status))
+        let fader =
+            switch status {
+            case .thinking: Self.thinking
+            case .starting: Self.starting
+            default: Self.waiting
+            }
         HStack(spacing: 8) {
             ThinkingBlob(energy: status == .thinking ? 1 : 0.4)
-            TimelineView(.animation(paused: reduceMotion)) { timeline in
+            TimelineView(PeriodicTimelineSchedule(from: startedAt, by: reduceMotion ? 3600 : 1.0 / 30)) { timeline in
                 let frame =
                     reduceMotion
                     ? (text: fader.phrase(at: 0), opacity: 1)
@@ -29,16 +39,12 @@ struct ThinkingLine: View {
         .accessibilityLabel(status.label)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-
-    private static func phrases(for status: RunStatus) -> [String] {
-        let phrases = status == .thinking ? ThinkingPhrases.thinking : ThinkingPhrases.starting
-        return phrases.filter { $0 != status.label }
-    }
 }
 
 #if DEBUG
     #Preview {
         VStack(alignment: .leading, spacing: 24) {
+            ThinkingLine(status: .running)
             ThinkingLine(status: .starting)
             ThinkingLine(status: .thinking)
         }

@@ -24,10 +24,15 @@ struct PhraseFader: Equatable {
     }
 
     /// The phrase of the `turn`th showing: steps of a stride that shares no factor with the count, so each comes once
-    /// per round.
+    /// per round, and that isn't one step either way, so the order scatters. Too few phrases for such a stride go in
+    /// order.
     func phrase(at turn: Int) -> String {
         let count = phrases.count
-        let stride = [37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3].first { count % $0 != 0 } ?? 1
+        guard count > 0, turn >= 0 else { return "" }
+        let stride =
+            [37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3].first { prime in
+                count % prime != 0 && prime % count != 1 && prime % count != count - 1
+            } ?? 1
         return phrases[(turn % count) * stride % count]
     }
 }

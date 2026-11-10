@@ -13,6 +13,8 @@ struct PhraseFaderTests {
             (100, "a", 1.0),
             (1100, "a", 1.0),
             (1150, "a", 0.5),
+            (1199, "a", 0.01),
+            (1200, "b", 0.0),
             (1250, "b", 0.5),
         ] as [(Int, String, Double)])
     func fadesInStaysAndFadesOutChangingOnlyWhileNothingShows(milliseconds: Int, text: String, opacity: Double) {
@@ -31,10 +33,22 @@ struct PhraseFaderTests {
         #expect(firstRound.first == "p0")
         #expect(Set(firstRound).count == 100)
         #expect(fader.phrase(at: 100) == "p0")
+        #expect(firstRound.prefix(3) != ["p0", "p1", "p2"])
+    }
+
+    @Test func scattersAFewPhrasesTooWhenTheCountAllowsIt() {
+        let fader = PhraseFader(phrases: (0..<10).map { "p\($0)" })
+
+        let firstRound = (0..<10).map { fader.phrase(at: $0) }
+
+        #expect(Set(firstRound).count == 10)
+        #expect(firstRound.prefix(3) != ["p0", "p1", "p2"])
+        #expect(firstRound.prefix(3) != ["p0", "p9", "p8"])
     }
 
     @Test func thereAreAHundredDifferentThinkingPhrases() {
         #expect(Set(ThinkingPhrases.thinking).count == 100)
         #expect(ThinkingPhrases.thinking.count == 100)
+        #expect(ThinkingPhrases.thinking.first == RunStatus.thinking.label)
     }
 }

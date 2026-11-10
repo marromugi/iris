@@ -24,6 +24,7 @@ struct RunView: View {
             switch status {
             case .running, .starting, .thinking:
                 ThinkingLine(status: status)
+                    .id(status)
             default:
                 if case .case3(let writing)? = progress {
                     Text(writing.text)
