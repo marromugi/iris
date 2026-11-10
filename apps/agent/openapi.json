@@ -3,7 +3,7 @@
   "info": {
     "title": "iris",
     "version": "1",
-    "description": "A user's agents, which they can add, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent)."
+    "description": "A user's agents, which they can add, and their threads: each agent's one-to-one thread and groups of agents. In a thread the user sends posts, and the members named with @, or all of them when none is, reply with runs; an agent's scheduled tasks also start runs in its one-to-one thread. /api/agents/{agentId}/messages, runs and events work on the agent's one-to-one thread. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/threads/{threadId}/events with a WebSocket upgrade opens a socket that sends the thread's posts, its runs as they change, and how the one being carried on is getting on (RunEvent); /api/agents/{agentId}/events does the same for the agent's one-to-one thread without posts."
   },
   "servers": [
     {
@@ -74,9 +74,28 @@
               "progress"
             ],
             "description": "How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every 100 ms; the run's next run event has the whole message."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "post"
+                ]
+              },
+              "post": {
+                "$ref": "#/components/schemas/Post"
+              }
+            },
+            "required": [
+              "type",
+              "post"
+            ],
+            "description": "A post was sent in the thread. Only a socket opened at /api/threads/{threadId}/events hears these; the runs that reply to it follow as run events"
           }
         ],
-        "description": "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing. Nothing is sent about what happened before the socket opened, apart from the progress of a run being carried on: open the socket, then read the runs."
+        "description": "One event on the WebSocket at /api/threads/{threadId}/events, or at /api/agents/{agentId}/events for the agent's one-to-one thread without posts, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing. Nothing is sent about what happened before the socket opened, apart from the progress of a run being carried on: open the socket, then read the runs."
       },
       "Run": {
         "type": "object",
@@ -85,13 +104,26 @@
             "type": "string",
             "format": "uuid"
           },
+          "agentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The agent it is a run of"
+          },
           "taskId": {
             "type": [
               "string",
               "null"
             ],
             "format": "uuid",
-            "description": "The task that started it; null when a message sent to the agent did"
+            "description": "The task that started it; null when a post did"
+          },
+          "postId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The post it replies to, which is also its first message; null when a task started it"
           },
           "startedAt": {
             "type": "string",
@@ -123,7 +155,9 @@
         },
         "required": [
           "id",
+          "agentId",
           "taskId",
+          "postId",
           "startedAt",
           "endedAt",
           "lastError",
@@ -300,6 +334,28 @@
           }
         ]
       },
+      "Post": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "text": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "text",
+          "createdAt"
+        ],
+        "description": "What the user said in a thread"
+      },
       "Me": {
         "type": "object",
         "properties": {
@@ -443,6 +499,128 @@
         },
         "required": [
           "text"
+        ]
+      },
+      "Thread": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "The group's name, or the agent's in its one-to-one thread"
+          },
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The agent whose one-to-one thread this is; null for a group"
+          },
+          "agentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The members, in the order they were added as agents"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was made, a post was sent, or a run started, whichever came last"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "agentId",
+          "agentIds",
+          "lastActivityAt"
+        ]
+      },
+      "NewGroup": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          },
+          "agentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "minItems": 2
+          }
+        },
+        "required": [
+          "name",
+          "agentIds"
+        ]
+      },
+      "ThreadEntry": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "post"
+                ]
+              },
+              "post": {
+                "$ref": "#/components/schemas/Post"
+              }
+            },
+            "required": [
+              "type",
+              "post"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "run"
+                ]
+              },
+              "run": {
+                "$ref": "#/components/schemas/Run"
+              }
+            },
+            "required": [
+              "type",
+              "run"
+            ]
+          }
+        ],
+        "description": "A post or a run of a thread"
+      },
+      "SentPost": {
+        "type": "object",
+        "properties": {
+          "post": {
+            "$ref": "#/components/schemas/Post"
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            }
+          }
+        },
+        "required": [
+          "post",
+          "runs"
         ]
       }
     },
@@ -981,6 +1159,293 @@
           },
           "404": {
             "description": "No agent of this user has this ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body isn't sent as application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads": {
+      "get": {
+        "operationId": "listThreads",
+        "responses": {
+          "200": {
+            "description": "The user's threads, each agent's one-to-one thread and the groups together, the latest activity first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Thread"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addGroup",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewGroup"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The group made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Thread"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body isn't sent as application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{threadId}/entries": {
+      "get": {
+        "operationId": "threadEntries",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "threadId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The thread's latest posts and runs together, the latest first; a post comes after the runs that reply to it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ThreadEntry"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No thread of this user has this ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{threadId}/posts": {
+      "post": {
+        "operationId": "sendPost",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "threadId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewMessage"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The post, and the runs that reply to it as they start: one for each member named with @ and its name, or for every member when none is. Each reply is added to its run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SentPost"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No thread of this user has this ID",
             "content": {
               "application/json": {
                 "schema": {
