@@ -4,7 +4,7 @@ import OpenAPIRuntime
 /// The one entrance to the iris server: signing in and out, and every call the app makes to `/api`. Errors come out as
 /// `AppError`; the generated types come out as they are, since they are the server's own contract.
 public final class IrisBackend: Sendable {
-    /// Where iris runs once it is deployed: the server openapi.json names.
+    /// Where iris runs: the server openapi.json names.
     public static let production: URL = {
         do {
             return try Servers.Server1.url()
