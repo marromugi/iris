@@ -4,8 +4,12 @@ import Foundation
 @testable import Backend
 
 /// Stands in for the iris server: registers the app, issues, refreshes, and revokes the tokens of one grant, and
-/// answers `/api` for the access token it last issued, keeping the tasks it was given. Records every request.
+/// answers `/api` for the access token it last issued, for a user with one agent, keeping the tasks it was given.
+/// Records every request.
 actor FakeServer {
+    /// The user's one agent.
+    static let agentID = "5d7c9e1a-2b4f-4c6d-8e0a-1b3c5d7e9f20"
+
     private struct Grant {
         let clientID: String
         var accessToken: String?
@@ -126,10 +130,19 @@ actor FakeServer {
 
     /// `/api` as the real one answers it, for the requests the app sends.
     private func api(_ request: URLRequest, path: String) -> (Data, URLResponse) {
-        switch (request.httpMethod, path) {
-        case ("GET", "/api/tasks"):
+        if request.httpMethod == "GET", path == "/api/agents" {
+            return Self.answer(
+                request, 200, #"[{"id":"\#(Self.agentID)","name":"エージェント","lastRanAt":"2026-11-09T22:00:00Z"}]"#)
+        }
+        let agentPath = "/api/agents/\(Self.agentID)"
+        guard path.hasPrefix("\(agentPath)/") else {
+            return Self.answer(request, 404, #"{"message":"No agent of this user has this ID"}"#)
+        }
+        let rest = String(path.dropFirst(agentPath.count))
+        switch (request.httpMethod, rest) {
+        case ("GET", "/tasks"):
             return Self.answer(request, 200, "[\(tasks.joined(separator: ","))]")
-        case ("POST", "/api/tasks"):
+        case ("POST", "/tasks"):
             struct Sent: Decodable {
                 struct Schedule: Decodable { let cron: String, timeZone: String }
                 let prompt: String
@@ -147,14 +160,14 @@ actor FakeServer {
                 #"{"id":"3c9d1e7a-5b2f-4e8c-9a1d-7f6e5d4c3b2a","prompt":"\#(sent.prompt)","schedule":{"cron":"\#(sent.schedule.cron)","timeZone":"\#(sent.schedule.timeZone)"},"nextRunAt":"2026-11-10T21:30:00Z"}"#
             tasks.append(task)
             return Self.answer(request, 201, task)
-        case ("DELETE", _) where path.hasPrefix("/api/tasks/"):
-            let id = String(path.dropFirst("/api/tasks/".count))
+        case ("DELETE", _) where rest.hasPrefix("/tasks/"):
+            let id = String(rest.dropFirst("/tasks/".count))
             guard let index = tasks.firstIndex(where: { $0.contains(#""id":"\#(id)""#) }) else {
-                return Self.answer(request, 404, #"{"message":"No task of this user has this ID"}"#)
+                return Self.answer(request, 404, #"{"message":"No task of this agent has this ID"}"#)
             }
             tasks.remove(at: index)
             return Self.answer(request, 204, "")
-        case ("GET", "/api/runs"):
+        case ("GET", "/runs"):
             return Self.answer(
                 request, 200,
                 #"[{"id":"8e2a4c6b-1d3f-4a5b-9c7d-2e4f6a8b0c1d","taskId":null,"startedAt":"2026-11-09T22:00:00Z","endedAt":"2026-11-09T22:00:07Z","lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"天気を教えて"},{"role":"assistant","parts":[{"type":"tool-call","id":"call-1","name":"weather","input":{"city":"Tokyo"}}]},{"role":"tool","callId":"call-1","isError":false,"content":"雨"},{"role":"assistant","parts":[{"type":"text","text":"傘を持っていきましょう。"}]}]}]"#

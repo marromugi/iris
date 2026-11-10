@@ -12,7 +12,7 @@ public struct IrisRoot: View {
     /// The app against the server at `origin`, keeping the sign-in in the Keychain.
     public init(origin: URL) {
         let backend = IrisBackend(origin: origin, store: KeychainCredentialStore())
-        self.init(session: Session(backend: backend), agents: SingleAgentDirectory(backend: backend))
+        self.init(session: Session(backend: backend), agents: backend)
     }
 
     init(session: Session, agents: any AgentDirectory) {

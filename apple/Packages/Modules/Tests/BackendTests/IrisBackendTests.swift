@@ -7,6 +7,7 @@ import Testing
 struct IrisBackendTests {
     let server = FakeServer()
     let store = InMemoryCredentialStore()
+    let agent = FakeServer.agentID
 
     func backend(now: Date = Date()) -> IrisBackend {
         IrisBackend(origin: server.origin, store: store, send: server.send, now: { now })
@@ -20,7 +21,7 @@ struct IrisBackendTests {
         let backend = backend()
 
         try await signIn(backend)
-        let tasks = try await backend.tasks()
+        let tasks = try await backend.tasks(of: agent)
 
         #expect(tasks.map(\.prompt) == ["天気を教えて"])
         #expect(tasks.first?.nextRunAt == Date(timeIntervalSince1970: 1_794_348_000))
@@ -36,7 +37,7 @@ struct IrisBackendTests {
 
         try await signIn(backend)
 
-        #expect(try await backend.tasks().count == 1)
+        #expect(try await backend.tasks(of: agent).count == 1)
     }
 
     @Test func ignoresASignInKeptForAnotherServer() async throws {
@@ -66,7 +67,7 @@ struct IrisBackendTests {
         let expired = IrisBackend(
             origin: server.origin, store: InMemoryCredentialStore(kept), send: server.send,
             now: { signedInAt.addingTimeInterval(3600) })
-        await #expect(throws: AppError.signedOut) { try await expired.tasks() }
+        await #expect(throws: AppError.signedOut) { try await expired.tasks(of: agent) }
     }
 
     @Test func signingOutWhileARefreshIsAnsweredStaysSignedOutEvenIfTheServerMissesIt() async throws {
@@ -76,7 +77,7 @@ struct IrisBackendTests {
         await server.missRevocations()
         await server.holdRefreshAnswers()
 
-        let read = Task { try await later.tasks() }
+        let read = Task { try await later.tasks(of: agent) }
         await server.heldRefreshAnswer()
         await later.signOut()
         await server.releaseRefreshAnswers()
@@ -91,7 +92,7 @@ struct IrisBackendTests {
         try await signIn(backend)
         await server.revokeAccessToken()
 
-        let tasks = try await backend.tasks()
+        let tasks = try await backend.tasks(of: agent)
 
         #expect(tasks.count == 1)
         #expect(store.load()?.tokens.accessToken == "access-2")
@@ -101,9 +102,9 @@ struct IrisBackendTests {
         let signedInAt = Date(timeIntervalSince1970: 0)
         try await signIn(backend(now: signedInAt))
 
-        _ = try await backend(now: signedInAt.addingTimeInterval(3600 - 30)).tasks()
+        _ = try await backend(now: signedInAt.addingTimeInterval(3600 - 30)).tasks(of: agent)
 
-        let apiRequests = await server.requests.filter { $0.url?.path == "/api/tasks" }
+        let apiRequests = await server.requests.filter { $0.url?.path == "/api/agents/\(agent)/tasks" }
         #expect(apiRequests.map { $0.value(forHTTPHeaderField: "Authorization") } == ["Bearer access-2"])
     }
 
@@ -112,7 +113,7 @@ struct IrisBackendTests {
         try await signIn(backend)
         await server.endGrant()
 
-        await #expect(throws: AppError.signedOut) { try await backend.tasks() }
+        await #expect(throws: AppError.signedOut) { try await backend.tasks(of: agent) }
         #expect(await !backend.isSignedIn)
         #expect(store.load() == nil)
     }
@@ -122,7 +123,7 @@ struct IrisBackendTests {
         try await signIn(backend)
         await server.refuseEveryToken()
 
-        await #expect(throws: AppError.signedOut) { try await backend.tasks() }
+        await #expect(throws: AppError.signedOut) { try await backend.tasks(of: agent) }
         #expect(await !backend.isSignedIn)
     }
 
@@ -131,7 +132,7 @@ struct IrisBackendTests {
         try await signIn(backend)
         await server.nameNoUser()
 
-        await #expect(throws: AppError.signedOut) { try await backend.tasks() }
+        await #expect(throws: AppError.signedOut) { try await backend.tasks(of: agent) }
         #expect(await !backend.isSignedIn)
         #expect(store.load() == nil)
     }
@@ -141,8 +142,8 @@ struct IrisBackendTests {
         try await signIn(backend(now: signedInAt))
         let later = backend(now: signedInAt.addingTimeInterval(3600))
 
-        async let first = later.tasks()
-        async let second = later.recentRuns(limit: 20)
+        async let first = later.tasks(of: agent)
+        async let second = later.recentRuns(of: agent, limit: 20)
         _ = try await (first, second)
 
         let refreshes = await server.requests.filter { $0.url?.path == "/token" }.count - 1
@@ -154,12 +155,12 @@ struct IrisBackendTests {
         try await signIn(backend)
 
         let added = try await backend.addTask(
-            NewTask(prompt: "ニュースをまとめて", schedule: .init(cron: "30 6 * * *", timeZone: "Asia/Tokyo")))
+            NewTask(prompt: "ニュースをまとめて", schedule: .init(cron: "30 6 * * *", timeZone: "Asia/Tokyo")), to: agent)
 
         #expect(added.prompt == "ニュースをまとめて")
         #expect(added.schedule.cron == "30 6 * * *")
         #expect(added.nextRunAt == Date(timeIntervalSince1970: 1_794_346_200))
-        #expect(try await backend.tasks().map(\.prompt) == ["天気を教えて", "ニュースをまとめて"])
+        #expect(try await backend.tasks(of: agent).map(\.prompt) == ["天気を教えて", "ニュースをまとめて"])
     }
 
     @Test func aTaskTheServerRefusesSaysWhyInTheServersWords() async throws {
@@ -167,26 +168,40 @@ struct IrisBackendTests {
         try await signIn(backend)
 
         await #expect(throws: AppError.refused(message: "✖ Not a known IANA time zone.\n  → at schedule.timeZone")) {
-            try await backend.addTask(NewTask(prompt: "天気", schedule: .init(cron: "0 7 * * *", timeZone: "Mars/Olympus")))
+            try await backend.addTask(
+                NewTask(prompt: "天気", schedule: .init(cron: "0 7 * * *", timeZone: "Mars/Olympus")), to: agent)
+        }
+    }
+
+    @Test func listsTheAgentsAndRefusesOneTheUserDoesNotHave() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        let agents = try await backend.agents()
+
+        #expect(agents.map(\.id) == [agent])
+        #expect(agents.first?.lastRanAt == Date(timeIntervalSince1970: 1_794_261_600))
+        await #expect(throws: AppError.refused(message: "No agent of this user has this ID")) {
+            try await backend.tasks(of: "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e")
         }
     }
 
     @Test func removesATaskAndCountsOneAlreadyGoneAsRemoved() async throws {
         let backend = backend()
         try await signIn(backend)
-        let id = try #require(try await backend.tasks().first?.id)
+        let id = try #require(try await backend.tasks(of: agent).first?.id)
 
-        try await backend.removeTask(id: id)
-        try await backend.removeTask(id: id)
+        try await backend.removeTask(id: id, of: agent)
+        try await backend.removeTask(id: id, of: agent)
 
-        #expect(try await backend.tasks().isEmpty)
+        #expect(try await backend.tasks(of: agent).isEmpty)
     }
 
     @Test func readsAsManyRunsAsAskedWithTheirConversations() async throws {
         let backend = backend()
         try await signIn(backend)
 
-        let runs = try await backend.recentRuns(limit: 1)
+        let runs = try await backend.recentRuns(of: agent, limit: 1)
 
         let run = try #require(runs.first)
         #expect(run.endedAt == Date(timeIntervalSince1970: 1_794_261_607))
@@ -198,11 +213,11 @@ struct IrisBackendTests {
         #expect(call.name == "weather")
         #expect(call.input?.value as? [String: String] == ["city": "Tokyo"])
         #expect(run.messages.count == 4)
-        #expect(await server.requests.last { $0.url?.path == "/api/runs" }?.url?.query == "limit=1")
+        #expect(await server.requests.last { $0.url?.path == "/api/agents/\(agent)/runs" }?.url?.query == "limit=1")
     }
 
     @Test func aCallWithoutASignInIsSignedOut() async throws {
-        await #expect(throws: AppError.signedOut) { try await backend().tasks() }
+        await #expect(throws: AppError.signedOut) { try await backend().tasks(of: agent) }
         #expect(await server.requests.isEmpty)
     }
 }

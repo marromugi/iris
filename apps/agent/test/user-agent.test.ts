@@ -2,6 +2,7 @@ import type { AssistantMessage } from "@iris/agent";
 import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
+import migrations from "../drizzle/migrations";
 import { MAX_FAILED_ATTEMPTS, RETRY_DELAY_MS, runNext } from "../src/runner";
 import * as store from "../src/store";
 import { scriptedModel, testAgent } from "./worker";
@@ -13,6 +14,15 @@ afterEach(async () => {
 
 const userAgent = () => env.USER_AGENT.getByName("user-1");
 
+/** The agent every user starts with. */
+async function firstAgentId(): Promise<string> {
+  const [first] = await userAgent().listAgents();
+  if (first === undefined) {
+    throw new Error("The user has no agent.");
+  }
+  return first.id;
+}
+
 const reply = (text: string): AssistantMessage => ({
   role: "assistant",
   parts: [{ type: "text", text }],
@@ -20,11 +30,16 @@ const reply = (text: string): AssistantMessage => ({
 
 const dailyAtEightUtc = { cron: "0 8 * * *", timeZone: "UTC" };
 
-/** Puts a task straight into storage with its alarm, so a test can choose a next run time in the past. */
-function insertTask(nextRunAt: Date, id = "task-1") {
-  return runInDurableObject(userAgent(), async (_, state) => {
+/**
+ * Puts a task of the first agent straight into storage with its alarm, so a test can choose a next
+ * run time in the past.
+ */
+async function insertTask(nextRunAt: Date, id = "task-1") {
+  const agentId = await firstAgentId();
+  await runInDurableObject(userAgent(), async (_, state) => {
     store.insertTask(state.storage, {
       id,
+      agentId,
       prompt: "Summarize today's email",
       schedule: dailyAtEightUtc,
       nextRunAt,
@@ -33,16 +48,93 @@ function insertTask(nextRunAt: Date, id = "task-1") {
   });
 }
 
-test("adds a task and sets the alarm to its next run time", async () => {
+/** Puts a second agent straight into storage, added after the first; returns its ID. */
+async function insertAgent(name: string): Promise<string> {
+  const id = crypto.randomUUID();
+  await runInDurableObject(userAgent(), (_, state) => {
+    store.insertAgent(state.storage, { id, name, createdAt: new Date(Date.now() + 1000) });
+  });
+  return id;
+}
+
+test("every user starts with one agent that hasn't run", async () => {
+  expect(await userAgent().listAgents()).toEqual([
+    {
+      id: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      ),
+      name: "エージェント",
+      lastRanAt: null,
+    },
+  ]);
+});
+
+test("each agent has its own tasks and runs, and runs when its own task is due", async () => {
+  const first = await firstAgentId();
+  const stocks = await insertAgent("株価の確認");
+  const dueAt = new Date("2026-11-10T08:00:00Z");
+  await runInDurableObject(userAgent(), (_, state) => {
+    store.insertTask(state.storage, {
+      id: "stocks-task",
+      agentId: stocks,
+      prompt: "Check stocks",
+      schedule: dailyAtEightUtc,
+      nextRunAt: dueAt,
+    });
+  });
+  scriptedModel.push(reply("Stocks are up."));
+
+  await runInDurableObject(userAgent(), (_, state) =>
+    runNext(state.storage, testAgent, () => dueAt),
+  );
+
+  expect(await userAgent().listTasks(first)).toEqual([]);
+  expect(await userAgent().recentRuns(first)).toEqual([]);
+  expect((await userAgent().listTasks(stocks))?.map((task) => task.id)).toEqual(["stocks-task"]);
+  const runs = await userAgent().recentRuns(stocks);
+  expect(runs?.map((run) => run.taskId)).toEqual(["stocks-task"]);
+  expect(await userAgent().listAgents()).toEqual([
+    { id: first, name: "エージェント", lastRanAt: null },
+    { id: stocks, name: "株価の確認", lastRanAt: dueAt },
+  ]);
+});
+
+test("adds no task, and sets no alarm, for an agent the user doesn't have", async () => {
   const agent = userAgent();
 
-  const added = await agent.addTask({
+  await agent.addTask(crypto.randomUUID(), { prompt: "Check stocks", schedule: dailyAtEightUtc });
+
+  expect(await agent.listTasks(await firstAgentId())).toEqual([]);
+  expect(await runInDurableObject(agent, (_, state) => state.storage.getAlarm())).toBeNull();
+});
+
+test("doesn't remove another agent's task", async () => {
+  const first = await firstAgentId();
+  const stocks = await insertAgent("株価の確認");
+  const task = await userAgent().addTask(first, {
+    prompt: "Check mail",
+    schedule: dailyAtEightUtc,
+  });
+  if (!task?.ok) {
+    throw new Error("The task wasn't added.");
+  }
+
+  expect(await userAgent().removeTask(stocks, task.task.id)).toBe(false);
+
+  expect(await userAgent().listTasks(first)).toHaveLength(1);
+});
+
+test("adds a task and sets the alarm to its next run time", async () => {
+  const agent = userAgent();
+  const agentId = await firstAgentId();
+
+  const added = await agent.addTask(agentId, {
     prompt: "Summarize today's email",
     schedule: { cron: "0 8 * * *", timeZone: "Asia/Tokyo" },
   });
 
-  expect(added.ok).toBe(true);
-  const tasks = await agent.listTasks();
+  expect(added?.ok).toBe(true);
+  const tasks = (await agent.listTasks(agentId)) ?? [];
   expect(tasks.map((task) => [task.prompt, task.schedule])).toEqual([
     ["Summarize today's email", { cron: "0 8 * * *", timeZone: "Asia/Tokyo" }],
   ]);
@@ -52,8 +144,9 @@ test("adds a task and sets the alarm to its next run time", async () => {
 
 test("returns an invalid schedule as an error and adds nothing", async () => {
   const agent = userAgent();
+  const agentId = await firstAgentId();
 
-  const added = await agent.addTask({
+  const added = await agent.addTask(agentId, {
     prompt: "Summarize today's email",
     schedule: { cron: "0 8 * * *", timeZone: "Mars/Olympus" },
   });
@@ -62,19 +155,20 @@ test("returns an invalid schedule as an error and adds nothing", async () => {
     ok: false,
     error: "✖ Not a known IANA time zone.\n  → at schedule.timeZone",
   });
-  expect(await agent.listTasks()).toEqual([]);
+  expect(await agent.listTasks(agentId)).toEqual([]);
 });
 
 test("removing the last task clears the alarm", async () => {
   const agent = userAgent();
-  const added = await agent.addTask({ prompt: "Check stocks", schedule: dailyAtEightUtc });
-  if (!added.ok) {
-    throw new Error(added.error);
+  const agentId = await firstAgentId();
+  const added = await agent.addTask(agentId, { prompt: "Check stocks", schedule: dailyAtEightUtc });
+  if (!added?.ok) {
+    throw new Error("The task wasn't added.");
   }
 
-  expect(await agent.removeTask(added.task.id)).toBe(true);
+  expect(await agent.removeTask(agentId, added.task.id)).toBe(true);
 
-  expect(await agent.listTasks()).toEqual([]);
+  expect(await agent.listTasks(agentId)).toEqual([]);
   expect(await runInDurableObject(agent, (_, state) => state.storage.getAlarm())).toBeNull();
 });
 
@@ -84,14 +178,15 @@ test("when the alarm fires, runs the due task and saves its conversation", async
 
   expect(await runDurableObjectAlarm(userAgent())).toBe(true);
 
-  const runs = await userAgent().recentRuns();
+  const agentId = await firstAgentId();
+  const runs = (await userAgent().recentRuns(agentId)) ?? [];
   expect(runs).toHaveLength(1);
   expect(runs[0]?.messages).toEqual([
     { role: "user", text: "Summarize today's email" },
     reply("You have 3 new emails."),
   ]);
   expect(runs[0]?.endedAt).not.toBeNull();
-  const [task] = await userAgent().listTasks();
+  const [task] = (await userAgent().listTasks(agentId)) ?? [];
   expect(task?.nextRunAt.getTime()).toBeGreaterThan(Date.now());
 });
 
@@ -99,13 +194,14 @@ test("a failed run is tried again later and carried on, not started again", asyn
   const startedAt = new Date("2026-11-10T08:00:00Z");
   await insertTask(startedAt);
   scriptedModel.push(new Error("The model service is unreachable."));
+  const agentId = await firstAgentId();
 
   const wakeAt = await runInDurableObject(userAgent(), (_, state) =>
     runNext(state.storage, testAgent, () => startedAt),
   );
 
   expect(wakeAt).toEqual(new Date(startedAt.getTime() + RETRY_DELAY_MS));
-  const [failed] = await userAgent().recentRuns();
+  const [failed] = (await userAgent().recentRuns(agentId)) ?? [];
   expect(failed?.lastError).toBe("The model service is unreachable.");
   expect(failed?.endedAt).toBeNull();
 
@@ -115,7 +211,7 @@ test("a failed run is tried again later and carried on, not started again", asyn
     runNext(state.storage, testAgent, () => retryAt),
   );
 
-  const runs = await userAgent().recentRuns();
+  const runs = (await userAgent().recentRuns(agentId)) ?? [];
   expect(runs).toHaveLength(1);
   expect(runs[0]?.messages).toEqual([
     { role: "user", text: "Summarize today's email" },
@@ -140,7 +236,7 @@ test("a run that keeps failing is given up, keeping its error, and stops calling
     );
   }
 
-  const [run] = await userAgent().recentRuns();
+  const [run] = (await userAgent().recentRuns(await firstAgentId())) ?? [];
   expect(run?.failedAttempts).toBe(MAX_FAILED_ATTEMPTS);
   expect(run?.lastError).toBe(`Attempt ${MAX_FAILED_ATTEMPTS} failed.`);
   expect(run?.endedAt).not.toBeNull();
@@ -151,14 +247,15 @@ test("a task that missed several times runs once and moves to its next time afte
   await insertTask(new Date("2026-11-07T08:00:00Z"));
   scriptedModel.push(reply("Done."));
   const now = new Date("2026-11-10T09:30:00Z");
+  const agentId = await firstAgentId();
 
   const wakeAt = await runInDurableObject(userAgent(), (_, state) =>
     runNext(state.storage, testAgent, () => now),
   );
 
-  expect(await userAgent().recentRuns()).toHaveLength(1);
+  expect(await userAgent().recentRuns(agentId)).toHaveLength(1);
   expect(wakeAt).toEqual(new Date("2026-11-11T08:00:00Z"));
-  const [task] = await userAgent().listTasks();
+  const [task] = (await userAgent().listTasks(agentId)) ?? [];
   expect(task?.nextRunAt).toEqual(new Date("2026-11-11T08:00:00Z"));
 });
 
@@ -167,36 +264,38 @@ test("does one run per wake-up and wakes again right away while more is due", as
   await insertTask(dueAt, "task-1");
   await insertTask(dueAt, "task-2");
   scriptedModel.push(reply("First done."), reply("Second done."));
+  const agentId = await firstAgentId();
 
   const first = await runInDurableObject(userAgent(), (_, state) =>
     runNext(state.storage, testAgent, () => dueAt),
   );
-  expect(await userAgent().recentRuns()).toHaveLength(1);
+  expect(await userAgent().recentRuns(agentId)).toHaveLength(1);
   expect(first).toEqual(dueAt);
 
   await runInDurableObject(userAgent(), (_, state) =>
     runNext(state.storage, testAgent, () => dueAt),
   );
-  expect(new Set((await userAgent().recentRuns()).map((run) => run.taskId))).toEqual(
-    new Set(["task-1", "task-2"]),
-  );
+  const runs = (await userAgent().recentRuns(agentId)) ?? [];
+  expect(new Set(runs.map((run) => run.taskId))).toEqual(new Set(["task-1", "task-2"]));
 });
 
 test("a task removed while another task's run waits on the model doesn't start", async () => {
   const dueAt = new Date("2026-11-10T08:00:00Z");
   await insertTask(dueAt, "task-1");
   await insertTask(dueAt, "task-2");
+  const agentId = await firstAgentId();
 
   await runInDurableObject(userAgent(), async (_, state) => {
     scriptedModel.push(() => {
-      store.deleteTask(state.storage, "task-2");
+      store.deleteTask(state.storage, agentId, "task-2");
       return reply("Done.");
     });
     await runNext(state.storage, testAgent, () => dueAt);
     await runNext(state.storage, testAgent, () => dueAt);
   });
 
-  expect((await userAgent().recentRuns()).map((run) => run.taskId)).toEqual(["task-1"]);
+  const runs = (await userAgent().recentRuns(agentId)) ?? [];
+  expect(runs.map((run) => run.taskId)).toEqual(["task-1"]);
 });
 
 test("adding a task after a run failed doesn't put off the run's retry", async () => {
@@ -207,7 +306,7 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
     runNext(state.storage, testAgent, () => failedAt),
   );
 
-  await userAgent().addTask({
+  await userAgent().addTask(await firstAgentId(), {
     prompt: "New year's review",
     schedule: { cron: "0 0 1 1 *", timeZone: "UTC" },
   });
@@ -215,6 +314,51 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
   expect(await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm())).toBe(
     failedAt.getTime() + RETRY_DELAY_MS,
   );
+});
+
+test("the tasks and runs stored before agents become the first agent's", async () => {
+  const startedAt = new Date("2026-11-09T08:00:00Z");
+  await runInDurableObject(userAgent(), (_, state) => {
+    const sql = state.storage.sql;
+    for (const table of ["messages", "runs", "tasks", "agents", "__drizzle_migrations"]) {
+      sql.exec(`DROP TABLE ${table}`);
+    }
+    // Storage as the code before agents left it: the first migration, and a task with one run.
+    sql.exec(
+      "CREATE TABLE __drizzle_migrations (id SERIAL PRIMARY KEY, hash text NOT NULL, created_at numeric)",
+    );
+    for (const statement of migrations.migrations.m0000.split("--> statement-breakpoint")) {
+      sql.exec(statement);
+    }
+    sql.exec(
+      "INSERT INTO __drizzle_migrations (hash, created_at) VALUES ('', ?)",
+      migrations.journal.entries[0]?.when,
+    );
+    sql.exec(
+      "INSERT INTO tasks (id, prompt, cron, time_zone, next_run_at) VALUES ('task-1', 'Check mail', '0 8 * * *', 'UTC', ?)",
+      Date.parse("2026-11-10T08:00:00Z"),
+    );
+    sql.exec(
+      "INSERT INTO runs (id, task_id, started_at, ended_at) VALUES ('run-1', 'task-1', ?, ?)",
+      startedAt.getTime(),
+      startedAt.getTime() + 1000,
+    );
+    sql.exec(
+      "INSERT INTO messages (run_id, seq, format, body) VALUES ('run-1', 0, 1, ?)",
+      JSON.stringify({ role: "user", text: "Check mail" }),
+    );
+
+    store.migrate(state.storage);
+  });
+
+  const [agent, ...others] = await userAgent().listAgents();
+  expect(others).toEqual([]);
+  expect(agent).toEqual({ id: expect.any(String), name: "エージェント", lastRanAt: startedAt });
+  expect((await userAgent().listTasks(agent!.id))?.map((task) => task.id)).toEqual(["task-1"]);
+  const runs = (await userAgent().recentRuns(agent!.id)) ?? [];
+  expect(runs.map((run) => [run.id, run.messages])).toEqual([
+    ["run-1", [{ role: "user", text: "Check mail" }]],
+  ]);
 });
 
 test("refuses storage that a newer version of the code migrated", async () => {

@@ -9,10 +9,13 @@ const userPropsSchema = z.object({ userId: z.string().min(1) });
 
 export type UserProps = z.infer<typeof userPropsSchema>;
 
-/** What every route of `/api` runs with: the Worker's bindings, the signed-in user, and their agent. */
+/**
+ * What every route of `/api` runs with: the Worker's bindings, the signed-in user, and the
+ * Durable Object that holds their agents.
+ */
 export type ApiEnv = {
   Bindings: Env;
-  Variables: { user: User; agent: ReturnType<Env["USER_AGENT"]["getByName"]> };
+  Variables: { user: User; agents: ReturnType<Env["USER_AGENT"]["getByName"]> };
 };
 
 /**
@@ -30,6 +33,6 @@ export const signedInUser = createMiddleware<ApiEnv>(async (c, next) => {
     return c.json({ message: "Forbidden" }, NO_USER.status);
   }
   c.set("user", user);
-  c.set("agent", c.env.USER_AGENT.getByName(user.id));
+  c.set("agents", c.env.USER_AGENT.getByName(user.id));
   return next();
 });

@@ -2,8 +2,8 @@
 // answer something its route doesn't document, which is what `Answer` is for.
 import type { TypedResponse } from "hono";
 import type { Answer } from "../src/api/answer";
-import type { removeTask } from "../src/api/routes/tasks/[taskId]/delete";
-import type { listTasks } from "../src/api/routes/tasks/get";
+import type { removeTask } from "../src/api/routes/agents/[agentId]/tasks/[taskId]/delete";
+import type { listTasks } from "../src/api/routes/agents/[agentId]/tasks/get";
 
 type ListTasksAnswer = Answer<typeof listTasks.route>;
 type RemoveTaskAnswer = Answer<typeof removeTask.route>;
