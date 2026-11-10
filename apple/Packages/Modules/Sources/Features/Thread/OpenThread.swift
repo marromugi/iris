@@ -1,12 +1,12 @@
 import Backend
 import Observation
 
-/// One agent's thread as the thread screen shows it: reading its runs, sending a message, and keeping both current from
-/// the agent's events socket while the screen is shown.
+/// One thread as the thread screen shows it: reading its posts and runs, sending a post, and keeping both current from
+/// the thread's events socket while the screen is shown.
 @Observable
-final class AgentThread {
-    /// How many of the latest runs the thread shows.
-    static let runsShown = 50
+final class OpenThread {
+    /// How many of the latest posts and runs the thread shows.
+    static let entriesShown = 50
 
     /// How long to wait before opening the events socket again: a second after one that stayed open, and twice as long
     /// after each failure in a row, up to 30 seconds.
@@ -18,30 +18,30 @@ final class AgentThread {
     /// closes sooner, counts as one.
     static let openLongEnough: Duration = .seconds(10)
 
-    /// The agent's latest runs, latest first. Turns to `.failed(.signedOut)` when the server refuses the sign-in, so
-    /// the screen offers to sign in again.
-    private(set) var runs: Loadable<[Run]> = .loading
+    /// The thread's latest posts and runs, latest first. Turns to `.failed(.signedOut)` when the server refuses the
+    /// sign-in, so the screen offers to sign in again.
+    private(set) var entries: Loadable<[Entry]> = .loading
     /// How the runs being carried on are getting on, by run ID, as the events socket last said. A run's next state
     /// takes its place, and it is let go when the socket closes.
     private(set) var progress: [String: RunProgress] = [:]
-    /// What the user is writing to the agent.
+    /// What the user is writing in the thread.
     var draft = ""
-    /// Whether a message is on its way to the server.
+    /// Whether a post is on its way to the server.
     private(set) var isSending = false
-    /// Why the last message did not go through.
+    /// Why the last post did not go through.
     private(set) var sendProblem: AppError?
 
-    private let backend: any AgentBackend
+    private let backend: any ThreadBackend
     private let wait: @Sendable (Duration) async throws -> Void
     private let now: () -> ContinuousClock.Instant
-    /// A run that came while a read was on its way: heard on the socket, which replaces what is shown, or answered to a
-    /// send, which only adds what is missing.
+    /// A post or run that came while a read was on its way: heard on the socket, which replaces what is shown, or
+    /// answered to a send, which only adds what is missing.
     private enum Arrival {
-        case heard(Run)
-        case sent(Run)
+        case heard(Entry)
+        case sent(Entry)
     }
 
-    // Runs that came while a read was on its way, in order, put back on top of what the read brings.
+    // Posts and runs that came while a read was on its way, in order, put back on top of what the read brings.
     private var cameDuringRead: [Arrival] = []
     private var readsOnTheWay = 0
     // When the socket being followed opened; nil while it hasn't.
@@ -49,7 +49,7 @@ final class AgentThread {
 
     /// `wait` sleeps before the socket is opened again (`Task.sleep` by default); `now` tells how long it stayed open.
     init(
-        backend: any AgentBackend,
+        backend: any ThreadBackend,
         wait: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         now: @escaping () -> ContinuousClock.Instant = { .now }
     ) {
@@ -60,7 +60,7 @@ final class AgentThread {
 
     /// Whether there is something written to send, and a thread to send it to.
     var canSend: Bool {
-        guard case .loaded = runs, !isSending else { return false }
+        guard case .loaded = entries, !isSending else { return false }
         return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -70,39 +70,39 @@ final class AgentThread {
         set { if !newValue { sendProblem = nil } }
     }
 
-    /// Reads the latest runs. Runs that come from the socket or a send while the read is on its way stay as they came,
-    /// and a read that fails leaves the runs as they are by then.
+    /// Reads the latest posts and runs. Those that come from the socket or a send while the read is on its way stay as
+    /// they came, and a read that fails leaves the thread as it is by then.
     func load() async {
         readsOnTheWay += 1
         let first = cameDuringRead.count
-        let result: Result<[Run], AppError>
+        let result: Result<[Entry], AppError>
         do throws(AppError) {
-            result = .success(try await backend.recentRuns(limit: Self.runsShown))
+            result = .success(try await backend.entries(limit: Self.entriesShown).map(Entry.init))
         } catch {
             result = .failure(error)
         }
         readsOnTheWay -= 1
-        runs = runs.applying(result)
+        entries = entries.applying(result)
         if case .success = result {
             for arrival in cameDuringRead[first...] {
                 switch arrival {
-                case .heard(let run): place(run)
-                case .sent(let run): placeIfMissing(run)
+                case .heard(let entry): place(entry)
+                case .sent(let entry): placeIfMissing(entry)
                 }
             }
         }
         if readsOnTheWay == 0 { cameDuringRead = [] }
     }
 
-    /// Reads the runs again from nothing, showing that they are coming.
+    /// Reads the thread again from nothing, showing that it is coming.
     @discardableResult
     func retry() -> Task<Void, Never> {
-        runs = .loading
+        entries = .loading
         return Task { await load() }
     }
 
-    /// Sends what the user wrote and puts the run it starts in the thread, unless the socket brought it first, as it
-    /// does when it is open: the socket's is the newer. When the server does not take it, the text goes back to the
+    /// Sends what the user wrote and puts the post and the runs it starts in the thread, unless the socket brought them
+    /// first, as it does when it is open: the socket's are the newer. When the server does not take it, the text goes back to the
     /// field, before anything written since, with the problem to show.
     @discardableResult
     func send() -> Task<Void, Never>? {
@@ -114,13 +114,15 @@ final class AgentThread {
         return Task {
             defer { isSending = false }
             do throws(AppError) {
-                let run = try await backend.sendMessage(text)
-                if readsOnTheWay > 0 { cameDuringRead.append(.sent(run)) }
-                placeIfMissing(run)
+                let sent = try await backend.send(text)
+                for entry in [Entry.post(sent.post)] + sent.runs.map(Entry.run) {
+                    if readsOnTheWay > 0 { cameDuringRead.append(.sent(entry)) }
+                    placeIfMissing(entry)
+                }
             } catch {
                 draft = draft.isEmpty ? text : "\(text)\n\(draft)"
                 if error == .signedOut {
-                    runs = .failed(.signedOut)
+                    entries = .failed(.signedOut)
                 } else {
                     sendProblem = error
                 }
@@ -128,23 +130,26 @@ final class AgentThread {
         }
     }
 
-    /// Takes in what the events socket says: a run as it is now, or how one is getting on.
+    /// Takes in what the events socket says: a run as it is now, how one is getting on, or a post sent.
     func hear(_ event: RunEvent) {
         switch event {
         case .case1(let changed):
             progress[changed.run.id] = nil
-            if readsOnTheWay > 0 { cameDuringRead.append(.heard(changed.run)) }
-            place(changed.run)
+            heard(.run(changed.run))
         case .case2(let getting):
             progress[getting.runId] = getting.progress
-        case .case3:
-            // Posts come only on a thread's socket, not the agent's this screen opens.
-            break
+        case .case3(let posted):
+            heard(.post(posted.post))
         }
     }
 
-    /// Reads the runs and keeps the thread current while the screen shows it. It opens the agent's events socket and
-    /// reads the runs once it is open, since nothing from before then comes on it, or reads them through `/api` when it
+    private func heard(_ entry: Entry) {
+        if readsOnTheWay > 0 { cameDuringRead.append(.heard(entry)) }
+        place(entry)
+    }
+
+    /// Reads the thread and keeps it current while the screen shows it. It opens the thread's events socket and reads
+    /// the thread once it is open, since nothing from before then comes on it, or reads them through `/api` when it
     /// can't open. After the socket closes or fails, it opens it again, waiting longer after each failure in a row; a
     /// socket that stayed open `openLongEnough` starts the count over. It stops when the screen goes away, and opens
     /// no more sockets once the sign-in ends.
@@ -161,7 +166,7 @@ final class AgentThread {
             } catch .cancelled {
                 return
             } catch .signedOut {
-                runs = .failed(.signedOut)
+                entries = .failed(.signedOut)
                 return
             } catch {
                 // Counted below, by how long the socket stayed open.
@@ -175,7 +180,7 @@ final class AgentThread {
                 // Reading through /api keeps the thread current while the socket can't open, and ends a sign-in the
                 // server no longer accepts, should the socket's refusal not have said so.
                 await load()
-                if case .failed(.signedOut) = runs { return }
+                if case .failed(.signedOut) = entries { return }
             }
             progress = [:]
             do {
@@ -191,20 +196,21 @@ final class AgentThread {
         await load()
     }
 
-    /// Puts the run among the runs unless one with its ID is there.
-    private func placeIfMissing(_ run: Run) {
-        guard case .loaded(let shown) = runs, !shown.contains(where: { $0.id == run.id }) else { return }
-        place(run)
+    /// Puts the post or run in the thread unless one with its ID is there.
+    private func placeIfMissing(_ entry: Entry) {
+        guard case .loaded(let shown) = entries, !shown.contains(where: { $0.id == entry.id }) else { return }
+        place(entry)
     }
 
-    /// Puts the run among the runs, latest first, in place of what was there, keeping the latest `runsShown`.
-    private func place(_ run: Run) {
-        guard case .loaded(var shown) = runs else { return }
-        if let index = shown.firstIndex(where: { $0.id == run.id }) {
-            shown[index] = run
+    /// Puts the post or run in the thread, latest first, in place of what was there, keeping the latest
+    /// `entriesShown`.
+    private func place(_ entry: Entry) {
+        guard case .loaded(var shown) = entries else { return }
+        if let index = shown.firstIndex(where: { $0.id == entry.id }) {
+            shown[index] = entry
         } else {
-            shown.insert(run, at: shown.firstIndex { $0.startedAt < run.startedAt } ?? shown.endIndex)
+            shown.insert(entry, at: shown.firstIndex { entry.isLater(than: $0) } ?? shown.endIndex)
         }
-        runs = .loaded(Array(shown.prefix(Self.runsShown)))
+        entries = .loaded(Array(shown.prefix(Self.entriesShown)))
     }
 }

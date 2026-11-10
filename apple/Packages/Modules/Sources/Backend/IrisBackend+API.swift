@@ -61,14 +61,20 @@ extension IrisBackend {
         }
     }
 
-    /// Sends a message to the agent, and gives back the run it starts, which has the message alone until the agent's
-    /// reply is added to it.
-    public func sendMessage(_ text: String, to agentID: Agent.ID) async throws(AppError) -> Run {
-        switch try await call({
-            try await client.sendMessage(path: .init(agentId: agentID), body: .json(NewMessage(text: text)))
-        }) {
-        case .accepted(let accepted): return try decoded { try accepted.body.json }
-        case .notFound(let refused): throw try refusal { try refused.body.json }
+    /// The user's threads, each agent's one-to-one thread and the groups together, the latest activity first.
+    public func threads() async throws(AppError) -> [ChatThread] {
+        switch try await call({ try await client.listThreads() }) {
+        case .ok(let ok): return try decoded { try ok.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// Makes a group of the agents with the name, and gives it back as the home lists it.
+    public func addGroup(named name: String, of agentIDs: [Agent.ID]) async throws(AppError) -> ChatThread {
+        switch try await call({ try await client.addGroup(body: .json(NewGroup(name: name, agentIds: agentIDs))) }) {
+        case .created(let created): return try decoded { try created.body.json }
         case .badRequest(let refused): throw try refusal { try refused.body.json }
         case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
         case .internalServerError(let failed): throw try refusal { try failed.body.json }
@@ -77,13 +83,29 @@ extension IrisBackend {
         }
     }
 
-    /// The agent's latest `limit` runs, latest first, each with its conversation. The server takes 1 to 100.
-    public func recentRuns(of agentID: Agent.ID, limit: Int) async throws(AppError) -> [Run] {
-        switch try await call({ try await client.recentRuns(path: .init(agentId: agentID), query: .init(limit: limit)) })
-        {
+    /// The thread's latest `limit` posts and runs together, latest first. The server takes 1 to 100.
+    public func entries(of threadID: ChatThread.ID, limit: Int) async throws(AppError) -> [ThreadEntry] {
+        switch try await call({
+            try await client.threadEntries(path: .init(threadId: threadID), query: .init(limit: limit))
+        }) {
         case .ok(let ok): return try decoded { try ok.body.json }
         case .notFound(let refused): throw try refusal { try refused.body.json }
         case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// Sends a post in the thread, and gives back the post and the runs that reply to it as they start.
+    public func sendPost(_ text: String, to threadID: ChatThread.ID) async throws(AppError) -> SentPost {
+        switch try await call({
+            try await client.sendPost(path: .init(threadId: threadID), body: .json(NewMessage(text: text)))
+        }) {
+        case .accepted(let accepted): return try decoded { try accepted.body.json }
+        case .notFound(let refused): throw try refusal { try refused.body.json }
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
         case .internalServerError(let failed): throw try refusal { try failed.body.json }
         case .unauthorized, .forbidden: throw .signedOut
         case .undocumented: throw .unexpected

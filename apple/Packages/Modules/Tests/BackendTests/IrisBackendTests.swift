@@ -144,7 +144,7 @@ struct IrisBackendTests {
         let later = backend(now: signedInAt.addingTimeInterval(3600))
 
         async let first = later.tasks(of: agent)
-        async let second = later.recentRuns(of: agent, limit: 20)
+        async let second = later.entries(of: agent, limit: 20)
         _ = try await (first, second)
 
         let refreshes = await server.requests.filter { $0.url?.path == "/token" }.count - 1
@@ -198,15 +198,19 @@ struct IrisBackendTests {
         #expect(try await backend.tasks(of: agent).isEmpty)
     }
 
-    @Test func readsAsManyRunsAsAskedWithTheirConversations() async throws {
+    @Test func readsAThreadsEntriesAsAskedWithTheRunsConversations() async throws {
         let backend = backend()
         try await signIn(backend)
 
-        let runs = try await backend.recentRuns(of: agent, limit: 1)
+        let entries = try await backend.entries(of: agent, limit: 2)
 
-        let run = try #require(runs.first)
+        guard case .case2(let ran) = entries.first, case .case1(let posted) = entries.last else {
+            Issue.record("expected a run and then its post, got \(entries)")
+            return
+        }
+        let run = ran.run
         #expect(run.endedAt == Date(timeIntervalSince1970: 1_794_261_607))
-        #expect(run.taskId == nil)
+        #expect(run.postId == posted.post.id)
         guard case .case2(let assistant) = run.messages[1], case .case2(let call) = assistant.parts.first else {
             Issue.record("expected the assistant's tool call, got \(run.messages[1])")
             return
@@ -214,28 +218,24 @@ struct IrisBackendTests {
         #expect(call.name == "weather")
         #expect(call.input?.value as? [String: String] == ["city": "Tokyo"])
         #expect(run.messages.count == 4)
-        #expect(await server.requests.last { $0.url?.path == "/api/agents/\(agent)/runs" }?.url?.query == "limit=1")
+        #expect(await server.requests.last { $0.url?.path == "/api/threads/\(agent)/entries" }?.url?.query == "limit=2")
     }
 
-    @Test func sendsAMessageAsJSONAndGetsBackTheRunItStarted() async throws {
+    @Test func sendsAPostAsJSONAndGetsBackThePostAndTheRunsItStarted() async throws {
         let backend = backend()
         try await signIn(backend)
 
-        let run = try await backend.sendMessage("こんにちは", to: agent)
+        let sent = try await backend.sendPost("こんにちは", to: agent)
 
-        #expect(run.taskId == nil)
-        #expect(run.endedAt == nil)
-        guard case .case1(let user) = run.messages.first else {
-            Issue.record("expected the user's message, got \(run.messages)")
-            return
-        }
-        #expect(user.text == "こんにちは")
+        #expect(sent.post.text == "こんにちは")
+        #expect(sent.runs.map(\.postId) == [sent.post.id])
+        #expect(sent.runs.first?.endedAt == nil)
         await #expect(throws: AppError.refused(message: "✖ Too small: expected string to have >=1 characters\n  → at text")) {
-            try await backend.sendMessage(" ", to: agent)
+            try await backend.sendPost(" ", to: agent)
         }
     }
 
-    @Test func followsAnAgentsEventsOnItsSocketUntilTheServerClosesIt() async throws {
+    @Test func followsAThreadsEventsOnItsSocketUntilTheServerClosesIt() async throws {
         let backend = backend()
         try await signIn(backend)
         await server.sendOnEvents([
@@ -261,7 +261,7 @@ struct IrisBackendTests {
         #expect(
             heard.withLock { $0 } == ["open", "run 6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f", "writing こん"])
         let opened = try #require(await server.requests.last)
-        #expect(opened.url?.absoluteString == "wss://iris.test/api/agents/\(agent)/events")
+        #expect(opened.url?.absoluteString == "wss://iris.test/api/threads/\(agent)/events")
         #expect(opened.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
     }
 

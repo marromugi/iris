@@ -6,6 +6,11 @@ enum Loadable<Value> {
     case loaded(Value)
     case failed(AppError)
 
+    /// What was read, once it is there.
+    var value: Value? {
+        if case .loaded(let value) = self { value } else { nil }
+    }
+
     /// What the screen has after reading again. What is already shown stays when the read is cancelled (the screen
     /// went away) or when reading it again fails (coming back to the screen offline); only a first read shows its
     /// failure. An ended sign-in always shows, since nothing read from then on can work without signing in again.

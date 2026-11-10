@@ -1,21 +1,26 @@
 import Backend
 import SwiftUI
 
-/// One run in a thread: what started it (a schedule and its prompt, or the message the user sent), then the
-/// conversation, then, until the model writes, the thinking line where the reply will go; once it writes, the message
-/// so far and how the run stands.
+/// One run in a thread: the schedule that started it with its prompt (a run that replies to a post leaves the post to
+/// be shown on its own), whose run it is when the thread has several agents, then the conversation, then, until the
+/// model writes, the thinking line where the reply will go; once it writes, the message so far and how the run stands.
 struct RunView: View {
     let run: Run
     /// How the run is getting on, while it is carried on.
     var progress: RunProgress?
+    /// The name of the agent whose run it is, shown in a thread of several agents.
+    var speaker: String?
 
     var body: some View {
         let conversation = Conversation(run.messages)
         VStack(alignment: .leading, spacing: 24) {
-            if run.taskId == nil {
-                UserBubble(text: conversation.prompt ?? "")
-            } else {
+            if run.postId == nil {
                 ScheduleRanCard(prompt: conversation.prompt, startedAt: run.startedAt)
+            }
+            if let speaker {
+                Text(speaker)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             ForEach(conversation.blocks) { block in
                 BlockView(kind: block.kind)
@@ -82,7 +87,7 @@ private struct BlockView: View {
 }
 
 /// What the user said, on the right.
-private struct UserBubble: View {
+struct UserBubble: View {
     let text: String
 
     var body: some View {

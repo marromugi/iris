@@ -3,6 +3,17 @@
 
 /// One of the user's agents: what it is called, and when its latest run started (nil until it first runs).
 public typealias Agent = Components.Schemas.Agent
+/// One of the user's threads as the home lists it: an agent's one-to-one thread, or a group of agents. Not `Thread`,
+/// which is Foundation's own.
+public typealias ChatThread = Components.Schemas.Thread
+/// What making a group sends: its name and its members.
+public typealias NewGroup = Components.Schemas.NewGroup
+/// What the user said in a thread.
+public typealias Post = Components.Schemas.Post
+/// A post or a run of a thread.
+public typealias ThreadEntry = Components.Schemas.ThreadEntry
+/// A post sent, with the runs that reply to it as they start.
+public typealias SentPost = Components.Schemas.SentPost
 /// What adding an agent sends: its name.
 public typealias NewAgent = Components.Schemas.NewAgent
 /// A task an agent runs on its schedule, with when it runs next. Not `Task`, which is Swift's own.
@@ -22,3 +33,4 @@ public typealias RunEvent = Components.Schemas.RunEvent
 public typealias RunProgress = Components.Schemas.RunProgress
 
 extension Agent: Identifiable {}
+extension ChatThread: Identifiable {}

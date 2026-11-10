@@ -1,26 +1,38 @@
 import Backend
 import SwiftUI
 
-/// One agent's runs as one thread, oldest first, opening at the latest, with a field at the bottom to send the agent a
-/// message. While it is shown, the agent's events keep it current: each run as it changes, and while one is carried on,
-/// whether it is starting or thinking, and its reply as it is written. The agent's tasks are a step away.
+/// One thread, oldest first, opening at the latest: the user's posts, and the runs that reply to them or that a schedule
+/// started, each run with its agent's name when the thread has several agents. A field at the bottom sends a post. While
+/// it is shown, the thread's events keep it current: each post and run as it changes, and while a run is carried on,
+/// whether it is starting or thinking, and its reply as it is written. An agent's one-to-one thread has its tasks a step
+/// away.
 struct ThreadScreen: View {
-    let agent: any AgentBackend
-    let name: String
-    @State private var thread: AgentThread
+    let thread: ChatThread
+    /// The names of the user's agents by ID, for naming whose run each is.
+    let agentNames: [Agent.ID: String]
+    let directory: any AgentDirectory
+    @State private var open: OpenThread
 
-    init(agent: any AgentBackend, name: String) {
-        self.agent = agent
-        self.name = name
-        _thread = State(initialValue: AgentThread(backend: agent))
+    init(thread: ChatThread, agentNames: [Agent.ID: String], directory: any AgentDirectory) {
+        self.thread = thread
+        self.agentNames = agentNames
+        self.directory = directory
+        _open = State(initialValue: OpenThread(backend: directory.thread(id: thread.id)))
     }
 
     var body: some View {
-        LoadableContent(state: thread.runs, onRetry: { thread.retry() }) { runs in
+        LoadableContent(state: open.entries, onRetry: { open.retry() }) { entries in
             ScrollView {
                 VStack(alignment: .leading, spacing: 48) {
-                    ForEach(runs.reversed(), id: \.id) { run in
-                        RunView(run: run, progress: thread.progress[run.id])
+                    ForEach(entries.reversed()) { entry in
+                        switch entry {
+                        case .post(let post):
+                            UserBubble(text: post.text)
+                        case .run(let run):
+                            RunView(
+                                run: run, progress: open.progress[run.id],
+                                speaker: thread.agentId == nil ? agentNames[run.agentId] : nil)
+                        }
                     }
                 }
                 .padding()
@@ -30,55 +42,65 @@ struct ThreadScreen: View {
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .scrollDismissesKeyboard(.interactively)
             .overlay {
-                if runs.isEmpty {
+                if entries.isEmpty {
                     ContentUnavailableView(
                         "会話はまだありません", systemImage: "bubble.left.and.bubble.right",
-                        description: Text("メッセージを送るか、タスクが決まった時刻に動くと、ここに会話が残ります。"))
+                        description: Text(emptyDescription))
                 }
             }
-            .refreshable { await thread.load() }
+            .refreshable { await open.load() }
             .safeAreaInset(edge: .bottom) {
-                MessageBar(text: $thread.draft, canSend: thread.canSend) { thread.send() }
+                MessageBar(text: $open.draft, canSend: open.canSend) { open.send() }
             }
         }
-        .navigationTitle(name)
+        .navigationTitle(thread.name)
         .toolbarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                NavigationLink {
-                    TasksScreen(agent: agent)
-                } label: {
-                    Label("タスク", systemImage: "checklist")
+            if let agentID = thread.agentId {
+                ToolbarItem(placement: .primaryAction) {
+                    NavigationLink {
+                        TasksScreen(agent: directory.agent(id: agentID))
+                    } label: {
+                        Label("タスク", systemImage: "checklist")
+                    }
                 }
             }
         }
-        .alert("送れませんでした", isPresented: $thread.isShowingSendProblem, presenting: thread.sendProblem) { _ in
+        .alert("送れませんでした", isPresented: $open.isShowingSendProblem, presenting: open.sendProblem) { _ in
             Button("OK") {}
         } message: { problem in
             Text(problem.message ?? "")
         }
-        .task { await thread.follow() }
+        .task { await open.follow() }
+    }
+
+    private var emptyDescription: String {
+        thread.agentId == nil
+            ? "メッセージを送ると、@ で名前を挙げたエージェントが、挙げなければ全員が返事をします。"
+            : "メッセージを送るか、タスクが決まった時刻に動くと、ここに会話が残ります。"
     }
 }
 
 #if DEBUG
+    private let names = Dictionary(uniqueKeysWithValues: Samples.agents.map { ($0.id, $0.name) })
+
     #Preview("実行あり") {
         NavigationStack {
-            ThreadScreen(agent: FakeAgentBackend(), name: "エージェント")
+            ThreadScreen(thread: Samples.threads[1], agentNames: names, directory: FakeAgentDirectory())
+        }
+    }
+
+    #Preview("グループ") {
+        NavigationStack {
+            ThreadScreen(thread: Samples.threads[0], agentNames: names, directory: FakeAgentDirectory())
         }
     }
 
     #Preview("実行なし") {
         NavigationStack {
-            ThreadScreen(agent: FakeAgentBackend(.init(runs: [])), name: "エージェント")
-        }
-    }
-
-    #Preview("返事待ち") {
-        NavigationStack {
             ThreadScreen(
-                agent: FakeAgentBackend(.init(runs: [Samples.sentRun, Samples.mailRun, Samples.weatherRun])),
-                name: "エージェント")
+                thread: Samples.threads[1], agentNames: names,
+                directory: FakeAgentDirectory(thread: FakeThreadBackend(.init(runs: [], posts: []))))
         }
     }
 #endif
