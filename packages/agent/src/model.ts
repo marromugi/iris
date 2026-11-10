@@ -8,10 +8,20 @@ export interface ToolSpec {
   readonly inputSchema: z.core.JSONSchema.BaseSchema;
 }
 
+/**
+ * How the model is getting on with its next message before the message is whole: thinking, or
+ * writing, with the text written so far.
+ */
+export type ModelProgress =
+  | { readonly type: "thinking" }
+  | { readonly type: "writing"; readonly text: string };
+
 export interface ModelRequest {
   readonly system: string | undefined;
   readonly messages: readonly Message[];
   readonly tools: readonly ToolSpec[];
+  /** Called as the model works on the message, by a model that can say. */
+  readonly onProgress?: (progress: ModelProgress) => void;
 }
 
 /**

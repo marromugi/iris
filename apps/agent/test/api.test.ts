@@ -7,6 +7,7 @@ import { agentApi, agentApiDocument, type UserProps } from "../src/api/api";
 import * as store from "../src/store";
 import { openDatabase } from "../src/users/database";
 import { users } from "../src/users/schema";
+import { listen } from "./run-events";
 import { scriptedModel } from "./worker";
 
 afterEach(async () => {
@@ -104,6 +105,7 @@ test("answers 404 for an agent the user doesn't have, and 400 for an ID that isn
     }),
     await call(userId, `/api/agents/${missing}/runs`),
     await post(userId, `/api/agents/${missing}/messages`, { text: "Hello" }),
+    await call(userId, `/api/agents/${missing}/events`, { headers: { Upgrade: "websocket" } }),
   ];
 
   for (const response of responses) {
@@ -218,6 +220,57 @@ test("sends a message to an agent, which starts one of its runs, and says why on
   });
   expect(await (await call(userId, `/api/agents/${agentId}/runs`)).json()).toEqual([run]);
   expect(empty.status).toBe(400);
+});
+
+test("an agent's event socket hears a sent message's run start, get on, and end", async () => {
+  const userId = await addUser("一郎");
+  const agentId = await firstAgentId(userId);
+  const opened = await call(userId, `/api/agents/${agentId}/events`, {
+    headers: { Upgrade: "websocket" },
+  });
+  expect(opened.status).toBe(101);
+  const socket = listen(opened.webSocket);
+  scriptedModel.push((request) => {
+    request.onProgress?.({ type: "thinking" });
+    request.onProgress?.({ type: "writing", text: "Hel" });
+    // Within the same 100 ms, so it doesn't go out; the run event after it has the whole reply.
+    request.onProgress?.({ type: "writing", text: "Hello" });
+    return { role: "assistant", parts: [{ type: "text", text: "Hello." }] };
+  });
+
+  const sent: { id: string } = await (
+    await post(userId, `/api/agents/${agentId}/messages`, { text: "Hi" })
+  ).json();
+  await runDurableObjectAlarm(env.USER_AGENT.getByName(userId));
+  const events = await socket.heard(6);
+
+  expect(events.map((event) => (event.type === "run" ? "run" : event.progress.type))).toEqual([
+    "run",
+    "starting",
+    "thinking",
+    "writing",
+    "run",
+    "run",
+  ]);
+  expect(events[3]).toEqual({
+    type: "progress",
+    runId: sent.id,
+    progress: { type: "writing", text: "Hel" },
+  });
+  const last = events.at(-1);
+  expect(last?.type === "run" && last.run).toMatchObject({
+    id: sent.id,
+    endedAt: expect.any(String),
+    messages: [
+      { role: "user", text: "Hi" },
+      { role: "assistant", parts: [{ type: "text", text: "Hello." }] },
+    ],
+  });
+  const plain = await call(userId, `/api/agents/${agentId}/events`);
+  expect([plain.status, await plain.json()]).toEqual([
+    426,
+    { message: "Open this as a WebSocket" },
+  ]);
 });
 
 test("refuses a request that reaches it without a signed-in user", async () => {

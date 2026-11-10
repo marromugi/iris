@@ -98,8 +98,43 @@ export const runSchema = z
 
 export function runJson(run: Run): z.infer<typeof runSchema> {
   return {
-    ...run,
+    id: run.id,
+    taskId: run.taskId,
     startedAt: timeJson(run.startedAt),
     endedAt: run.endedAt === null ? null : timeJson(run.endedAt),
+    lastError: run.lastError,
+    failedAttempts: run.failedAttempts,
+    messages: run.messages,
   };
 }
+
+const runProgressSchema = z
+  .discriminatedUnion("type", [
+    z.object({ type: z.literal("starting") }).meta({ description: "The run was picked up" }),
+    z
+      .object({ type: z.literal("thinking") })
+      .meta({ description: "The model is asked, and hasn't written anything of this message yet" }),
+    z
+      .object({ type: z.literal("writing"), text: z.string() })
+      .meta({ description: "The model is writing; text is the message so far" }),
+  ])
+  .meta({ id: "RunProgress" });
+
+export const runEventSchema = z
+  .discriminatedUnion("type", [
+    z.object({ type: z.literal("run"), run: runSchema }).meta({
+      description:
+        "A run started, got a message, or ended or failed an attempt: the run as it is now",
+    }),
+    z.object({ type: z.literal("progress"), runId: z.uuid(), progress: runProgressSchema }).meta({
+      description:
+        "How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every 100 ms; the run's next run event has the whole message.",
+    }),
+  ])
+  .meta({
+    id: "RunEvent",
+    description:
+      "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing.",
+  });
+
+export type RunEvent = z.infer<typeof runEventSchema>;

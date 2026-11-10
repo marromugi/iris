@@ -1,8 +1,9 @@
 import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
-import { nextWakeAt, runNext } from "./runner";
 import { type NewMessage, newMessageSchema } from "./message";
+import { RunBroadcast } from "./run-broadcast";
+import { nextWakeAt, runNext } from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
@@ -18,15 +19,49 @@ export type SendMessageResult =
 
 /**
  * Builds the Durable Object class for one user. One object per user holds that user's agents,
- * and each agent's tasks and runs; `agentFor` gives the model and tools every run uses.
+ * and each agent's tasks and runs; `agentFor` gives the model and tools every run uses. Its
+ * `fetch` opens a WebSocket on which an agent's runs are sent as they happen (`RunBroadcast`).
  *
  * The methods that take an agent's ID answer undefined when the user has no agent with it.
  */
 export function createUserAgent(agentFor: (env: Env) => Agent) {
   return class UserAgent extends DurableObject<Env> {
+    private readonly broadcast: RunBroadcast;
+
     constructor(ctx: DurableObjectState, env: Env) {
       super(ctx, env);
       store.migrate(ctx.storage);
+      this.broadcast = new RunBroadcast(ctx);
+    }
+
+    /**
+     * Opens the WebSocket for the events of the agent named by the `agentId` search parameter:
+     * 101 with the socket, 404 when the user has no such agent, 426 for a request that isn't a
+     * WebSocket upgrade.
+     */
+    override async fetch(request: Request): Promise<Response> {
+      const agentId = new URL(request.url).searchParams.get("agentId");
+      if (agentId === null || !store.hasAgent(this.ctx.storage, agentId)) {
+        return new Response(null, { status: 404 });
+      }
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response(null, { status: 426 });
+      }
+      const { 0: client, 1: server } = new WebSocketPair();
+      this.broadcast.accept(agentId, server);
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    /** The app sends nothing on its socket; whatever comes is let go. */
+    override webSocketMessage(): void {}
+
+    override webSocketClose(socket: WebSocket, code: number, reason: string): void {
+      try {
+        // 1005 and 1006 say no code came; they can't be sent back.
+        socket.close(code === 1005 || code === 1006 ? 1000 : code, reason);
+      } catch {
+        // Already closed.
+      }
     }
 
     /** The user's agents in the order they were added. */
@@ -90,6 +125,7 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       if (run === undefined) {
         throw new Error(`Run ${id} was started but isn't stored.`);
       }
+      this.broadcast.changed(id);
       await this.wakeAt(nextWakeAt(this.ctx.storage));
       return { ok: true, run };
     }
@@ -111,8 +147,17 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     }
 
     override async alarm(): Promise<void> {
-      const wakeAt = await runNext(this.ctx.storage, agentFor(this.env), () => new Date());
-      await this.wakeAt(wakeAt);
+      try {
+        const wakeAt = await runNext(
+          this.ctx.storage,
+          agentFor(this.env),
+          () => new Date(),
+          this.broadcast,
+        );
+        await this.wakeAt(wakeAt);
+      } finally {
+        this.broadcast.idle();
+      }
     }
 
     private async wakeAt(time: Date | undefined): Promise<void> {

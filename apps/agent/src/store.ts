@@ -330,6 +330,7 @@ export function recordRunFailure(
 
 export interface Run {
   readonly id: string;
+  readonly agentId: string;
   readonly taskId: string | null;
   readonly startedAt: Date;
   /**
@@ -346,6 +347,7 @@ export interface Run {
 function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Run {
   return {
     id: row.id,
+    agentId: row.agentId,
     taskId: row.taskId,
     startedAt: row.startedAt,
     endedAt: row.endedAt,
@@ -353,6 +355,14 @@ function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Ru
     failedAttempts: row.failedAttempts,
     messages: loadConversation(storage, row.id),
   };
+}
+
+export function agentOfRun(storage: DurableObjectStorage, runId: string): string | undefined {
+  return database(storage)
+    .select({ agentId: runs.agentId })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .get()?.agentId;
 }
 
 export function findRun(storage: DurableObjectStorage, id: string): Run | undefined {

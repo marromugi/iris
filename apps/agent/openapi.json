@@ -3,7 +3,7 @@
   "info": {
     "title": "iris",
     "version": "1",
-    "description": "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer."
+    "description": "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they happen (RunEvent)."
   },
   "servers": [
     {
@@ -30,125 +30,53 @@
       }
     },
     "schemas": {
-      "Me": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string",
-            "description": "The name the user's invite gave them"
-          }
-        },
-        "required": [
-          "id",
-          "name"
-        ]
-      },
-      "Error": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "message"
-        ]
-      },
-      "Agent": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "lastRanAt": {
-            "type": [
-              "string",
-              "null"
+      "RunEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "run"
+                ]
+              },
+              "run": {
+                "$ref": "#/components/schemas/Run"
+              }
+            },
+            "required": [
+              "type",
+              "run"
             ],
-            "format": "date-time",
-            "description": "When its latest run started; null until it first runs"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "lastRanAt"
-        ]
-      },
-      "Task": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
+            "description": "A run started, got a message, or ended or failed an attempt: the run as it is now"
           },
-          "prompt": {
-            "type": "string"
-          },
-          "schedule": {
+          {
             "type": "object",
             "properties": {
-              "cron": {
+              "type": {
                 "type": "string",
-                "minLength": 1
+                "enum": [
+                  "progress"
+                ]
               },
-              "timeZone": {
-                "type": "string"
+              "runId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "progress": {
+                "$ref": "#/components/schemas/RunProgress"
               }
             },
             "required": [
-              "cron",
-              "timeZone"
-            ]
-          },
-          "nextRunAt": {
-            "type": "string",
-            "format": "date-time"
+              "type",
+              "runId",
+              "progress"
+            ],
+            "description": "How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every 100 ms; the run's next run event has the whole message."
           }
-        },
-        "required": [
-          "id",
-          "prompt",
-          "schedule",
-          "nextRunAt"
-        ]
-      },
-      "NewTask": {
-        "type": "object",
-        "properties": {
-          "prompt": {
-            "type": "string",
-            "minLength": 1
-          },
-          "schedule": {
-            "type": "object",
-            "properties": {
-              "cron": {
-                "type": "string",
-                "minLength": 1
-              },
-              "timeZone": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "cron",
-              "timeZone"
-            ]
-          }
-        },
-        "required": [
-          "prompt",
-          "schedule"
-        ]
+        ],
+        "description": "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing."
       },
       "Run": {
         "type": "object",
@@ -317,6 +245,179 @@
               "content"
             ]
           }
+        ]
+      },
+      "RunProgress": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "starting"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "description": "The run was picked up"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "thinking"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "description": "The model is asked, and hasn't written anything of this message yet"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "writing"
+                ]
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ],
+            "description": "The model is writing; text is the message so far"
+          }
+        ]
+      },
+      "Me": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "The name the user's invite gave them"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "Agent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "lastRanAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When its latest run started; null until it first runs"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "lastRanAt"
+        ]
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "schedule": {
+            "type": "object",
+            "properties": {
+              "cron": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timeZone": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "cron",
+              "timeZone"
+            ]
+          },
+          "nextRunAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "prompt",
+          "schedule",
+          "nextRunAt"
+        ]
+      },
+      "NewTask": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 1
+          },
+          "schedule": {
+            "type": "object",
+            "properties": {
+              "cron": {
+                "type": "string",
+                "minLength": 1
+              },
+              "timeZone": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "cron",
+              "timeZone"
+            ]
+          }
+        },
+        "required": [
+          "prompt",
+          "schedule"
         ]
       },
       "NewMessage": {

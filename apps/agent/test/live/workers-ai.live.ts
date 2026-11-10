@@ -1,4 +1,4 @@
-import { defineTool, type Message, nextAction, run } from "@iris/agent";
+import { defineTool, type Message, type ModelProgress, nextAction, run } from "@iris/agent";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
@@ -22,11 +22,17 @@ test("the real model calls a tool and answers with its result", async () => {
     { role: "user", text: "Use the add tool to add 17 and 25, then tell me the result." },
   ];
 
-  for await (const message of run({ model, tools: [add] }, conversation, { maxSteps: 6 })) {
+  const heard: ModelProgress["type"][] = [];
+  const onProgress = (progress: ModelProgress) => heard.push(progress.type);
+  for await (const message of run({ model, tools: [add] }, conversation, {
+    maxSteps: 6,
+    onProgress,
+  })) {
     conversation.push(message);
   }
 
   console.log(JSON.stringify(conversation, null, 2));
+  expect(heard).toContain("thinking");
   expect(conversation).toContainEqual({
     role: "tool",
     callId: expect.any(String),

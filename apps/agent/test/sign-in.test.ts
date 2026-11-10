@@ -74,6 +74,30 @@ describe("a new user", () => {
     });
   });
 
+  test("opens an agent's event socket with the token, with or without an Origin", async () => {
+    const sheet = await openSignInSheet();
+    const registered = await sheet.register(new FakeAuthenticator(BASE), await issueInvite("花子"));
+    const tokens = await sheet.finish(registered.body.redirectTo);
+    const [agent]: { id: string }[] = await (
+      await callApi(sheet.call, tokens.access_token, "/agents")
+    ).json();
+    const events = `/agents/${agent?.id}/events`;
+
+    const opened = await callApi(sheet.call, tokens.access_token, events, {
+      headers: { Upgrade: "websocket" },
+    });
+    const withOrigin = await callApi(sheet.call, tokens.access_token, events, {
+      headers: { Upgrade: "websocket", Origin: "https://example.com" },
+    });
+
+    for (const response of [opened, withOrigin]) {
+      expect(response.status).toBe(101);
+      expect(response.webSocket).not.toBeNull();
+      response.webSocket?.accept();
+      response.webSocket?.close();
+    }
+  });
+
   test("signs in again with their passkey alone, as the same user", async () => {
     const { phone, tokens, call } = await newUser("太郎");
 

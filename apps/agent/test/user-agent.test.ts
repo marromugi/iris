@@ -4,7 +4,9 @@ import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
 import migrations from "../drizzle/migrations";
 import { MAX_FAILED_ATTEMPTS, RETRY_DELAY_MS, runNext } from "../src/runner";
+import { RunBroadcast } from "../src/run-broadcast";
 import * as store from "../src/store";
+import { listen } from "./run-events";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
@@ -335,6 +337,23 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
   );
 });
 
+test("a socket that opens while a run is being written hears the text so far at once", async () => {
+  const agentId = await firstAgentId();
+  const sent = await userAgent().sendMessage(agentId, { text: "Hi" });
+  const runId = sent?.ok ? sent.run.id : "";
+
+  const first = await runInDurableObject(userAgent(), async (_, state) => {
+    const broadcast = new RunBroadcast(state);
+    broadcast.progress(runId, { type: "writing", text: "Hel" });
+    const { 0: client, 1: server } = new WebSocketPair();
+    broadcast.accept(agentId, server);
+    const [event] = await listen(client).heard(1);
+    return event;
+  });
+
+  expect(first).toEqual({ type: "progress", runId, progress: { type: "writing", text: "Hel" } });
+});
+
 test("a message starts a run due at once, which the model answers after the agent's earlier runs", async () => {
   const earlier = new Date(Date.now() - 60_000);
   await insertTask(earlier);
@@ -350,6 +369,7 @@ test("a message starts a run due at once, which the model answers after the agen
     ok: true,
     run: {
       id: expect.any(String),
+      agentId,
       taskId: null,
       startedAt: expect.any(Date),
       endedAt: null,
