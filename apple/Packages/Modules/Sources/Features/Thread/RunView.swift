@@ -19,14 +19,20 @@ struct RunView: View {
             ForEach(conversation.blocks) { block in
                 BlockView(kind: block.kind)
             }
-            if case .case3(let writing)? = progress {
-                Text(writing.text)
-                    .textSelection(.enabled)
+            let status = RunStatus(of: run, progress: progress)
+            switch status {
+            case .starting:
+                ThinkingLine(stage: .starting)
+            case .thinking:
+                ThinkingLine(stage: .thinking)
+            default:
+                if case .case3(let writing)? = progress {
+                    Text(writing.text)
+                        .textSelection(.enabled)
+                }
+                // A failure from an earlier attempt is no longer the news while another attempt is under way.
+                RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
             }
-            // A failure from an earlier attempt is no longer the news while another attempt is under way.
-            RunEnd(
-                status: RunStatus(of: run, progress: progress), endedAt: run.endedAt,
-                lastError: progress == nil ? run.lastError : nil)
         }
     }
 }
