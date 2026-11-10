@@ -11,12 +11,23 @@ enum Loadable<Value> {
     /// failure. An ended sign-in always shows, since nothing read from then on can work without signing in again.
     func reading(_ read: () async throws(AppError) -> Value) async -> Loadable<Value> {
         do throws(AppError) {
-            return .loaded(try await read())
-        } catch .cancelled {
-            return self
-        } catch .signedOut {
-            return .failed(.signedOut)
+            return applying(.success(try await read()))
         } catch {
+            return applying(.failure(error))
+        }
+    }
+
+    /// What the screen has once a read ends with `result`, by the rules of `reading`, kept apart for a screen whose
+    /// value changes while the read is on its way: it applies the result to what the screen has by then.
+    func applying(_ result: Result<Value, AppError>) -> Loadable<Value> {
+        switch result {
+        case .success(let value):
+            return .loaded(value)
+        case .failure(.cancelled):
+            return self
+        case .failure(.signedOut):
+            return .failed(.signedOut)
+        case .failure(let error):
             if case .loaded = self { return self }
             return .failed(error)
         }

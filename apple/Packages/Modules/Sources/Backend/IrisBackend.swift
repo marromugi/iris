@@ -17,20 +17,23 @@ public final class IrisBackend: Sendable {
     let client: Client
     let origin: URL
     let openSocket: OpenSocket
+    let socketPings: SocketPings
 
     /// `origin` is the server's origin; `send` carries every request and `openSocket` every WebSocket (`URLSession` by
-    /// default).
+    /// default), which `socketPings` checks on.
     public init(
         origin: URL,
         store: some CredentialStore,
         send: @escaping Send = { request in try await URLSession.shared.data(for: request) },
         openSocket: @escaping OpenSocket = { request in URLSessionEventSocket(request: request) },
+        socketPings: SocketPings = SocketPings(every: .seconds(30), answerWithin: .seconds(10)),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         vault = SignInVault(origin: origin, store: store, send: send, now: now)
         client = Client(serverURL: origin, transport: AuthorizedTransport(vault: vault, send: send))
         self.origin = origin
         self.openSocket = openSocket
+        self.socketPings = socketPings
     }
 
     /// Whether the app holds a sign-in. The server may still refuse it; calls then throw `.signedOut`.

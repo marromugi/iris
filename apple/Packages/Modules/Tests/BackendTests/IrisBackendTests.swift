@@ -281,6 +281,30 @@ struct IrisBackendTests {
         #expect(await !backend.isSignedIn)
     }
 
+    @Test func aSocketThatCantBeReachedIsOfflineAndOneForAnotherAgentUnexpected() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        await #expect(throws: AppError.unexpected) {
+            try await backend.followEvents(of: "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e", onOpen: {}, onEvent: { _ in })
+        }
+        await server.dropSockets()
+        await #expect(throws: AppError.offline) {
+            try await backend.followEvents(of: agent, onOpen: {}, onEvent: { _ in })
+        }
+        #expect(await backend.isSignedIn)
+    }
+
+    @Test func closesASocketWhosePingGoesUnanswered() async throws {
+        let backend = IrisBackend(
+            origin: server.origin, store: store, send: server.send, openSocket: server.openSocket,
+            socketPings: SocketPings(every: .milliseconds(10), answerWithin: .milliseconds(10)))
+        try await signIn(backend)
+        await server.goSilentOnSockets()
+
+        try await backend.followEvents(of: agent, onOpen: {}, onEvent: { _ in })
+    }
+
     @Test func aCallWithoutASignInIsSignedOut() async throws {
         await #expect(throws: AppError.signedOut) { try await backend().tasks(of: agent) }
         #expect(await server.requests.isEmpty)

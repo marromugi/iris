@@ -8,11 +8,15 @@ final class AgentThread {
     /// How many of the latest runs the thread shows.
     static let runsShown = 50
 
-    /// How long to wait before opening the events socket again: a second after the server closed it, and twice as
-    /// long after each failure in a row, up to 30 seconds.
+    /// How long to wait before opening the events socket again: a second after one that stayed open, and twice as long
+    /// after each failure in a row, up to 30 seconds.
     static func reopenDelay(afterFailures failures: Int) -> Duration {
         .seconds(min(30, 1 << min(failures, 5)))
     }
+
+    /// How long the socket has to stay open for its end not to count as a failure. A socket that fails to open, or
+    /// closes sooner, counts as one.
+    static let openLongEnough: Duration = .seconds(10)
 
     /// The agent's latest runs, latest first. Turns to `.failed(.signedOut)` when the server refuses the sign-in, so
     /// the screen offers to sign in again.
@@ -29,17 +33,29 @@ final class AgentThread {
 
     private let backend: any AgentBackend
     private let wait: @Sendable (Duration) async throws -> Void
-    // Runs that came while a read was on its way, in order, put back on top of what the read brings.
-    private var cameDuringRead: [Run] = []
-    private var readsOnTheWay = 0
+    private let now: () -> ContinuousClock.Instant
+    /// A run that came while a read was on its way: heard on the socket, which replaces what is shown, or answered to a
+    /// send, which only adds what is missing.
+    private enum Arrival {
+        case heard(Run)
+        case sent(Run)
+    }
 
-    /// `wait` sleeps before the socket is opened again (`Task.sleep` by default).
+    // Runs that came while a read was on its way, in order, put back on top of what the read brings.
+    private var cameDuringRead: [Arrival] = []
+    private var readsOnTheWay = 0
+    // When the socket being followed opened; nil while it hasn't.
+    private var openedAt: ContinuousClock.Instant?
+
+    /// `wait` sleeps before the socket is opened again (`Task.sleep` by default); `now` tells how long it stayed open.
     init(
         backend: any AgentBackend,
-        wait: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+        wait: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        now: @escaping () -> ContinuousClock.Instant = { .now }
     ) {
         self.backend = backend
         self.wait = wait
+        self.now = now
     }
 
     /// Whether there is something written to send, and a thread to send it to.
@@ -54,17 +70,26 @@ final class AgentThread {
         set { if !newValue { sendProblem = nil } }
     }
 
-    /// Reads the latest runs. Runs that come from the socket or a send while the read is on its way stay as they came.
+    /// Reads the latest runs. Runs that come from the socket or a send while the read is on its way stay as they came,
+    /// and a read that fails leaves the runs as they are by then.
     func load() async {
         readsOnTheWay += 1
         let first = cameDuringRead.count
-        let read = await runs.reading { () async throws(AppError) -> [Run] in
-            try await backend.recentRuns(limit: Self.runsShown)
+        let result: Result<[Run], AppError>
+        do throws(AppError) {
+            result = .success(try await backend.recentRuns(limit: Self.runsShown))
+        } catch {
+            result = .failure(error)
         }
         readsOnTheWay -= 1
-        runs = read
-        for run in cameDuringRead[first...] {
-            put(run)
+        runs = runs.applying(result)
+        if case .success = result {
+            for arrival in cameDuringRead[first...] {
+                switch arrival {
+                case .heard(let run): place(run)
+                case .sent(let run): placeIfMissing(run)
+                }
+            }
         }
         if readsOnTheWay == 0 { cameDuringRead = [] }
     }
@@ -76,8 +101,9 @@ final class AgentThread {
         return Task { await load() }
     }
 
-    /// Sends what the user wrote and puts the run it starts in the thread. When the server does not take it, the text
-    /// goes back to the field, before anything written since, with the problem to show.
+    /// Sends what the user wrote and puts the run it starts in the thread, unless the socket brought it first, as it
+    /// does when it is open: the socket's is the newer. When the server does not take it, the text goes back to the
+    /// field, before anything written since, with the problem to show.
     @discardableResult
     func send() -> Task<Void, Never>? {
         guard canSend else { return nil }
@@ -88,7 +114,9 @@ final class AgentThread {
         return Task {
             defer { isSending = false }
             do throws(AppError) {
-                put(try await backend.sendMessage(text))
+                let run = try await backend.sendMessage(text)
+                if readsOnTheWay > 0 { cameDuringRead.append(.sent(run)) }
+                placeIfMissing(run)
             } catch {
                 draft = draft.isEmpty ? text : "\(text)\n\(draft)"
                 if error == .signedOut {
@@ -104,35 +132,48 @@ final class AgentThread {
     func hear(_ event: RunEvent) {
         switch event {
         case .case1(let changed):
-            put(changed.run)
+            progress[changed.run.id] = nil
+            if readsOnTheWay > 0 { cameDuringRead.append(.heard(changed.run)) }
+            place(changed.run)
         case .case2(let getting):
             progress[getting.runId] = getting.progress
         }
     }
 
-    /// Keeps the thread current while the screen shows it. It opens the agent's events socket and reads the runs once
-    /// it is open, since nothing from before then comes on it. After the socket closes or fails, it opens it again,
-    /// waiting longer after each failure in a row. It stops when the screen goes away or the sign-in ends.
+    /// Reads the runs and keeps the thread current while the screen shows it. It opens the agent's events socket and
+    /// reads the runs once it is open, since nothing from before then comes on it, or reads them through `/api` when it
+    /// can't open. After the socket closes or fails, it opens it again, waiting longer after each failure in a row; a
+    /// socket that stayed open `openLongEnough` starts the count over. It stops when the screen goes away, and opens
+    /// no more sockets once the sign-in ends.
     func follow() async {
         var failures = 0
         while !Task.isCancelled {
+            openedAt = nil
             do throws(AppError) {
                 try await backend.followEvents {
-                    await self.load()
+                    await self.opened()
                 } onEvent: { event in
                     await self.hear(event)
                 }
-                failures = 0
             } catch .cancelled {
                 return
             } catch .signedOut {
                 runs = .failed(.signedOut)
                 return
             } catch {
-                failures += 1
+                // Counted below, by how long the socket stayed open.
             }
             // The socket also closes when the screen goes away; that is no reason to open it again.
             if Task.isCancelled { return }
+            if let openedAt, now() - openedAt >= Self.openLongEnough {
+                failures = 0
+            } else {
+                failures += 1
+                // Reading through /api keeps the thread current while the socket can't open, and ends a sign-in the
+                // server no longer accepts, should the socket's refusal not have said so.
+                await load()
+                if case .failed(.signedOut) = runs { return }
+            }
             progress = [:]
             do {
                 try await wait(Self.reopenDelay(afterFailures: failures))
@@ -142,16 +183,25 @@ final class AgentThread {
         }
     }
 
-    /// Puts the run in its place among the runs, latest first, in place of what was there; its progress is over.
-    private func put(_ run: Run) {
-        progress[run.id] = nil
-        if readsOnTheWay > 0 { cameDuringRead.append(run) }
+    private func opened() async {
+        openedAt = now()
+        await load()
+    }
+
+    /// Puts the run among the runs unless one with its ID is there.
+    private func placeIfMissing(_ run: Run) {
+        guard case .loaded(let shown) = runs, !shown.contains(where: { $0.id == run.id }) else { return }
+        place(run)
+    }
+
+    /// Puts the run among the runs, latest first, in place of what was there, keeping the latest `runsShown`.
+    private func place(_ run: Run) {
         guard case .loaded(var shown) = runs else { return }
         if let index = shown.firstIndex(where: { $0.id == run.id }) {
             shown[index] = run
         } else {
             shown.insert(run, at: shown.firstIndex { $0.startedAt < run.startedAt } ?? shown.endIndex)
         }
-        runs = .loaded(shown)
+        runs = .loaded(Array(shown.prefix(Self.runsShown)))
     }
 }

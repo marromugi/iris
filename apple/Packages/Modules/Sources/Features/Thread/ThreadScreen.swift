@@ -57,10 +57,7 @@ struct ThreadScreen: View {
         } message: { problem in
             Text(problem.message ?? "")
         }
-        .task {
-            await thread.load()
-            await thread.follow()
-        }
+        .task { await thread.follow() }
     }
 }
 
