@@ -1,20 +1,22 @@
 import Backend
 import SwiftUI
 
-/// One agent's runs as one thread, oldest first, opening at the latest. The agent's tasks are a step away.
+/// One agent's runs as one thread, oldest first, opening at the latest, with a field at the bottom to send the agent a
+/// message. While a run is still going, the thread reads it again until its reply comes. The agent's tasks are a step
+/// away.
 struct ThreadScreen: View {
     let agent: any AgentBackend
     let name: String
-    @State private var runs = Loadable<[Run]>.loading
+    @State private var thread: AgentThread
+
+    init(agent: any AgentBackend, name: String) {
+        self.agent = agent
+        self.name = name
+        _thread = State(initialValue: AgentThread(backend: agent))
+    }
 
     var body: some View {
-        LoadableContent(
-            state: runs,
-            onRetry: {
-                runs = .loading
-                Task { await load() }
-            }
-        ) { runs in
+        LoadableContent(state: thread.runs, onRetry: { thread.retry() }) { runs in
             ScrollView {
                 VStack(alignment: .leading, spacing: 48) {
                     ForEach(runs.reversed(), id: \.id) { run in
@@ -25,14 +27,19 @@ struct ThreadScreen: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .defaultScrollAnchor(.bottom, for: .initialOffset)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .scrollDismissesKeyboard(.interactively)
             .overlay {
                 if runs.isEmpty {
                     ContentUnavailableView(
-                        "実行はまだありません", systemImage: "clock",
-                        description: Text("タスクが決まった時刻に動くと、ここに会話が残ります。"))
+                        "会話はまだありません", systemImage: "bubble.left.and.bubble.right",
+                        description: Text("メッセージを送るか、タスクが決まった時刻に動くと、ここに会話が残ります。"))
                 }
             }
-            .refreshable { await load() }
+            .refreshable { await thread.load() }
+            .safeAreaInset(edge: .bottom) {
+                MessageBar(text: $thread.draft, canSend: thread.canSend) { thread.send() }
+            }
         }
         .navigationTitle(name)
         .toolbarTitleDisplayMode(.inline)
@@ -45,15 +52,14 @@ struct ThreadScreen: View {
                 }
             }
         }
-        .task { await load() }
-    }
-
-    /// How many of the latest runs the thread shows.
-    private static let runsShown = 50
-
-    private func load() async {
-        runs = await runs.reading { () async throws(AppError) -> [Run] in
-            try await agent.recentRuns(limit: Self.runsShown)
+        .alert("送れませんでした", isPresented: $thread.isShowingSendProblem, presenting: thread.sendProblem) { _ in
+            Button("OK") {}
+        } message: { problem in
+            Text(problem.message ?? "")
+        }
+        .task {
+            await thread.load()
+            await thread.keepCurrent()
         }
     }
 }
@@ -68,6 +74,14 @@ struct ThreadScreen: View {
     #Preview("実行なし") {
         NavigationStack {
             ThreadScreen(agent: FakeAgentBackend(.init(runs: [])), name: "エージェント")
+        }
+    }
+
+    #Preview("返事待ち") {
+        NavigationStack {
+            ThreadScreen(
+                agent: FakeAgentBackend(.init(runs: [Samples.sentRun, Samples.mailRun, Samples.weatherRun])),
+                name: "エージェント")
         }
     }
 #endif

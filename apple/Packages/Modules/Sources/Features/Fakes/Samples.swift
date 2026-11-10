@@ -107,6 +107,22 @@
             }
             """)
 
+        /// A message the user just sent, waiting for the agent's reply.
+        static let sentRun = run(
+            """
+            {
+              "id": "9c1e3a5b-7d9f-4b1c-8e2a-4c6e8a0b2d4f",
+              "taskId": null,
+              "startedAt": "2026-11-10T00:05:00Z",
+              "endedAt": null,
+              "lastError": null,
+              "failedAttempts": 0,
+              "messages": [
+                {"role": "user", "text": "請求書の件、返信の下書きを作って。"}
+              ]
+            }
+            """)
+
         /// Many agents, for seeing that the home holds up when there are more than fit on the screen.
         static let agents: [Agent] =
             [
