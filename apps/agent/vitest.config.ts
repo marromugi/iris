@@ -17,6 +17,7 @@ export default defineProject(async () => ({
         fileURLToPath(new URL("./d1-migrations", import.meta.url).href),
       ),
     },
+    globalSetup: ["./test/build-sign-in-client.ts"],
     setupFiles: ["./test/apply-d1-migrations.ts"],
   },
 }));

@@ -3,15 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "postinstall": "wrangler types",
-    "typecheck": "wrangler types && tsc",
+    "postinstall": "wrangler types && pnpm run build:client",
+    "typecheck": "wrangler types && pnpm run build:client && tsc && tsc -p src/sign-in/client",
     "db:generate": "drizzle-kit generate",
     "d1:generate": "drizzle-kit generate --config drizzle.d1.config.ts",
     "d1:migrate:local": "wrangler d1 migrations apply iris --local",
     "dev": "wrangler dev --local --local-protocol https --https-key-path ~/.iris-dev/key.pem --https-cert-path ~/.iris-dev/cert.pem --var ORIGIN:https://localhost:8787",
     "invite": "tsx scripts/issue-invite.ts",
     "test:live": "vitest run --config vitest.live.config.ts",
-    "openapi": "tsx scripts/write-openapi.ts > openapi.json"
+    "openapi": "tsx scripts/write-openapi.ts > openapi.json",
+    "build:client": "esbuild src/sign-in/client/main.ts --bundle --format=iife --target=es2022 --minify --outfile=build/sign-in-client.txt"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",
@@ -25,7 +26,9 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.6.0",
+    "@simplewebauthn/browser": "14.0.0",
     "drizzle-kit": "0.31.11",
+    "esbuild": "0.28.2",
     "tsx": "4.23.15",
     "wrangler": "4.158.0"
   }
