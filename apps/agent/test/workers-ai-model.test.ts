@@ -7,27 +7,40 @@ type Delta = Record<string, unknown>;
 /**
  * Streams the deltas as Workers AI does: a chunk per delta, the last with the finish reason, then
  * one with only the usage and `data: [DONE]`. The text arrives in pieces of a few bytes, so a line
- * is split across reads.
+ * is split across reads. A null finish reason is a stream cut off: it stops before `[DONE]`.
  */
 function completionStreaming(
   deltas: Delta[],
-  finishReason = "stop",
+  finishReason: string | null = "stop",
+  lines: { end: string; keepAlive: boolean; lastEnd: boolean } = {
+    end: "\n",
+    keepAlive: false,
+    lastEnd: true,
+  },
 ): { complete: ChatCompletionStream; inputs: Parameters<ChatCompletionStream>[0][] } {
   const inputs: Parameters<ChatCompletionStream>[0][] = [];
+  const cutOff = finishReason === null;
   const chunk = (delta: Delta, finish: string | null) =>
     `data: ${JSON.stringify({
       object: "chat.completion.chunk",
       model: "@cf/zai-org/glm-4.7-flash",
       choices: [{ index: 0, delta, finish_reason: finish }],
-    })}\n\n`;
-  const text = [
+    })}`;
+  const events = [
     chunk({ role: "assistant", content: "", reasoning_content: null }, null),
+    ...(lines.keepAlive ? ["data: "] : []),
     ...deltas.map((delta, index) =>
-      chunk(delta, index === deltas.length - 1 ? finishReason : null),
+      chunk(delta, index === deltas.length - 1 && !cutOff ? finishReason : null),
     ),
-    `data: ${JSON.stringify({ response: "", usage: { prompt_tokens: 16 } })}\n\n`,
-    "data: [DONE]\n\n",
-  ].join("");
+    ...(cutOff
+      ? []
+      : [
+          `data: ${JSON.stringify({ response: "", usage: { prompt_tokens: 16 } })}`,
+          "data: [DONE]",
+        ]),
+  ];
+  const separator = lines.end + lines.end;
+  const text = events.join(separator) + (lines.lastEnd ? separator : "");
   const bytes = new TextEncoder().encode(text);
   const complete: ChatCompletionStream = async (input) => {
     inputs.push(input);
@@ -149,6 +162,8 @@ test("reports thinking once asked and while reasoning, then writing with the tex
     { reasoning: "Hmm", reasoning_content: "Hmm" },
     { reasoning: " ok", reasoning_content: " ok" },
     { content: "Hel" },
+    // Reasoning once the text has begun is part of writing it, not thinking again.
+    { reasoning: "And", reasoning_content: "And" },
     { content: "lo." },
   ]);
   const heard: ModelProgress[] = [];
@@ -165,6 +180,36 @@ test("reports thinking once asked and while reasoning, then writing with the tex
     { type: "writing", text: "Hel" },
     { type: "writing", text: "Hello." },
   ]);
+});
+
+test("reads CRLF lines, a data line that carries nothing, and a last line without a newline", async () => {
+  const { complete } = completionStreaming([{ content: "OK" }], "stop", {
+    end: "\r\n",
+    keepAlive: true,
+    lastEnd: false,
+  });
+
+  const message = await createWorkersAiModel(complete)({
+    system: undefined,
+    messages: [{ role: "user", text: "Hi" }],
+    tools: [],
+  });
+
+  expect(message).toEqual({ role: "assistant", parts: [{ type: "text", text: "OK" }] });
+});
+
+test("rejects a reply that stops before it finishes", async () => {
+  const { complete } = completionStreaming([{ content: "Hel" }], null);
+
+  await expect(
+    createWorkersAiModel(complete)({
+      system: undefined,
+      messages: [{ role: "user", text: "Hi" }],
+      tools: [],
+    }),
+  ).rejects.toThrow(
+    "Workers AI model @cf/zai-org/glm-4.7-flash's reply stopped before it finished.",
+  );
 });
 
 test("rejects an empty reply, but keeps a refusal as the assistant's text", async () => {

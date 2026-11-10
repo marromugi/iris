@@ -26,8 +26,9 @@ export type ChatCompletionStream = (input: {
  * A `Model` backed by a Workers AI chat completions model, read as it streams: it reports
  * thinking as soon as it is asked and while the model reasons, and writing with the text so far.
  * The Workers AI format stays in this module. Rejects when the call or the stream does, on a chunk
- * it can't read, and when the reply has no message or an empty one (no text, refusal or tool call,
- * as when the model runs out of tokens while reasoning).
+ * it can't read, when the stream ends before a finish reason (cut off), and when the reply has no
+ * message or an empty one (no text, refusal or tool call, as when the model runs out of tokens
+ * while reasoning).
  */
 export function createWorkersAiModel(complete: ChatCompletionStream): Model {
   return async (request) => {
@@ -121,10 +122,11 @@ async function* chunks(stream: ReadableStream): AsyncGenerator<Chunk, void, unde
   }
 }
 
-/** What a `data:` line carries; undefined for any other line of the stream. */
+/** What a `data:` line carries; undefined for any other line of the stream, or one that carries nothing. */
 function dataOf(line: string): string | undefined {
   const trimmed = line.trim();
-  return trimmed.startsWith("data:") ? trimmed.slice("data:".length).trim() : undefined;
+  const data = trimmed.startsWith("data:") ? trimmed.slice("data:".length).trim() : "";
+  return data === "" ? undefined : data;
 }
 
 /** The assistant's message as its chunks add up. */
@@ -145,7 +147,9 @@ class Reply {
     this.choices += 1;
     this.finishReason = choice.finish_reason ?? this.finishReason;
     const delta = choice.delta;
-    if (delta?.reasoning || delta?.reasoning_content) {
+    // Thinking means nothing of this message is written yet; reasoning after the text has begun is
+    // part of writing it.
+    if ((delta?.reasoning || delta?.reasoning_content) && this.text === "" && this.refusal === "") {
       report({ type: "thinking" });
     }
     if (delta?.content || delta?.refusal) {
@@ -169,6 +173,9 @@ class Reply {
   message(): AssistantMessage {
     if (this.choices === 0) {
       throw new Error(`Workers AI model ${this.model} returned no message.`);
+    }
+    if (this.finishReason === undefined) {
+      throw new Error(`Workers AI model ${this.model}'s reply stopped before it finished.`);
     }
     const parts: AssistantMessage["parts"] = [];
     for (const text of [this.text, this.refusal]) {

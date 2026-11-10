@@ -3,7 +3,7 @@
   "info": {
     "title": "iris",
     "version": "1",
-    "description": "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they happen (RunEvent)."
+    "description": "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent)."
   },
   "servers": [
     {
@@ -76,7 +76,7 @@
             "description": "How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every 100 ms; the run's next run event has the whole message."
           }
         ],
-        "description": "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing."
+        "description": "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing. Nothing is sent about what happened before the socket opened, apart from the progress of a run being carried on: open the socket, then read the runs."
       },
       "Run": {
         "type": "object",

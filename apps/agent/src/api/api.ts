@@ -53,7 +53,7 @@ export function agentApiDocument(origin: string) {
       title: "iris",
       version: "1",
       description:
-        "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they happen (RunEvent).",
+        "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent).",
     },
     servers: [{ url: origin }],
     security: [{ iris: [] }],

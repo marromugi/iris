@@ -26,6 +26,26 @@ export interface RunWatcher {
 
 const nobodyWatching: RunWatcher = { changed() {}, progress() {} };
 
+/** The watcher with its failures logged instead of thrown: watching a run never changes how the run goes. */
+function safely(watcher: RunWatcher): RunWatcher {
+  return {
+    changed(runId) {
+      try {
+        watcher.changed(runId);
+      } catch (error) {
+        console.error(`Telling the watcher that run ${runId} changed failed.`, error);
+      }
+    },
+    progress(runId, progress) {
+      try {
+        watcher.progress(runId, progress);
+      } catch (error) {
+        console.error(`Telling the watcher how run ${runId} is getting on failed.`, error);
+      }
+    },
+  };
+}
+
 /**
  * Does one piece of work that is due, then returns when to wake up next (a time already passed
  * when more work is due), or undefined when nothing is waiting. One piece per wake-up keeps each
@@ -44,8 +64,9 @@ export async function runNext(
   storage: DurableObjectStorage,
   agent: Agent,
   now: () => Date,
-  watcher: RunWatcher = nobodyWatching,
+  watching: RunWatcher = nobodyWatching,
 ): Promise<Date | undefined> {
+  const watcher = safely(watching);
   const due = store.nextDueRun(storage, now());
   if (due !== undefined) {
     await carryOn(storage, agent, due, now, watcher);

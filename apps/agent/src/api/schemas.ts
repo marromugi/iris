@@ -108,6 +108,13 @@ export function runJson(run: Run): z.infer<typeof runSchema> {
   };
 }
 
+/**
+ * How often a run's writing goes out at most. Writing that comes sooner waits for the rest of the
+ * interval, and then the latest goes out, unless the run's next `run` event, which has the whole
+ * message, comes first.
+ */
+export const WRITING_EVERY_MS = 100;
+
 const runProgressSchema = z
   .discriminatedUnion("type", [
     z.object({ type: z.literal("starting") }).meta({ description: "The run was picked up" }),
@@ -127,14 +134,13 @@ export const runEventSchema = z
         "A run started, got a message, or ended or failed an attempt: the run as it is now",
     }),
     z.object({ type: z.literal("progress"), runId: z.uuid(), progress: runProgressSchema }).meta({
-      description:
-        "How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every 100 ms; the run's next run event has the whole message.",
+      description: `How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every ${WRITING_EVERY_MS} ms; the run's next run event has the whole message.`,
     }),
   ])
   .meta({
     id: "RunEvent",
     description:
-      "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing.",
+      "One event on the WebSocket at /api/agents/{agentId}/events, which the app opens with the same token as /api. The server sends these as JSON text; the app sends nothing. Nothing is sent about what happened before the socket opened, apart from the progress of a run being carried on: open the socket, then read the runs.",
   });
 
 export type RunEvent = z.infer<typeof runEventSchema>;

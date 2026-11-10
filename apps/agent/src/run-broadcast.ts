@@ -1,9 +1,6 @@
-import { type RunEvent, runJson } from "./api/schemas";
+import { type RunEvent, runJson, WRITING_EVERY_MS } from "./api/schemas";
 import type { RunProgress, RunWatcher } from "./runner";
 import * as store from "./store";
-
-/** How often a run's writing goes out at most; the run's next `run` event has the whole message. */
-export const WRITING_EVERY_MS = 100;
 
 /**
  * Tells each agent's open sockets what happens to its runs: every run as it changes, and how the
@@ -14,6 +11,7 @@ export const WRITING_EVERY_MS = 100;
 export class RunBroadcast implements RunWatcher {
   private live: { agentId: string; runId: string; progress: RunProgress } | undefined;
   private lastWritingAt = Number.NEGATIVE_INFINITY;
+  private waitingWriting: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly ctx: DurableObjectState) {}
 
@@ -31,7 +29,7 @@ export class RunBroadcast implements RunWatcher {
       return;
     }
     if (this.live?.runId === runId) {
-      this.live = undefined;
+      this.idle();
     }
     this.send(run.agentId, { type: "run", run: runJson(run) });
   }
@@ -44,17 +42,35 @@ export class RunBroadcast implements RunWatcher {
     }
     this.live = { agentId, runId, progress };
     if (progress.type === "writing") {
-      if (Date.now() - this.lastWritingAt < WRITING_EVERY_MS) {
+      const wait = this.lastWritingAt + WRITING_EVERY_MS - Date.now();
+      if (wait > 0) {
+        this.waitingWriting ??= setTimeout(() => this.sendWaitingWriting(), wait);
         return;
       }
       this.lastWritingAt = Date.now();
     }
+    this.stopWaiting();
     this.send(agentId, progressEvent(runId, progress));
   }
 
   /** No run is being carried on any more, as when the alarm's wake-up is over. */
   idle(): void {
+    this.stopWaiting();
     this.live = undefined;
+  }
+
+  private sendWaitingWriting(): void {
+    this.waitingWriting = undefined;
+    if (this.live?.progress.type !== "writing") {
+      return;
+    }
+    this.lastWritingAt = Date.now();
+    this.send(this.live.agentId, progressEvent(this.live.runId, this.live.progress));
+  }
+
+  private stopWaiting(): void {
+    clearTimeout(this.waitingWriting);
+    this.waitingWriting = undefined;
   }
 
   private send(agentId: string, event: RunEvent): void {

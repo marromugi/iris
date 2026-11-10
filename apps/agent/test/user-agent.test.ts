@@ -339,8 +339,8 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
 
 test("a socket that opens while a run is being written hears the text so far at once", async () => {
   const agentId = await firstAgentId();
-  const sent = await userAgent().sendMessage(agentId, { text: "Hi" });
-  const runId = sent?.ok ? sent.run.id : "";
+  const runId = crypto.randomUUID();
+  await startRun(runId, agentId, "Hi", new Date());
 
   const first = await runInDurableObject(userAgent(), async (_, state) => {
     const broadcast = new RunBroadcast(state);
@@ -352,6 +352,54 @@ test("a socket that opens while a run is being written hears the text so far at 
   });
 
   expect(first).toEqual({ type: "progress", runId, progress: { type: "writing", text: "Hel" } });
+});
+
+test("writing that comes too soon goes out once the interval is over, as the latest", async () => {
+  const agentId = await firstAgentId();
+  const runId = crypto.randomUUID();
+  await startRun(runId, agentId, "Hi", new Date());
+
+  const heard = await runInDurableObject(userAgent(), async (_, state) => {
+    const broadcast = new RunBroadcast(state);
+    const { 0: client, 1: server } = new WebSocketPair();
+    broadcast.accept(agentId, server);
+    const socket = listen(client);
+    broadcast.progress(runId, { type: "writing", text: "Hel" });
+    broadcast.progress(runId, { type: "writing", text: "Hello" });
+    broadcast.progress(runId, { type: "writing", text: "Hello, wor" });
+    return socket.heard(2);
+  });
+
+  expect(heard.map((event) => event.type === "progress" && event.progress)).toEqual([
+    { type: "writing", text: "Hel" },
+    { type: "writing", text: "Hello, wor" },
+  ]);
+});
+
+test("a watcher that throws changes nothing about the run", async () => {
+  const dueAt = new Date("2026-11-10T08:00:00Z");
+  await insertTask(dueAt);
+  scriptedModel.push((request) => {
+    request.onProgress?.({ type: "writing", text: "You have" });
+    return reply("You have 3 new emails.");
+  });
+  const throwing = {
+    changed() {
+      throw new Error("The socket went away.");
+    },
+    progress() {
+      throw new Error("The socket went away.");
+    },
+  };
+
+  await runInDurableObject(userAgent(), (_, state) =>
+    runNext(state.storage, testAgent, () => dueAt, throwing),
+  );
+
+  const [run] = (await userAgent().recentRuns(await firstAgentId())) ?? [];
+  expect(run?.endedAt).not.toBeNull();
+  expect(run?.lastError).toBeNull();
+  expect(run?.failedAttempts).toBe(0);
 });
 
 test("a message starts a run due at once, which the model answers after the agent's earlier runs", async () => {

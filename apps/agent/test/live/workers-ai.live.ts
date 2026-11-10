@@ -32,7 +32,8 @@ test("the real model calls a tool and answers with its result", async () => {
   }
 
   console.log(JSON.stringify(conversation, null, 2));
-  expect(heard).toContain("thinking");
+  // Writing comes only from text the model streamed; thinking is reported as soon as it is asked.
+  expect(heard).toContain("writing");
   expect(conversation).toContainEqual({
     role: "tool",
     callId: expect.any(String),
