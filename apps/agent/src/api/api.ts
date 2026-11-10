@@ -8,6 +8,7 @@ import { removeTask } from "./routes/agents/[agentId]/tasks/[taskId]/delete";
 import { listTasks } from "./routes/agents/[agentId]/tasks/get";
 import { addTask } from "./routes/agents/[agentId]/tasks/post";
 import { listAgents } from "./routes/agents/get";
+import { addAgent } from "./routes/agents/post";
 import { me } from "./routes/me/get";
 import { runEventSchema } from "./schemas";
 
@@ -34,7 +35,16 @@ export const agentApi = new OpenAPIHono<ApiEnv>({
 agentApi.use("*", signedInUser);
 agentApi.notFound((c) => c.json({ message: "Not found" }, 404));
 agentApi.onError(answerError);
-agentApi.openapiRoutes([me, listAgents, listTasks, addTask, removeTask, recentRuns, sendMessage]);
+agentApi.openapiRoutes([
+  me,
+  listAgents,
+  addAgent,
+  listTasks,
+  addTask,
+  removeTask,
+  recentRuns,
+  sendMessage,
+]);
 agentApi.get(EVENTS_PATH, openEvents);
 agentApi.openAPIRegistry.register("RunEvent", runEventSchema);
 
@@ -53,7 +63,7 @@ export function agentApiDocument(origin: string) {
       title: "iris",
       version: "1",
       description:
-        "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent).",
+        "A user's agents, which they can add, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent).",
     },
     servers: [{ url: origin }],
     security: [{ iris: [] }],

@@ -9,6 +9,7 @@ import { openDatabase } from "../src/users/database";
 import { users } from "../src/users/schema";
 import { listen } from "./run-events";
 import { scriptedModel } from "./worker";
+import { agentThread } from "./agent-thread";
 
 afterEach(async () => {
   scriptedModel.length = 0;
@@ -69,6 +70,21 @@ test("lists the agent a user starts with", async () => {
   expect(await response.json()).toEqual([
     { id: expect.any(String), name: "エージェント", lastRanAt: null },
   ]);
+});
+
+test("adds an agent, which then lists last, and says why one can't be added", async () => {
+  const userId = await addUser("一郎");
+
+  const added = await post(userId, "/api/agents", { name: "株価の確認" });
+  const blank = await post(userId, "/api/agents", { name: " " });
+
+  expect(added.status).toBe(201);
+  const agent = await added.json();
+  expect(agent).toEqual({ id: expect.any(String), name: "株価の確認", lastRanAt: null });
+  const listed: { name: string }[] = await (await call(userId, "/api/agents")).json();
+  expect(listed.map((each) => each.name)).toEqual(["エージェント", "株価の確認"]);
+  expect(blank.status).toBe(400);
+  expect(await blank.json()).toEqual({ message: expect.any(String) });
 });
 
 test("adds a task to one agent and lists it for that agent only", async () => {
@@ -170,6 +186,7 @@ test("lists an agent's latest runs with their conversations, and when it last ra
     store.insertTask(state.storage, {
       id: "8f2a6c1e-3b4d-4e5f-9a0b-1c2d3e4f5a6b",
       agentId,
+      threadId: agentThread(state.storage, agentId),
       prompt: "Summarize today's email",
       schedule: { cron: "0 8 * * *", timeZone: "UTC" },
       nextRunAt: dueAt,

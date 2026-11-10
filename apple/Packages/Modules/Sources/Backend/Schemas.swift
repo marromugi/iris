@@ -3,6 +3,8 @@
 
 /// One of the user's agents: what it is called, and when its latest run started (nil until it first runs).
 public typealias Agent = Components.Schemas.Agent
+/// What adding an agent sends: its name.
+public typealias NewAgent = Components.Schemas.NewAgent
 /// A task an agent runs on its schedule, with when it runs next. Not `Task`, which is Swift's own.
 public typealias ScheduledTask = Components.Schemas.Task
 /// What adding a task sends: the prompt each run starts with, and when it runs.
