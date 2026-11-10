@@ -5,8 +5,9 @@ import Observation
 /// the thread's events socket while the screen is shown.
 @Observable
 final class OpenThread {
-    /// How many of the latest posts and runs the thread shows.
-    static let entriesShown = 50
+    /// How many of the latest posts and runs the thread reads, the most the server gives. Replies at the oldest end
+    /// whose post didn't fit are left out, so a reply is never shown without what it answers.
+    static let entriesShown = 100
 
     /// How long to wait before opening the events socket again: a second after one that stayed open, and twice as long
     /// after each failure in a row, up to 30 seconds.
@@ -77,7 +78,7 @@ final class OpenThread {
         let first = cameDuringRead.count
         let result: Result<[Entry], AppError>
         do throws(AppError) {
-            result = .success(try await backend.entries(limit: Self.entriesShown).map(Entry.init))
+            result = .success(Self.whole(try await backend.entries(limit: Self.entriesShown).map(Entry.init)))
         } catch {
             result = .failure(error)
         }
@@ -211,6 +212,16 @@ final class OpenThread {
         } else {
             shown.insert(entry, at: shown.firstIndex { entry.isLater(than: $0) } ?? shown.endIndex)
         }
-        entries = .loaded(Array(shown.prefix(Self.entriesShown)))
+        // Cutting the oldest end may leave replies without their post; a run that only came before its post is kept.
+        entries = .loaded(shown.count > Self.entriesShown ? Self.whole(Array(shown.prefix(Self.entriesShown))) : shown)
+    }
+
+    /// The entries, latest first, without the replies at the oldest end whose post isn't among them.
+    private static func whole(_ entries: [Entry]) -> [Entry] {
+        var kept = entries
+        while let oldest = kept.last, oldest.repliesToNone(of: kept) {
+            kept.removeLast()
+        }
+        return kept
     }
 }

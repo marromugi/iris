@@ -128,18 +128,42 @@ struct OpenThreadTests {
     }
 
     @Test func aPostHeardGoesInBeforeTheRunsThatReplyToIt() async {
-        let thread = OpenThread(backend: FakeThreadBackend(.init(runs: [Samples.mailRun], posts: [])))
+        let thread = OpenThread(backend: FakeThreadBackend(.init(runs: [], posts: [])))
         await thread.load()
 
         thread.hear(Samples.changed(Samples.sentRun))
         thread.hear(Samples.posted(Samples.sentPost))
         thread.hear(Samples.posted(Samples.mailPost))
+        thread.hear(Samples.changed(Samples.mailRun))
 
         #expect(
             thread.entries.value?.map(\.id) == [
                 "run-\(Samples.sentRun.id)", "post-\(Samples.sentPost.id)", "run-\(Samples.mailRun.id)",
                 "post-\(Samples.mailPost.id)",
             ])
+    }
+
+    @Test func repliesAtTheOldestEndWhosePostDidNotFitAreLeftOut() async {
+        let thread = OpenThread(
+            backend: FakeThreadBackend(.init(runs: [Samples.sentRun, Samples.mailRun], posts: [Samples.sentPost])))
+
+        await thread.load()
+
+        #expect(thread.entries.value?.map(\.id) == ["run-\(Samples.sentRun.id)", "post-\(Samples.sentPost.id)"])
+    }
+
+    @Test func repliesToOnePostGoInTheServersOrderHoweverTheyCome() async {
+        let replies = ["b", "a", "c"].map { id in
+            var run = Samples.sentRun
+            run.id = id
+            return run
+        }
+        let thread = OpenThread(backend: FakeThreadBackend(.init(runs: [], posts: [Samples.sentPost])))
+        await thread.load()
+
+        for run in replies { thread.hear(Samples.changed(run)) }
+
+        #expect(thread.runs?.map(\.id) == ["c", "b", "a"])
     }
 
     @Test func sendingToAGroupPutsThePostAndEveryReplyInTheThread() async {

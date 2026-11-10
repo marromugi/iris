@@ -22,14 +22,25 @@ nonisolated enum Entry: Identifiable, Equatable, Sendable {
         }
     }
 
+    /// Whether this is the post with the ID.
+    private func isPost(_ id: String) -> Bool {
+        if case .post(let post) = self { post.id == id } else { false }
+    }
+
     var run: Run? {
         if case .run(let run) = self { run } else { nil }
     }
 
-    /// Whether this goes after `other` in the thread: it was sent or started later, or, at the same time, it is a run
-    /// and `other` the post it replies to.
+    /// Whether this goes after `other` in the thread: it was sent or started later; at the same time, it is a run and
+    /// `other` the post it replies to; or, among runs replying to one post, its ID is greater, as the server orders them.
     func isLater(than other: Entry) -> Bool {
-        (at, isRun ? 1 : 0) > (other.at, other.isRun ? 1 : 0)
+        (at, isRun ? 1 : 0, ownID) > (other.at, other.isRun ? 1 : 0, other.ownID)
+    }
+
+    /// Whether this is a run that replies to a post not among `shown`.
+    func repliesToNone(of shown: [Entry]) -> Bool {
+        guard let postID = run?.postId else { return false }
+        return !shown.contains { $0.isPost(postID) }
     }
 
     private var at: Date {
@@ -40,4 +51,11 @@ nonisolated enum Entry: Identifiable, Equatable, Sendable {
     }
 
     private var isRun: Bool { run != nil }
+
+    private var ownID: String {
+        switch self {
+        case .post(let post): post.id
+        case .run(let run): run.id
+        }
+    }
 }
