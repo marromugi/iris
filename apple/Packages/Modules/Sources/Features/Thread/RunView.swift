@@ -1,14 +1,19 @@
 import Backend
 import SwiftUI
 
-/// One run in a thread: that a schedule ran and with what prompt, then the conversation, then how the run stands.
+/// One run in a thread: what started it (a schedule and its prompt, or the message the user sent), then the
+/// conversation, then how the run stands.
 struct RunView: View {
     let run: Run
 
     var body: some View {
         let conversation = Conversation(run.messages)
         VStack(alignment: .leading, spacing: 24) {
-            ScheduleRanCard(prompt: conversation.prompt, startedAt: run.startedAt)
+            if run.taskId == nil {
+                UserBubble(text: conversation.prompt ?? "")
+            } else {
+                ScheduleRanCard(prompt: conversation.prompt, startedAt: run.startedAt)
+            }
             ForEach(conversation.blocks) { block in
                 BlockView(kind: block.kind)
             }
@@ -53,18 +58,27 @@ private struct BlockView: View {
     var body: some View {
         switch kind {
         case .user(let text):
-            Text(text)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(.fill.tertiary, in: .rect(cornerRadius: 16))
-                .frame(maxWidth: .infinity, alignment: .trailing)
+            UserBubble(text: text)
         case .assistant(let text):
             Text(text)
                 .textSelection(.enabled)
         case .tools(let uses):
             ToolUsesView(uses: uses)
         }
+    }
+}
+
+/// What the user said, on the right.
+private struct UserBubble: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .textSelection(.enabled)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.fill.tertiary, in: .rect(cornerRadius: 16))
+            .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
 
@@ -103,6 +117,12 @@ private struct RunEnd: View {
     #Preview("完了") {
         ScrollView {
             RunView(run: Samples.mailRun).padding()
+        }
+    }
+
+    #Preview("返事待ち") {
+        ScrollView {
+            RunView(run: Samples.sentRun).padding()
         }
     }
 

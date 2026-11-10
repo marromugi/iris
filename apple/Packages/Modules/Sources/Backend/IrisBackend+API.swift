@@ -49,6 +49,22 @@ extension IrisBackend {
         }
     }
 
+    /// Sends a message to the agent, and gives back the run it starts, which has the message alone until the agent's
+    /// reply is added to it.
+    public func sendMessage(_ text: String, to agentID: Agent.ID) async throws(AppError) -> Run {
+        switch try await call({
+            try await client.sendMessage(path: .init(agentId: agentID), body: .json(NewMessage(text: text)))
+        }) {
+        case .accepted(let accepted): return try decoded { try accepted.body.json }
+        case .notFound(let refused): throw try refusal { try refused.body.json }
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
     /// The agent's latest `limit` runs, latest first, each with its conversation. The server takes 1 to 100.
     public func recentRuns(of agentID: Agent.ID, limit: Int) async throws(AppError) -> [Run] {
         switch try await call({ try await client.recentRuns(path: .init(agentId: agentID), query: .init(limit: limit)) })

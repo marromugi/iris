@@ -7,7 +7,10 @@ public typealias Agent = Components.Schemas.Agent
 public typealias ScheduledTask = Components.Schemas.Task
 /// What adding a task sends: the prompt each run starts with, and when it runs.
 public typealias NewTask = Components.Schemas.NewTask
-/// One run of a task: when it started and ended, how its attempts went, and its conversation.
+/// What sending a message to an agent sends: the text the run it starts begins with.
+public typealias NewMessage = Components.Schemas.NewMessage
+/// One run of an agent, started by a task or by a message sent to it: when it started and ended, how its attempts
+/// went, and its conversation.
 public typealias Run = Components.Schemas.Run
 /// One message of a run's conversation: the user's prompt, the assistant's answer, or a tool's result.
 public typealias RunMessage = Components.Schemas.Message

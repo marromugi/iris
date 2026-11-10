@@ -6,4 +6,5 @@ nonisolated protocol AgentBackend: Sendable {
     func addTask(_ task: NewTask) async throws(AppError) -> ScheduledTask
     func removeTask(id: String) async throws(AppError)
     func recentRuns(limit: Int) async throws(AppError) -> [Run]
+    func sendMessage(_ text: String) async throws(AppError) -> Run
 }

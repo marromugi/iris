@@ -20,4 +20,8 @@ nonisolated struct ServerAgent: AgentBackend {
     func recentRuns(limit: Int) async throws(AppError) -> [Run] {
         try await backend.recentRuns(of: id, limit: limit)
     }
+
+    func sendMessage(_ text: String) async throws(AppError) -> Run {
+        try await backend.sendMessage(text, to: id)
+    }
 }

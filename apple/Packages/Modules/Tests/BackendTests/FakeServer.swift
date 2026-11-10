@@ -167,6 +167,19 @@ actor FakeServer {
             }
             tasks.remove(at: index)
             return Self.answer(request, 204, "")
+        case ("POST", "/messages"):
+            struct Sent: Decodable { let text: String }
+            guard request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/json") == true,
+                let body = request.httpBody, let sent = try? JSONDecoder().decode(Sent.self, from: body)
+            else { return Self.answer(request, 415, #"{"message":"Unsupported Media Type"}"#) }
+            guard !sent.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return Self.answer(
+                    request, 400, #"{"message":"✖ Too small: expected string to have >=1 characters\n  → at text"}"#)
+            }
+            return Self.answer(
+                request, 202,
+                #"{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","taskId":null,"startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"\#(sent.text)"}]}"#
+            )
         case ("GET", "/runs"):
             return Self.answer(
                 request, 200,

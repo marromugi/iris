@@ -216,6 +216,24 @@ struct IrisBackendTests {
         #expect(await server.requests.last { $0.url?.path == "/api/agents/\(agent)/runs" }?.url?.query == "limit=1")
     }
 
+    @Test func sendsAMessageAsJSONAndGetsBackTheRunItStarted() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        let run = try await backend.sendMessage("こんにちは", to: agent)
+
+        #expect(run.taskId == nil)
+        #expect(run.endedAt == nil)
+        guard case .case1(let user) = run.messages.first else {
+            Issue.record("expected the user's message, got \(run.messages)")
+            return
+        }
+        #expect(user.text == "こんにちは")
+        await #expect(throws: AppError.refused(message: "✖ Too small: expected string to have >=1 characters\n  → at text")) {
+            try await backend.sendMessage(" ", to: agent)
+        }
+    }
+
     @Test func aCallWithoutASignInIsSignedOut() async throws {
         await #expect(throws: AppError.signedOut) { try await backend().tasks(of: agent) }
         #expect(await server.requests.isEmpty)
