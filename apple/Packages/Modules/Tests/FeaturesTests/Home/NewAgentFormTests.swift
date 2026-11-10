@@ -9,7 +9,7 @@ struct NewAgentFormTests {
         var added: Agent?
 
         form.name = "  株価の確認\n"
-        await form.add { added = $0 }.value
+        await form.add(onAdded: { added = $0 }, onSignedOut: {}).value
 
         #expect(added?.name == "株価の確認")
         #expect(added?.lastRanAt == nil)
@@ -29,10 +29,22 @@ struct NewAgentFormTests {
         var added = false
 
         form.name = "株価の確認"
-        await form.add { _ in added = true }.value
+        await form.add(onAdded: { _ in added = true }, onSignedOut: {}).value
 
         #expect(!added)
         #expect(form.problem == .refused(message: "Too long."))
         #expect(form.canAdd)
+    }
+
+    @Test func aRefusedSignInIsHandedOnInsteadOfShownInTheForm() async {
+        let form = NewAgentForm(directory: FakeAgentDirectory(failure: .signedOut))
+        var signedOut = false
+
+        form.name = "株価の確認"
+        await form.add(onAdded: { _ in }, onSignedOut: { signedOut = true }).value
+
+        #expect(signedOut)
+        #expect(form.problem == nil)
+        #expect(!form.isAdding)
     }
 }

@@ -5,11 +5,13 @@ import SwiftUI
 struct NewAgentSheet: View {
     @State private var form: NewAgentForm
     let onAdded: (Agent) -> Void
+    let onSignedOut: () -> Void
     @Environment(\.dismiss) private var dismiss
 
-    init(directory: any AgentDirectory, onAdded: @escaping (Agent) -> Void) {
+    init(directory: any AgentDirectory, onAdded: @escaping (Agent) -> Void, onSignedOut: @escaping () -> Void) {
         _form = State(initialValue: NewAgentForm(directory: directory))
         self.onAdded = onAdded
+        self.onSignedOut = onSignedOut
     }
 
     var body: some View {
@@ -49,19 +51,25 @@ struct NewAgentSheet: View {
     }
 
     private func add() {
-        form.add { agent in
-            onAdded(agent)
-            dismiss()
-        }
+        form.add(
+            onAdded: { agent in
+                onAdded(agent)
+                dismiss()
+            },
+            onSignedOut: {
+                onSignedOut()
+                dismiss()
+            }
+        )
     }
 }
 
 #if DEBUG
     #Preview {
-        NewAgentSheet(directory: FakeAgentDirectory()) { _ in }
+        NewAgentSheet(directory: FakeAgentDirectory(), onAdded: { _ in }, onSignedOut: {})
     }
 
     #Preview("追加できない") {
-        NewAgentSheet(directory: FakeAgentDirectory(failure: .offline)) { _ in }
+        NewAgentSheet(directory: FakeAgentDirectory(failure: .offline), onAdded: { _ in }, onSignedOut: {})
     }
 #endif

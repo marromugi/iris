@@ -37,9 +37,11 @@ struct HomeScreen: View {
             }
         }
         .sheet(isPresented: $isAddingAgent) {
-            NewAgentSheet(directory: directory) { _ in
-                Task { await load() }
-            }
+            NewAgentSheet(
+                directory: directory,
+                onAdded: { _ in Task { await load() } },
+                onSignedOut: { agents = .failed(.signedOut) }
+            )
         }
         .navigationDestination(for: Agent.self) { agent in
             ThreadScreen(agent: directory.agent(id: agent.id), name: agent.name)
