@@ -3,7 +3,7 @@
   "info": {
     "title": "iris",
     "version": "1",
-    "description": "A user's agents, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent)."
+    "description": "A user's agents, which they can add, with each one's scheduled tasks and its runs, which its tasks and the messages sent to it start. Errors are { message }, except 401, which comes from the OAuth layer. GET /api/agents/{agentId}/events with a WebSocket upgrade opens a socket that sends the agent's runs as they change and how the one being carried on is getting on (RunEvent)."
   },
   "servers": [
     {
@@ -353,6 +353,19 @@
           "lastRanAt"
         ]
       },
+      "NewAgent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
       "Task": {
         "type": "object",
         "properties": {
@@ -498,6 +511,74 @@
           },
           "403": {
             "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "addAgent",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewAgent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The agent added, last in the list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body isn't sent as application/json",
             "content": {
               "application/json": {
                 "schema": {

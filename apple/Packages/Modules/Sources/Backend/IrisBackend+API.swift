@@ -12,6 +12,18 @@ extension IrisBackend {
         }
     }
 
+    /// Adds an agent with the name, and gives it back as the list will show it, last.
+    public func addAgent(named name: String) async throws(AppError) -> Agent {
+        switch try await call({ try await client.addAgent(body: .json(NewAgent(name: name))) }) {
+        case .created(let created): return try decoded { try created.body.json }
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
     /// The agent's tasks, the next to run first.
     public func tasks(of agentID: Agent.ID) async throws(AppError) -> [ScheduledTask] {
         switch try await call({ try await client.listTasks(path: .init(agentId: agentID)) }) {

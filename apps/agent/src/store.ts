@@ -3,7 +3,7 @@ import { and, asc, desc, eq, isNull, lt, lte, max, min, notExists, or, sql } fro
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { alias, type SQLiteColumn } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
-import { agents, messages, runs, tasks } from "./db/schema";
+import { agents, messages, runs, tasks, threads } from "./db/schema";
 import type { Schedule } from "./schedule";
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
@@ -23,6 +23,8 @@ export interface Agent {
 export interface Task {
   readonly id: string;
   readonly agentId: string;
+  /** The thread its runs happen in. */
+  readonly threadId: string;
   readonly prompt: string;
   readonly schedule: Schedule;
   readonly nextRunAt: Date;
@@ -74,11 +76,26 @@ function migrationText(index: number): string | undefined {
   return sqlByKey[`m${index.toString().padStart(4, "0")}`];
 }
 
+/** Adds an agent together with its own one-to-one thread. */
 export function insertAgent(
   storage: DurableObjectStorage,
   agent: { id: string; name: string; createdAt: Date },
 ): void {
-  database(storage).insert(agents).values(agent).run();
+  database(storage).transaction((tx) => {
+    tx.insert(agents).values(agent).run();
+    tx.insert(threads)
+      .values({ id: crypto.randomUUID(), agentId: agent.id, createdAt: agent.createdAt })
+      .run();
+  });
+}
+
+/** The ID of the agent's own one-to-one thread; undefined when the user has no such agent. */
+export function agentThreadId(storage: DurableObjectStorage, agentId: string): string | undefined {
+  return database(storage)
+    .select({ id: threads.id })
+    .from(threads)
+    .where(eq(threads.agentId, agentId))
+    .get()?.id;
 }
 
 /** The user's agents in the order they were added. */
@@ -105,6 +122,7 @@ function toTask(row: typeof tasks.$inferSelect): Task {
   return {
     id: row.id,
     agentId: row.agentId,
+    threadId: row.threadId,
     prompt: row.prompt,
     schedule: { cron: row.cron, timeZone: row.timeZone },
     nextRunAt: row.nextRunAt,
@@ -117,6 +135,7 @@ export function insertTask(storage: DurableObjectStorage, task: Task): void {
     .values({
       id: task.id,
       agentId: task.agentId,
+      threadId: task.threadId,
       prompt: task.prompt,
       cron: task.schedule.cron,
       timeZone: task.schedule.timeZone,
@@ -168,6 +187,7 @@ export function startRun(
   run: {
     id: string;
     agentId: string;
+    threadId: string;
     text: string;
     startedAt: Date;
     task?: { id: string; nextRunAt: Date };
@@ -184,6 +204,7 @@ export function startRun(
       .values({
         id: run.id,
         agentId: run.agentId,
+        threadId: run.threadId,
         taskId: run.task?.id ?? null,
         startedAt: run.startedAt,
         dueAt: run.startedAt,
@@ -245,7 +266,7 @@ function startedBefore(
 }
 
 /**
- * Runs next in line: each agent's first run that hasn't ended. An agent's runs are carried on one
+ * Runs next in line: each thread's first run that hasn't ended. A thread's runs are carried on one
  * at a time in the order they started, so each reads the ones before it once they have ended.
  */
 function nextInLine(storage: DurableObjectStorage) {
@@ -257,7 +278,7 @@ function nextInLine(storage: DurableObjectStorage) {
         .from(earlierRuns)
         .where(
           and(
-            eq(earlierRuns.agentId, runs.agentId),
+            eq(earlierRuns.threadId, runs.threadId),
             isNull(earlierRuns.endedAt),
             startedBefore(earlierRuns, runs),
           ),
@@ -266,7 +287,7 @@ function nextInLine(storage: DurableObjectStorage) {
   );
 }
 
-/** The ID of the run next in line whose due time came first, among every agent's runs due by `now`. */
+/** The ID of the run next in line whose due time came first, among every thread's runs due by `now`. */
 export function nextDueRun(storage: DurableObjectStorage, now: Date): string | undefined {
   const row = database(storage)
     .select({ id: runs.id })
@@ -383,15 +404,15 @@ export function recentRuns(storage: DurableObjectStorage, agentId: string, limit
 }
 
 /**
- * The conversations of the runs of the same agent that started before the run, the latest first.
- * Each is read from storage only when the caller asks for it.
+ * The conversations of the runs of the same agent in the same thread that started before the run,
+ * the latest first. Each is read from storage only when the caller asks for it.
  */
 export function* earlierConversations(
   storage: DurableObjectStorage,
   runId: string,
 ): Generator<Message[], void, undefined> {
   const run = database(storage)
-    .select({ agentId: runs.agentId, startedAt: runs.startedAt })
+    .select({ agentId: runs.agentId, threadId: runs.threadId, startedAt: runs.startedAt })
     .from(runs)
     .where(eq(runs.id, runId))
     .get();
@@ -404,6 +425,7 @@ export function* earlierConversations(
     .where(
       and(
         eq(runs.agentId, run.agentId),
+        eq(runs.threadId, run.threadId),
         startedBefore(runs, { startedAt: run.startedAt, id: runId }),
       ),
     )

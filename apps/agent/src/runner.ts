@@ -57,8 +57,8 @@ function safely(watcher: RunWatcher): RunWatcher {
  * missed several times runs once. A run that throws keeps its messages so far and is due again
  * `RETRY_DELAY_MS` later, until it has failed `MAX_FAILED_ATTEMPTS` times and is given up.
  *
- * An agent's runs are carried on one at a time in the order they started: a run waits while an
- * earlier run of the same agent hasn't ended, the task's new run included.
+ * A thread's runs are carried on one at a time in the order they started: a run waits while an
+ * earlier run in the same thread hasn't ended, the task's new run included.
  */
 export async function runNext(
   storage: DurableObjectStorage,
@@ -79,6 +79,7 @@ export async function runNext(
     store.startRun(storage, {
       id: runId,
       agentId: task.agentId,
+      threadId: task.threadId,
       text: task.prompt,
       startedAt,
       task: { id: task.id, nextRunAt: nextRunAt(task.schedule, startedAt) },

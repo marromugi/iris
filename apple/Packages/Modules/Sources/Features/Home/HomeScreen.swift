@@ -1,11 +1,12 @@
 import Backend
 import SwiftUI
 
-/// The user's agents, each with when it last ran. Each opens to its thread.
+/// The user's agents, each with when it last ran. Each opens to its thread, and a new one can be added.
 struct HomeScreen: View {
     let directory: any AgentDirectory
     let onSignOut: () -> Void
     @State private var agents = Loadable<[Agent]>.loading
+    @State private var isAddingAgent = false
 
     var body: some View {
         LoadableContent(
@@ -29,8 +30,18 @@ struct HomeScreen: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button("エージェントを追加", systemImage: "plus") { isAddingAgent = true }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 AccountMenu(onSignOut: onSignOut)
             }
+        }
+        .sheet(isPresented: $isAddingAgent) {
+            NewAgentSheet(
+                directory: directory,
+                onAdded: { _ in Task { await load() } },
+                onSignedOut: { agents = .failed(.signedOut) }
+            )
         }
         .navigationDestination(for: Agent.self) { agent in
             ThreadScreen(agent: directory.agent(id: agent.id), name: agent.name)

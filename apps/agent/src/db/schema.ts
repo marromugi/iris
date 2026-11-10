@@ -6,9 +6,17 @@ export const agents = sqliteTable("agents", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+/** Where runs happen. `agentId` is set on an agent's own one-to-one thread, made with the agent. */
+export const threads = sqliteTable("threads", {
+  id: text("id").primaryKey(),
+  agentId: text("agent_id").unique(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
+
 export const tasks = sqliteTable("tasks", {
   id: text("id").primaryKey(),
   agentId: text("agent_id").notNull(),
+  threadId: text("thread_id").notNull(),
   prompt: text("prompt").notNull(),
   cron: text("cron").notNull(),
   timeZone: text("time_zone").notNull(),
@@ -18,6 +26,7 @@ export const tasks = sqliteTable("tasks", {
 export const runs = sqliteTable("runs", {
   id: text("id").primaryKey(),
   agentId: text("agent_id").notNull(),
+  threadId: text("thread_id").notNull(),
   taskId: text("task_id"),
   startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
   endedAt: integer("ended_at", { mode: "timestamp_ms" }),

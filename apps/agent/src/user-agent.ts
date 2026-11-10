@@ -1,6 +1,7 @@
 import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
+import { type NewAgent, newAgentSchema } from "./agent";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
 import { nextWakeAt, runNext } from "./runner";
@@ -8,6 +9,10 @@ import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 import { type NewTask, newTaskSchema } from "./task";
+
+export type AddAgentResult =
+  | { readonly ok: true; readonly agent: store.Agent }
+  | { readonly ok: false; readonly error: string };
 
 export type AddTaskResult =
   | { readonly ok: true; readonly task: store.Task }
@@ -69,9 +74,21 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       return store.listAgents(this.ctx.storage);
     }
 
+    /** Adds an agent with its own one-to-one thread. An invalid name comes back as `ok: false`. */
+    addAgent(input: NewAgent): AddAgentResult {
+      const parsed = newAgentSchema.safeParse(input);
+      if (!parsed.success) {
+        return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      const agent = { id: crypto.randomUUID(), name: parsed.data.name, createdAt: new Date() };
+      store.insertAgent(this.ctx.storage, agent);
+      return { ok: true, agent: { id: agent.id, name: agent.name, lastRanAt: null } };
+    }
+
     /** Adds a task the agent runs `prompt` on `schedule`. An invalid prompt or schedule comes back as `ok: false`. */
     async addTask(agentId: string, input: NewTask): Promise<AddTaskResult | undefined> {
-      if (!store.hasAgent(this.ctx.storage, agentId)) {
+      const threadId = store.agentThreadId(this.ctx.storage, agentId);
+      if (threadId === undefined) {
         return undefined;
       }
       const parsed = newTaskSchema.safeParse(input);
@@ -82,6 +99,7 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       const task: store.Task = {
         id: crypto.randomUUID(),
         agentId,
+        threadId,
         prompt: parsed.data.prompt,
         schedule: parsed.data.schedule,
         nextRunAt: nextRunAt(parsed.data.schedule, now),
@@ -102,12 +120,13 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
     }
 
     /**
-     * Starts a run of the agent on a message the user sent, which the alarm carries on once the
-     * agent's earlier runs have ended, and returns the run as it starts. Empty text comes back as
-     * `ok: false`.
+     * Starts a run of the agent in its one-to-one thread on a message the user sent, which the
+     * alarm carries on once the thread's earlier runs have ended, and returns the run as it
+     * starts. Empty text comes back as `ok: false`.
      */
     async sendMessage(agentId: string, input: NewMessage): Promise<SendMessageResult | undefined> {
-      if (!store.hasAgent(this.ctx.storage, agentId)) {
+      const threadId = store.agentThreadId(this.ctx.storage, agentId);
+      if (threadId === undefined) {
         return undefined;
       }
       const parsed = newMessageSchema.safeParse(input);
@@ -118,6 +137,7 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       store.startRun(this.ctx.storage, {
         id,
         agentId,
+        threadId,
         text: parsed.data.text,
         startedAt: new Date(),
       });

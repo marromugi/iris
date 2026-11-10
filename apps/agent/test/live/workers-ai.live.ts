@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import { z } from "zod";
 import * as store from "../../src/store";
 import { createWorkersAiModel, WORKERS_AI_MODEL } from "../../src/workers-ai-model";
+import { agentThread } from "../agent-thread";
 
 const model = createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input));
 
@@ -55,6 +56,7 @@ test("a due task runs through the user agent's alarm on the real model", async (
     store.insertTask(state.storage, {
       id: "live-check",
       agentId,
+      threadId: agentThread(state.storage, agentId),
       prompt: "Reply with one short sentence saying hello.",
       schedule: { cron: "0 8 * * *", timeZone: "UTC" },
       nextRunAt: dueAt,

@@ -8,6 +8,7 @@ import { RunBroadcast } from "../src/run-broadcast";
 import * as store from "../src/store";
 import { listen } from "./run-events";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
+import { agentThread } from "./agent-thread";
 
 afterEach(async () => {
   scriptedModel.length = 0;
@@ -43,6 +44,7 @@ async function insertTask(nextRunAt: Date, id = "task-1") {
     store.insertTask(state.storage, {
       id,
       agentId,
+      threadId: agentThread(state.storage, agentId),
       prompt: "Summarize today's email",
       schedule: dailyAtEightUtc,
       nextRunAt,
@@ -63,7 +65,13 @@ async function insertAgent(name: string): Promise<string> {
 /** Starts a run of the agent straight in storage, at a time the test chooses. */
 async function startRun(id: string, agentId: string, text: string, startedAt: Date) {
   await runInDurableObject(userAgent(), (_, state) => {
-    store.startRun(state.storage, { id, agentId, text, startedAt });
+    store.startRun(state.storage, {
+      id,
+      agentId,
+      threadId: agentThread(state.storage, agentId),
+      text,
+      startedAt,
+    });
   });
 }
 
@@ -86,6 +94,28 @@ test("every user starts with one agent that hasn't run", async () => {
   ]);
 });
 
+test("an added agent comes last in the list with its own thread, and a blank or long name is refused", async () => {
+  const added = await userAgent().addAgent({ name: "  株価の確認  " });
+  const blank = await userAgent().addAgent({ name: "   " });
+  const long = await userAgent().addAgent({ name: "あ".repeat(41) });
+
+  if (!added.ok) {
+    throw new Error(added.error);
+  }
+  expect(added.agent).toEqual({ id: expect.any(String), name: "株価の確認", lastRanAt: null });
+  expect((await userAgent().listAgents()).map((agent) => agent.name)).toEqual([
+    "エージェント",
+    "株価の確認",
+  ]);
+  const threads = await runInDurableObject(userAgent(), (_, state) => [
+    store.agentThreadId(state.storage, added.agent.id),
+    store.agentThreadId(state.storage, "no-such-agent"),
+  ]);
+  expect(threads).toEqual([expect.any(String), undefined]);
+  expect(blank.ok).toBe(false);
+  expect(long.ok).toBe(false);
+});
+
 test("each agent has its own tasks and runs, and runs when its own task is due", async () => {
   const first = await firstAgentId();
   const stocks = await insertAgent("株価の確認");
@@ -94,6 +124,7 @@ test("each agent has its own tasks and runs, and runs when its own task is due",
     store.insertTask(state.storage, {
       id: "stocks-task",
       agentId: stocks,
+      threadId: agentThread(state.storage, stocks),
       prompt: "Check stocks",
       schedule: dailyAtEightUtc,
       nextRunAt: dueAt,
@@ -476,7 +507,7 @@ test("while a run waits on the model, it is due again only after the retry delay
   expect(dueDuringCall).toEqual(new Date(sentAt.getTime() + RETRY_DELAY_MS));
 });
 
-test("an agent's runs go one at a time in the order they started, each reading its agent's before it", async () => {
+test("a thread's runs go one at a time in the order they started, each reading the ones before it", async () => {
   const otherId = await insertAgent("Second");
   const sentAt = new Date("2026-11-10T07:00:00Z");
   const retryAt = new Date(sentAt.getTime() + RETRY_DELAY_MS);
@@ -509,7 +540,7 @@ test("an agent's runs go one at a time in the order they started, each reading i
 /** Empties the storage and applies the first `count` migrations, as an older version of the code left it. */
 function storageMigratedUpTo(storage: DurableObjectStorage, count: number) {
   const sql = storage.sql;
-  for (const table of ["messages", "runs", "tasks", "agents", "__drizzle_migrations"]) {
+  for (const table of ["messages", "runs", "tasks", "threads", "agents", "__drizzle_migrations"]) {
     sql.exec(`DROP TABLE ${table}`);
   }
   sql.exec(
@@ -588,6 +619,63 @@ test("a run that hasn't ended stays due when it was before runs kept a due time"
     { id: "cut-off", due_at: startedAt + RETRY_DELAY_MS },
     { id: "failed", due_at: failedAt + RETRY_DELAY_MS },
   ]);
+});
+
+test("each agent stored before threads gets its own, where its tasks and runs then happen", async () => {
+  const startedAt = Date.parse("2026-11-10T08:00:00Z");
+  const moved = await runInDurableObject(userAgent(), (_, state) => {
+    const sql = state.storage.sql;
+    // Storage as the code before threads left it: two agents, each with a task and a run.
+    storageMigratedUpTo(state.storage, 3);
+    sql.exec(
+      "INSERT INTO agents (id, name, created_at) VALUES ('agent-2', 'Second', ?)",
+      startedAt,
+    );
+    for (const agentId of sql
+      .exec<{ id: string }>("SELECT id FROM agents")
+      .toArray()
+      .map((row) => row.id)) {
+      sql.exec(
+        "INSERT INTO tasks (id, agent_id, prompt, cron, time_zone, next_run_at) VALUES (?, ?, 'Check mail', '0 8 * * *', 'UTC', ?)",
+        `task-of-${agentId}`,
+        agentId,
+        startedAt,
+      );
+      sql.exec(
+        "INSERT INTO runs (id, agent_id, task_id, started_at, due_at) VALUES (?, ?, NULL, ?, ?)",
+        `run-of-${agentId}`,
+        agentId,
+        startedAt,
+        startedAt,
+      );
+    }
+
+    store.migrate(state.storage);
+
+    const threadOf = (agentId: string) => store.agentThreadId(state.storage, agentId);
+    return sql
+      .exec<{ id: string }>("SELECT id FROM agents")
+      .toArray()
+      .map(({ id }) => ({
+        thread: threadOf(id),
+        tasks: sql
+          .exec<{ thread_id: string }>("SELECT thread_id FROM tasks WHERE agent_id = ?", id)
+          .toArray()
+          .map((row) => row.thread_id),
+        runs: sql
+          .exec<{ thread_id: string }>("SELECT thread_id FROM runs WHERE agent_id = ?", id)
+          .toArray()
+          .map((row) => row.thread_id),
+      }));
+  });
+
+  expect(moved).toHaveLength(2);
+  for (const { thread, tasks, runs } of moved) {
+    expect(thread).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(tasks).toEqual([thread]);
+    expect(runs).toEqual([thread]);
+  }
+  expect(moved[0]?.thread).not.toBe(moved[1]?.thread);
 });
 
 test("refuses storage that a newer version of the code migrated", async () => {
