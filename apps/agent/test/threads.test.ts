@@ -3,7 +3,7 @@ import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:tes
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
 import { RunBroadcast } from "../src/run-broadcast";
-import { runDue, Waker } from "../src/runner";
+import { RETRY_DELAY_MS, runDue, Waker } from "../src/runner";
 import * as store from "../src/store";
 import { listen } from "./run-events";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
@@ -226,14 +226,13 @@ test("a group's replies to one post ask the model side by side, and a socket hea
   ).toHaveProperty("size", 2);
 });
 
-test("a post sent while a wake-up carries runs on is started by that wake-up at once", async () => {
+test("a post sent while a wake-up carries runs on is started by that wake-up when it is woken", async () => {
   const { groupId } = await groupOf("メール", "株価");
   const waker = new Waker();
-  const { promise: firstAsked, resolve: firstStarted } = Promise.withResolvers<void>();
   const { promise: secondAsked, resolve: secondStarted } = Promise.withResolvers<void>();
   scriptedModel.push(
     async () => {
-      firstStarted();
+      // Ends only once the second post's run has asked the model, which only this wake-up can start.
       await secondAsked;
       return reply("一つ目。");
     },
@@ -244,7 +243,16 @@ test("a post sent while a wake-up carries runs on is started by that wake-up at 
   );
 
   await runInDurableObject(userAgent(), async (_, state) => {
-    await userAgent().post(groupId, { text: "@メール 一つ目" });
+    const [first] = store.listAgents(state.storage);
+    const firstThread = store.agentThreadId(state.storage, first?.id ?? "") ?? "";
+    const post = (threadId: string, text: string, agentIds: string[]) =>
+      store.insertPost(
+        state.storage,
+        { id: crypto.randomUUID(), threadId, text, createdAt: new Date() },
+        agentIds,
+      );
+    const [mail = ""] = store.findThread(state.storage, groupId)?.agentIds ?? [];
+    post(groupId, "@メール 一つ目", [mail]);
     const going = runDue(
       state.storage,
       testAgent,
@@ -252,9 +260,8 @@ test("a post sent while a wake-up carries runs on is started by that wake-up at 
       undefined,
       waker,
     );
-    await firstAsked;
-    const [first] = await userAgent().listAgents();
-    await userAgent().sendMessage(first?.id ?? "", { text: "二つ目" });
+    await Promise.resolve();
+    post(firstThread, "二つ目", [first?.id ?? ""]);
     waker.wake();
     await going;
   });
@@ -263,4 +270,88 @@ test("a post sent while a wake-up carries runs on is started by that wake-up at 
     { role: "user", text: "@メール 一つ目" },
     { role: "user", text: "二つ目" },
   ]);
+});
+
+test("no more than six runs ask the model at once", async () => {
+  let asking = 0;
+  let most = 0;
+  const slow = async () => {
+    asking += 1;
+    most = Math.max(most, asking);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    asking -= 1;
+    return reply("はい。");
+  };
+  await runInDurableObject(userAgent(), (_, state) => {
+    for (let index = 0; index < 8; index += 1) {
+      const agentId = crypto.randomUUID();
+      store.insertAgent(state.storage, {
+        id: agentId,
+        name: `エージェント ${index}`,
+        look: { palette: 0, seed: 0 },
+        createdAt: new Date(),
+      });
+      store.insertPost(
+        state.storage,
+        {
+          id: crypto.randomUUID(),
+          threadId: store.agentThreadId(state.storage, agentId) ?? "",
+          text: "はい？",
+          createdAt: new Date(),
+        },
+        [agentId],
+      );
+      scriptedModel.push(slow);
+    }
+  });
+
+  await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => new Date(Date.now() + 1000)),
+  );
+
+  expect(modelRequests).toHaveLength(8);
+  expect(most).toBe(6);
+});
+
+test("a run still going after the retry delay isn't picked up a second time", async () => {
+  const { agentIds } = await groupOf("メール", "株価");
+  let clock = Date.now();
+  const { promise: secondDone, resolve: secondEnded } = Promise.withResolvers<void>();
+  scriptedModel.push(
+    async () => {
+      // Outlasts the retry delay while the other run ends, so the wake-up looks for due runs again.
+      clock += RETRY_DELAY_MS + 60_000;
+      await secondDone;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return reply("遅い返事。");
+    },
+    () => {
+      secondEnded();
+      return reply("速い返事。");
+    },
+  );
+  await runInDurableObject(userAgent(), (_, state) => {
+    for (const agentId of agentIds) {
+      store.insertPost(
+        state.storage,
+        {
+          id: crypto.randomUUID(),
+          threadId: store.agentThreadId(state.storage, agentId) ?? "",
+          text: "はい？",
+          createdAt: new Date(clock),
+        },
+        [agentId],
+      );
+    }
+  });
+
+  await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => new Date(clock)),
+  );
+
+  expect(modelRequests).toHaveLength(2);
+  const runs = await runInDurableObject(userAgent(), (_, state) =>
+    state.storage.sql.exec("SELECT failed_attempts, ended_at FROM runs").toArray(),
+  );
+  expect(runs.map((run) => run.failed_attempts)).toEqual([0, 0]);
 });

@@ -1,4 +1,4 @@
-import { type Agent, type Message, type ModelProgress, run } from "@iris/agent";
+import { type Agent, DEFAULT_MAX_STEPS, type Message, type ModelProgress, run } from "@iris/agent";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 
@@ -117,7 +117,10 @@ export async function runDue(
   for (;;) {
     if (!outOfTime()) {
       startDueTasks(storage, now, watcher);
-      for (const runId of store.nextDueRuns(storage, now(), MAX_PARALLEL_RUNS - going.size)) {
+      const due = store.nextDueRuns(storage, now(), MAX_PARALLEL_RUNS - going.size, [
+        ...going.keys(),
+      ]);
+      for (const runId of due) {
         going.set(
           runId,
           carryOn(storage, agent, runId, now, watcher, outOfTime).finally(() =>
@@ -181,9 +184,12 @@ export function earlierMessages(earlier: Iterable<Message[]>, limit: number): Me
   return taken.toReversed().flat();
 }
 
+/** A run with no steps left: it ends where it is. */
+async function* noSteps(): AsyncGenerator<Message, void, undefined> {}
+
 /**
- * Carries the run on from its saved messages until it ends, or until `outOfTime` says so after a
- * message, when it is due again at once.
+ * Carries the run on from its saved messages until it ends, it has taken `DEFAULT_MAX_STEPS`
+ * steps in all, or `outOfTime` says so after a message, when it is due again at once.
  */
 async function carryOn(
   storage: DurableObjectStorage,
@@ -199,10 +205,19 @@ async function carryOn(
     const earlier = earlierMessages(store.earlierInThread(storage, runId), MAX_EARLIER_MESSAGES);
     const conversation = store.loadConversation(storage, runId);
     let seq = conversation.length;
+    // Steps count across attempts and wake-ups: the run's own messages after its first are the
+    // steps it has taken.
+    const stepsLeft = DEFAULT_MAX_STEPS - (conversation.length - 1);
     const onProgress = (progress: ModelProgress) => watcher.progress(runId, progress);
-    for await (const message of run(agent, [...earlier, ...conversation], { onProgress })) {
+    const steps =
+      stepsLeft > 0
+        ? run(agent, [...earlier, ...conversation], { onProgress, maxSteps: stepsLeft })
+        : noSteps();
+    for await (const message of steps) {
       store.appendMessage(storage, runId, seq, message);
       seq += 1;
+      // Still being carried on: not due again until an attempt cut off here would be.
+      store.postponeRun(storage, runId, new Date(now().getTime() + RETRY_DELAY_MS));
       watcher.changed(runId);
       if (outOfTime()) {
         store.postponeRun(storage, runId, now());

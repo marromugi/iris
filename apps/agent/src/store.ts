@@ -11,6 +11,7 @@ import {
   max,
   min,
   notExists,
+  notInArray,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -446,12 +447,23 @@ export function nextDueRun(storage: DurableObjectStorage, now: Date): string | u
   return nextDueRuns(storage, now, 1)[0];
 }
 
-/** The IDs of up to `limit` runs next in line that are due by `now`, the earliest due first. */
-export function nextDueRuns(storage: DurableObjectStorage, now: Date, limit: number): string[] {
+/**
+ * The IDs of up to `limit` runs next in line that are due by `now`, the earliest due first,
+ * leaving out `going`, the runs already being carried on.
+ */
+export function nextDueRuns(
+  storage: DurableObjectStorage,
+  now: Date,
+  limit: number,
+  going: readonly string[] = [],
+): string[] {
+  if (limit <= 0) {
+    return [];
+  }
   return database(storage)
     .select({ id: runs.id })
     .from(runs)
-    .where(and(nextInLine(storage), lte(runs.dueAt, now)))
+    .where(and(nextInLine(storage), lte(runs.dueAt, now), notInArray(runs.id, [...going])))
     .orderBy(asc(runs.dueAt), asc(runs.id))
     .limit(limit)
     .all()

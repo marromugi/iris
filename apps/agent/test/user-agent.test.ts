@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@iris/agent";
+import { type AssistantMessage, DEFAULT_MAX_STEPS } from "@iris/agent";
 import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
@@ -404,6 +404,52 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
   expect(await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm())).toBe(
     failedAt.getTime() + RETRY_DELAY_MS,
   );
+});
+
+test("a socket that opens while runs go on hears each one's latest progress", async () => {
+  const agentId = await firstAgentId();
+  await startRun("run-a", agentId, "Hi", new Date());
+  await startRun("run-b", agentId, "Hi", new Date());
+
+  const heard = await runInDurableObject(userAgent(), async (_, state) => {
+    const broadcast = new RunBroadcast(state);
+    broadcast.progress("run-a", { type: "thinking" });
+    broadcast.progress("run-b", { type: "starting" });
+    const { 0: client, 1: server } = new WebSocketPair();
+    broadcast.accept(agentThread(state.storage, agentId), server, "runs");
+    return listen(client).heard(2);
+  });
+
+  expect(heard).toEqual([
+    { type: "progress", runId: "run-a", progress: { type: "thinking" } },
+    { type: "progress", runId: "run-b", progress: { type: "starting" } },
+  ]);
+});
+
+test("a run that took its steps across wake-ups ends where it is", async () => {
+  const dueAt = new Date("2026-11-10T08:00:00Z");
+  const agentId = await firstAgentId();
+  await startRun("long", agentId, "Keep going", dueAt);
+  await runInDurableObject(userAgent(), (_, state) => {
+    for (let seq = 1; seq <= DEFAULT_MAX_STEPS; seq += 1) {
+      store.appendMessage(state.storage, "long", seq, {
+        role: "assistant",
+        parts: [{ type: "text", text: `Step ${seq}.` }],
+      });
+    }
+    // Saved as if the steps' last message weren't a reply, so only the step count can end it.
+    state.storage.sql.exec(
+      "UPDATE messages SET body = ? WHERE run_id = 'long' AND seq = ?",
+      JSON.stringify({ role: "user", text: "Go on." }),
+      DEFAULT_MAX_STEPS,
+    );
+  });
+
+  await runNextAt(dueAt);
+
+  const [run] = (await userAgent().recentRuns(agentId)) ?? [];
+  expect(modelRequests).toHaveLength(0);
+  expect(run?.endedAt).not.toBeNull();
 });
 
 test("a socket that opens while a run is being written hears the text so far at once", async () => {
