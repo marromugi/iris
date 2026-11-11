@@ -6,6 +6,7 @@ import {
   toolResultMessageSchema,
   userMessageSchema,
 } from "@iris/agent";
+import { lookSchema } from "../agent";
 import { scheduleSchema } from "../schedule";
 import type { Agent, Post, Run, Task, Thread } from "../store";
 
@@ -25,6 +26,7 @@ export const agentSchema = z
   .object({
     id: z.uuid(),
     name: z.string(),
+    look: lookSchema,
     lastRanAt: timeSchema
       .nullable()
       .meta({ description: "When its latest run started; null until it first runs" }),
@@ -35,6 +37,7 @@ export function agentJson(agent: Agent): z.infer<typeof agentSchema> {
   return {
     id: agent.id,
     name: agent.name,
+    look: agent.look,
     lastRanAt: agent.lastRanAt === null ? null : timeJson(agent.lastRanAt),
   };
 }

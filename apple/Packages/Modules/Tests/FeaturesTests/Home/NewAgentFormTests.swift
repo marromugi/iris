@@ -15,6 +15,20 @@ struct NewAgentFormTests {
         #expect(added?.lastRanAt == nil)
     }
 
+    @Test func sendsTheLookItWasShuffledTo() async {
+        let form = NewAgentForm(directory: FakeAgentDirectory(), look: AgentLook(palette: 0, seed: 0))
+        var added: Agent?
+
+        form.shuffle()
+        let shuffled = form.look
+        form.name = "株価の確認"
+        await form.add(onAdded: { added = $0 }, onSignedOut: {}).value
+
+        #expect(shuffled != AgentLook(palette: 0, seed: 0))
+        #expect(added?.look == shuffled)
+        #expect((0..<OrbPalette.all.count).contains(shuffled.palette))
+    }
+
     @Test(arguments: ["", " \n ", String(repeating: "あ", count: 41)])
     func cannotAddABlankOrLongName(name: String) {
         let form = NewAgentForm(directory: FakeAgentDirectory())

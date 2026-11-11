@@ -8,8 +8,8 @@ struct RunView: View {
     let run: Run
     /// How the run is getting on, while it is carried on.
     var progress: RunProgress?
-    /// The name of the agent whose run it is, shown in a thread of several agents.
-    var speaker: String?
+    /// The agent whose run it is, shown with its orb and name in a thread of several agents.
+    var speaker: Agent?
 
     var body: some View {
         let conversation = Conversation(run.messages)
@@ -18,9 +18,12 @@ struct RunView: View {
                 ScheduleRanCard(prompt: conversation.prompt, startedAt: run.startedAt)
             }
             if let speaker {
-                Text(speaker)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    AgentOrb(look: speaker.look, size: 22)
+                    Text(speaker.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
             ForEach(conversation.blocks) { block in
                 BlockView(kind: block.kind)

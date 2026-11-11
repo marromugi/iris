@@ -17,6 +17,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { alias } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
 import { agents, messages, posts, runs, tasks, threadMembers, threads } from "./db/schema";
+import type { Look } from "./agent";
 import type { Schedule } from "./schedule";
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
@@ -26,10 +27,11 @@ function database(storage: DurableObjectStorage) {
   return drizzle(storage);
 }
 
-/** One of the user's agents, with when its latest run started (null until it first runs). */
+/** One of the user's agents, with its look and when its latest run started (null until it first runs). */
 export interface Agent {
   readonly id: string;
   readonly name: string;
+  readonly look: Look;
   readonly lastRanAt: Date | null;
 }
 
@@ -92,11 +94,19 @@ function migrationText(index: number): string | undefined {
 /** Adds an agent together with its own one-to-one thread, of which it is the member. */
 export function insertAgent(
   storage: DurableObjectStorage,
-  agent: { id: string; name: string; createdAt: Date },
+  agent: { id: string; name: string; look: Look; createdAt: Date },
 ): void {
   const threadId = crypto.randomUUID();
   database(storage).transaction((tx) => {
-    tx.insert(agents).values(agent).run();
+    tx.insert(agents)
+      .values({
+        id: agent.id,
+        name: agent.name,
+        lookPalette: agent.look.palette,
+        lookSeed: agent.look.seed,
+        createdAt: agent.createdAt,
+      })
+      .run();
     tx.insert(threads)
       .values({ id: threadId, agentId: agent.id, createdAt: agent.createdAt })
       .run();
@@ -205,12 +215,19 @@ export function agentThreadId(storage: DurableObjectStorage, agentId: string): s
 /** The user's agents in the order they were added. */
 export function listAgents(storage: DurableObjectStorage): Agent[] {
   return database(storage)
-    .select({ id: agents.id, name: agents.name, lastRanAt: max(runs.startedAt) })
+    .select({
+      id: agents.id,
+      name: agents.name,
+      palette: agents.lookPalette,
+      seed: agents.lookSeed,
+      lastRanAt: max(runs.startedAt),
+    })
     .from(agents)
     .leftJoin(runs, eq(runs.agentId, agents.id))
     .groupBy(agents.id)
     .orderBy(asc(agents.createdAt), asc(agents.id))
-    .all();
+    .all()
+    .map(({ palette, seed, ...agent }) => ({ ...agent, look: { palette, seed } }));
 }
 
 export function hasAgent(storage: DurableObjectStorage, id: string): boolean {

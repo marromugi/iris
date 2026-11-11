@@ -1,7 +1,7 @@
 import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
-import { type NewAgent, newAgentSchema } from "./agent";
+import { type NewAgent, newAgentSchema, randomLook } from "./agent";
 import { type NewGroup, newGroupSchema } from "./group";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
@@ -161,9 +161,17 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       if (!parsed.success) {
         return { ok: false, error: z.prettifyError(parsed.error) };
       }
-      const agent = { id: crypto.randomUUID(), name: parsed.data.name, createdAt: new Date() };
+      const agent = {
+        id: crypto.randomUUID(),
+        name: parsed.data.name,
+        look: parsed.data.look ?? randomLook(),
+        createdAt: new Date(),
+      };
       store.insertAgent(this.ctx.storage, agent);
-      return { ok: true, agent: { id: agent.id, name: agent.name, lastRanAt: null } };
+      return {
+        ok: true,
+        agent: { id: agent.id, name: agent.name, look: agent.look, lastRanAt: null },
+      };
     }
 
     /** Adds a task the agent runs `prompt` on `schedule`. An invalid prompt or schedule comes back as `ok: false`. */

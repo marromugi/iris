@@ -10,6 +10,9 @@ import { listen } from "./run-events";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
 import { agentThread } from "./agent-thread";
 
+/** Any look; agents get one at random unless they are given one. */
+const anyLook = { palette: expect.any(Number), seed: expect.any(Number) };
+
 afterEach(async () => {
   scriptedModel.length = 0;
   modelRequests.length = 0;
@@ -57,7 +60,12 @@ async function insertTask(nextRunAt: Date, id = "task-1") {
 async function insertAgent(name: string): Promise<string> {
   const id = crypto.randomUUID();
   await runInDurableObject(userAgent(), (_, state) => {
-    store.insertAgent(state.storage, { id, name, createdAt: new Date(Date.now() + 1000) });
+    store.insertAgent(state.storage, {
+      id,
+      name,
+      look: { palette: 0, seed: 0 },
+      createdAt: new Date(Date.now() + 1000),
+    });
   });
   return id;
 }
@@ -89,6 +97,7 @@ test("every user starts with one agent that hasn't run", async () => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
       ),
       name: "エージェント",
+      look: anyLook,
       lastRanAt: null,
     },
   ]);
@@ -97,15 +106,23 @@ test("every user starts with one agent that hasn't run", async () => {
 test("an added agent comes last in the list with its own thread, and a blank or long name is refused", async () => {
   const added = await userAgent().addAgent({ name: "  株価の確認  " });
   const blank = await userAgent().addAgent({ name: "   " });
+  const chosen = await userAgent().addAgent({ name: "ニュース", look: { palette: 3, seed: 42 } });
+  const badLook = await userAgent().addAgent({ name: "ニュース", look: { palette: -1, seed: 42 } });
   const long = await userAgent().addAgent({ name: "あ".repeat(41) });
 
   if (!added.ok) {
     throw new Error(added.error);
   }
-  expect(added.agent).toEqual({ id: expect.any(String), name: "株価の確認", lastRanAt: null });
+  expect(added.agent).toEqual({
+    id: expect.any(String),
+    name: "株価の確認",
+    look: anyLook,
+    lastRanAt: null,
+  });
   expect((await userAgent().listAgents()).map((agent) => agent.name)).toEqual([
     "エージェント",
     "株価の確認",
+    "ニュース",
   ]);
   const threads = await runInDurableObject(userAgent(), (_, state) => [
     store.agentThreadId(state.storage, added.agent.id),
@@ -114,6 +131,8 @@ test("an added agent comes last in the list with its own thread, and a blank or 
   expect(threads).toEqual([expect.any(String), undefined]);
   expect(blank.ok).toBe(false);
   expect(long.ok).toBe(false);
+  expect(chosen.ok && chosen.agent.look).toEqual({ palette: 3, seed: 42 });
+  expect(badLook.ok).toBe(false);
 });
 
 test("each agent has its own tasks and runs, and runs when its own task is due", async () => {
@@ -142,8 +161,8 @@ test("each agent has its own tasks and runs, and runs when its own task is due",
   const runs = await userAgent().recentRuns(stocks);
   expect(runs?.map((run) => run.taskId)).toEqual(["stocks-task"]);
   expect(await userAgent().listAgents()).toEqual([
-    { id: first, name: "エージェント", lastRanAt: null },
-    { id: stocks, name: "株価の確認", lastRanAt: dueAt },
+    { id: first, name: "エージェント", look: anyLook, lastRanAt: null },
+    { id: stocks, name: "株価の確認", look: anyLook, lastRanAt: dueAt },
   ]);
 });
 
@@ -595,7 +614,12 @@ test("the tasks and runs stored before agents become the first agent's", async (
 
   const [agent, ...others] = await userAgent().listAgents();
   expect(others).toEqual([]);
-  expect(agent).toEqual({ id: expect.any(String), name: "エージェント", lastRanAt: startedAt });
+  expect(agent).toEqual({
+    id: expect.any(String),
+    name: "エージェント",
+    look: anyLook,
+    lastRanAt: startedAt,
+  });
   expect((await userAgent().listTasks(agent!.id))?.map((task) => task.id)).toEqual(["task-1"]);
   const runs = (await userAgent().recentRuns(agent!.id)) ?? [];
   expect(runs.map((run) => [run.id, run.messages])).toEqual([

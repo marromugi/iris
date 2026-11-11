@@ -14,8 +14,14 @@ struct HomeScreen: View {
         let threads: [ChatThread]
         let agents: [Agent]
 
-        var agentNames: [Agent.ID: String] {
-            Dictionary(agents.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        var agentsByID: [Agent.ID: Agent] {
+            Dictionary(agents.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+
+        /// The looks of the thread's members that the home knows, in the thread's order.
+        func looks(of thread: ChatThread) -> [AgentLook] {
+            let byID = agentsByID
+            return thread.agentIds.compactMap { byID[$0]?.look }
         }
     }
 
@@ -36,13 +42,13 @@ struct HomeScreen: View {
         ) { home in
             List(home.threads) { thread in
                 NavigationLink(value: thread) {
-                    ThreadRow(thread: thread)
+                    ThreadRow(thread: thread, looks: home.looks(of: thread))
                 }
             }
             .listStyle(.plain)
             .refreshable { await load() }
             .navigationDestination(for: ChatThread.self) { thread in
-                ThreadScreen(thread: thread, agentNames: home.agentNames, directory: directory)
+                ThreadScreen(thread: thread, agents: home.agentsByID, directory: directory)
             }
         }
         .navigationTitle("Iris")
@@ -90,26 +96,42 @@ struct HomeScreen: View {
     }
 }
 
-/// One thread: its name, a mark for a group, and when something last happened in it.
+/// One thread: its members' orbs, its name, and when something last happened in it.
 private struct ThreadRow: View {
     let thread: ChatThread
+    /// The members' looks, in the thread's order.
+    let looks: [AgentLook]
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Label {
-                Text(thread.name)
-                    .font(.headline)
-                    .lineLimit(1)
-            } icon: {
-                Image(systemName: thread.agentId == nil ? "person.3.fill" : "person.fill")
-                    .foregroundStyle(.secondary)
-            }
+        HStack {
+            ThreadPicture(looks: looks)
+            Text(thread.name)
+                .font(.headline)
+                .lineLimit(1)
             Spacer()
             AgoText(date: thread.lastActivityAt)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 8)
+    }
+}
+
+/// A thread's picture: its agent's orb, or for a group the first two members' orbs, one over the other.
+private struct ThreadPicture: View {
+    let looks: [AgentLook]
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if looks.count >= 2 {
+                AgentOrb(look: looks[0], size: 30)
+                AgentOrb(look: looks[1], size: 30)
+                    .offset(x: 14, y: 14)
+            } else if let look = looks.first {
+                AgentOrb(look: look, size: 44)
+            }
+        }
+        .frame(width: 44, height: 44, alignment: .topLeading)
     }
 }
 

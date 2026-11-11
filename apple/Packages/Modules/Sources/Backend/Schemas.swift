@@ -14,6 +14,8 @@ public typealias Post = Components.Schemas.Post
 public typealias ThreadEntry = Components.Schemas.ThreadEntry
 /// A post sent, with the runs that reply to it as they start.
 public typealias SentPost = Components.Schemas.SentPost
+/// How an agent's orb is drawn: one of the app's palettes, taken modulo how many there are, and the seed of its grain.
+public typealias AgentLook = Components.Schemas.Look
 /// What adding an agent sends: its name.
 public typealias NewAgent = Components.Schemas.NewAgent
 /// A task an agent runs on its schedule, with when it runs next. Not `Task`, which is Swift's own.

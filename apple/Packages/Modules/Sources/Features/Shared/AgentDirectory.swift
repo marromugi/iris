@@ -4,8 +4,8 @@ import Backend
 nonisolated protocol AgentDirectory: Sendable {
     /// The user's agents, in the order they were added.
     func agents() async throws(AppError) -> [Agent]
-    /// Adds an agent with the name, with its own one-to-one thread.
-    func addAgent(named name: String) async throws(AppError) -> Agent
+    /// Adds an agent with the name and look, with its own one-to-one thread.
+    func addAgent(named name: String, look: AgentLook) async throws(AppError) -> Agent
     /// The user's threads, the latest activity first, as the home lists them.
     func threads() async throws(AppError) -> [ChatThread]
     /// Makes a group of the agents with the name.

@@ -3,6 +3,10 @@ import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  /** Which of the app's palettes the agent's orb is drawn in, taken modulo how many the app has. */
+  lookPalette: integer("look_palette").notNull().default(0),
+  /** What shapes the noise of the agent's orb. */
+  lookSeed: integer("look_seed").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 

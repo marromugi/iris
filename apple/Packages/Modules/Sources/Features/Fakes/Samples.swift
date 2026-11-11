@@ -171,12 +171,22 @@
         /// Many agents, for seeing that the home holds up when there are more than fit on the screen.
         static let agents: [Agent] =
             [
-                Agent(id: "mail", name: "メールの整理", lastRanAt: moment("2026-11-10T00:00:00Z")),
-                Agent(id: "stocks", name: "株価の確認", lastRanAt: moment("2026-11-09T23:50:00Z")),
-                Agent(id: "news", name: "ニュースのまとめ", lastRanAt: moment("2026-11-09T20:00:00Z")),
-                Agent(id: "new", name: "まだ動いていないエージェント", lastRanAt: nil),
+                Agent(
+                    id: "mail", name: "メールの整理", look: AgentLook(palette: 2, seed: 12034),
+                    lastRanAt: moment("2026-11-10T00:00:00Z")),
+                Agent(
+                    id: "stocks", name: "株価の確認", look: AgentLook(palette: 0, seed: 9808),
+                    lastRanAt: moment("2026-11-09T23:50:00Z")),
+                Agent(
+                    id: "news", name: "ニュースのまとめ", look: AgentLook(palette: 6, seed: 74854),
+                    lastRanAt: moment("2026-11-09T20:00:00Z")),
+                Agent(id: "new", name: "まだ動いていないエージェント", look: AgentLook(palette: 4, seed: 44916), lastRanAt: nil),
             ]
-            + (1...16).map { Agent(id: "pod-\($0)", name: "Pod \($0)", lastRanAt: moment("2026-11-01T00:00:00Z")) }
+            + (1...16).map {
+                Agent(
+                    id: "pod-\($0)", name: "Pod \($0)", look: AgentLook(palette: $0, seed: $0 * 7919),
+                    lastRanAt: moment("2026-11-01T00:00:00Z"))
+            }
 
         /// A group of two agents first, then each agent's one-to-one thread, as the home lists them.
         static let threads: [ChatThread] =

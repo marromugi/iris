@@ -18,6 +18,15 @@ struct NewAgentSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    VStack(spacing: 16) {
+                        AgentOrb(look: form.look, size: 120)
+                        Button("ほかの色にする", systemImage: "shuffle") { form.shuffle() }
+                            .buttonStyle(.bordered)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                }
+                Section {
                     TextField("例：株価の確認", text: $form.name)
                         .onSubmit(add)
                 } header: {

@@ -8,14 +8,14 @@ import SwiftUI
 /// away.
 struct ThreadScreen: View {
     let thread: ChatThread
-    /// The names of the user's agents by ID, for naming whose run each is.
-    let agentNames: [Agent.ID: String]
+    /// The user's agents by ID, for showing whose run each is.
+    let agents: [Agent.ID: Agent]
     let directory: any AgentDirectory
     @State private var open: OpenThread
 
-    init(thread: ChatThread, agentNames: [Agent.ID: String], directory: any AgentDirectory) {
+    init(thread: ChatThread, agents: [Agent.ID: Agent], directory: any AgentDirectory) {
         self.thread = thread
-        self.agentNames = agentNames
+        self.agents = agents
         self.directory = directory
         _open = State(initialValue: OpenThread(backend: directory.thread(id: thread.id)))
     }
@@ -31,7 +31,7 @@ struct ThreadScreen: View {
                         case .run(let run):
                             RunView(
                                 run: run, progress: open.progress[run.id],
-                                speaker: thread.agentId == nil ? agentNames[run.agentId] : nil)
+                                speaker: thread.agentId == nil ? agents[run.agentId] : nil)
                         }
                     }
                 }
@@ -82,24 +82,24 @@ struct ThreadScreen: View {
 }
 
 #if DEBUG
-    private let names = Dictionary(uniqueKeysWithValues: Samples.agents.map { ($0.id, $0.name) })
+    private let agents = Dictionary(uniqueKeysWithValues: Samples.agents.map { ($0.id, $0) })
 
     #Preview("実行あり") {
         NavigationStack {
-            ThreadScreen(thread: Samples.threads[1], agentNames: names, directory: FakeAgentDirectory())
+            ThreadScreen(thread: Samples.threads[1], agents: agents, directory: FakeAgentDirectory())
         }
     }
 
     #Preview("グループ") {
         NavigationStack {
-            ThreadScreen(thread: Samples.threads[0], agentNames: names, directory: FakeAgentDirectory())
+            ThreadScreen(thread: Samples.threads[0], agents: agents, directory: FakeAgentDirectory())
         }
     }
 
     #Preview("実行なし") {
         NavigationStack {
             ThreadScreen(
-                thread: Samples.threads[1], agentNames: names,
+                thread: Samples.threads[1], agents: agents,
                 directory: FakeAgentDirectory(thread: FakeThreadBackend(.init(runs: [], posts: []))))
         }
     }
