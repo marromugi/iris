@@ -55,7 +55,7 @@
         func send(_ text: String) async throws(AppError) -> SentPost {
             try answers.withLock { answers throws(AppError) in
                 if let failure = answers.failure { throw failure }
-                let post = Post(id: "post-\(answers.posts.count + 1)", text: text, createdAt: answers.sentAt)
+                let post = Post(id: "post-\(answers.posts.count + 1)", agentId: nil, text: text, createdAt: answers.sentAt)
                 let runs = answers.repliers.enumerated().map { index, agentID in
                     Run(
                         id: "sent-\(answers.runs.count + index + 1)", agentId: agentID, postId: post.id,

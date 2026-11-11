@@ -328,7 +328,12 @@ test("makes a group, lists it with the one-to-one threads, and posts in it", asy
   expect(tooFew.status).toBe(400);
   expect(sent.status).toBe(202);
   expect(await sent.json()).toEqual({
-    post: { id: expect.any(String), text: "@株価 今日は？", createdAt: expect.any(String) },
+    post: {
+      id: expect.any(String),
+      agentId: null,
+      text: "@株価 今日は？",
+      createdAt: expect.any(String),
+    },
     runs: [expect.objectContaining({ agentId: second.id, taskId: null, endedAt: null })],
   });
   expect(listed.map((thread) => thread.name)).toEqual(["チーム", "株価", "エージェント"]);

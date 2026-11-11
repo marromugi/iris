@@ -72,11 +72,27 @@ export function threadJson(thread: Thread): z.infer<typeof threadSchema> {
 }
 
 export const postSchema = z
-  .object({ id: z.uuid(), text: z.string(), createdAt: timeSchema })
-  .meta({ id: "Post", description: "What the user said in a thread" });
+  .object({
+    id: z.uuid(),
+    agentId: z
+      .uuid()
+      .nullable()
+      .meta({ description: "The agent that asked it in a consult; null when the user said it" }),
+    text: z.string(),
+    createdAt: timeSchema,
+  })
+  .meta({
+    id: "Post",
+    description: "What was said in a thread: by the user, or in a consult by the agent that asked",
+  });
 
 export function postJson(post: Post): z.infer<typeof postSchema> {
-  return { id: post.id, text: post.text, createdAt: timeJson(post.createdAt) };
+  return {
+    id: post.id,
+    agentId: post.agentId,
+    text: post.text,
+    createdAt: timeJson(post.createdAt),
+  };
 }
 
 export const taskSchema = z

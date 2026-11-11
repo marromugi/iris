@@ -135,6 +135,9 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       if (thread === undefined) {
         return undefined;
       }
+      if (thread.consultRunId !== null) {
+        return { ok: false, error: "A consult is only for reading; agents ask and answer in it." };
+      }
       const parsed = newMessageSchema.safeParse(input);
       if (!parsed.success) {
         return { ok: false, error: z.prettifyError(parsed.error) };
@@ -288,7 +291,14 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       text: string,
       agentIds: readonly string[],
     ): Promise<{ post: store.Post; runs: store.Run[] }> {
-      const post: store.Post = { id: crypto.randomUUID(), threadId, text, createdAt: new Date() };
+      const post: store.Post = {
+        id: crypto.randomUUID(),
+        threadId,
+        agentId: null,
+        callId: null,
+        text,
+        createdAt: new Date(),
+      };
       const runIds = store.insertPost(this.ctx.storage, post, agentIds);
       this.broadcast.posted(post);
       const runs = runIds.map((id) => {

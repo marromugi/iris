@@ -182,7 +182,11 @@ test("a post is read together with its replies, and passed over when none ended 
   const read = await runInDurableObject(userAgent(), (_, state) => {
     const threadId = store.agentThreadId(state.storage, agentId) ?? "";
     const send = (id: string, text: string, minute: number) =>
-      store.insertPost(state.storage, { id, threadId, text, createdAt: at(minute) }, [agentId]);
+      store.insertPost(
+        state.storage,
+        { id, threadId, agentId: null, callId: null, text, createdAt: at(minute) },
+        [agentId],
+      );
     const [answered = ""] = send("answered", "X", 0);
     store.appendMessage(state.storage, answered, 1, reply("Answer to X."));
     store.endRun(state.storage, answered, at(1));
@@ -248,7 +252,14 @@ test("a post sent while a wake-up carries runs on is started by that wake-up whe
     const post = (threadId: string, text: string, agentIds: string[]) =>
       store.insertPost(
         state.storage,
-        { id: crypto.randomUUID(), threadId, text, createdAt: new Date() },
+        {
+          id: crypto.randomUUID(),
+          threadId,
+          agentId: null,
+          callId: null,
+          text,
+          createdAt: new Date(),
+        },
         agentIds,
       );
     const [mail = ""] = store.findThread(state.storage, groupId)?.agentIds ?? [];
@@ -296,6 +307,8 @@ test("no more than six runs ask the model at once", async () => {
         {
           id: crypto.randomUUID(),
           threadId: store.agentThreadId(state.storage, agentId) ?? "",
+          agentId: null,
+          callId: null,
           text: "はい？",
           createdAt: new Date(),
         },
@@ -337,6 +350,8 @@ test("a run still going after the retry delay isn't picked up a second time", as
         {
           id: crypto.randomUUID(),
           threadId: store.agentThreadId(state.storage, agentId) ?? "",
+          agentId: null,
+          callId: null,
           text: "はい？",
           createdAt: new Date(clock),
         },

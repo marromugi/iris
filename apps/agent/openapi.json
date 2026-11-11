@@ -341,6 +341,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The agent that asked it in a consult; null when the user said it"
+          },
           "text": {
             "type": "string"
           },
@@ -351,10 +359,11 @@
         },
         "required": [
           "id",
+          "agentId",
           "text",
           "createdAt"
         ],
-        "description": "What the user said in a thread"
+        "description": "What was said in a thread: by the user, or in a consult by the agent that asked"
       },
       "Me": {
         "type": "object",

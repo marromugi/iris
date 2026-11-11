@@ -7,16 +7,21 @@ import type { z } from "zod";
  */
 export type ToolOutcome = { ok: true; content: string } | { ok: false; error: string };
 
+/** Which call of the model a tool runs for. The same call keeps its ID when it runs again. */
+export interface ToolCall {
+  readonly id: string;
+}
+
 /**
  * A tool the model can call. `input` parses the model's arguments before `run` sees them.
  * A call's result is saved only after `run` returns, so if the process stops while `run` is
- * working, the same call runs again when the conversation is resumed.
+ * working, the same call, with the same ID, runs again when the conversation is resumed.
  */
 export interface Tool<Input extends z.ZodType = z.ZodType> {
   readonly name: string;
   readonly description: string;
   readonly input: Input;
-  run(input: z.output<Input>): Promise<ToolOutcome>;
+  run(input: z.output<Input>, call: ToolCall): Promise<ToolOutcome>;
 }
 
 /** Builds a tool, typing `run`'s argument from the `input` schema. */
