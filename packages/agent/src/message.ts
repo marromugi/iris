@@ -31,14 +31,27 @@ export const toolCallPartSchema = z.object({
   input: jsonValueSchema,
 });
 
+/**
+ * The model's own reasoning toward the message, kept as its service returned it so it can be sent
+ * back to that service with the rest of the conversation. Only the model adapter that wrote it
+ * reads `data`; nothing of it is shown, and it belongs to the run that produced it.
+ */
+export const reasoningPartSchema = z.object({
+  type: z.literal("reasoning"),
+  data: jsonValueSchema,
+});
+
 export const userMessageSchema = z.object({
   role: z.literal("user"),
   text: z.string(),
 });
 
+/** The parts keep the order the model wrote them in, which its service may need when they go back. */
 export const assistantMessageSchema = z.object({
   role: z.literal("assistant"),
-  parts: z.array(z.discriminatedUnion("type", [textPartSchema, toolCallPartSchema])),
+  parts: z.array(
+    z.discriminatedUnion("type", [textPartSchema, toolCallPartSchema, reasoningPartSchema]),
+  ),
 });
 
 /**
@@ -65,6 +78,7 @@ export const messageSchema = z.discriminatedUnion("role", [
 
 export type TextPart = z.infer<typeof textPartSchema>;
 export type ToolCallPart = z.infer<typeof toolCallPartSchema>;
+export type ReasoningPart = z.infer<typeof reasoningPartSchema>;
 export type UserMessage = z.infer<typeof userMessageSchema>;
 export type AssistantMessage = z.infer<typeof assistantMessageSchema>;
 export type ToolResultMessage = z.infer<typeof toolResultMessageSchema>;

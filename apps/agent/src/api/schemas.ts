@@ -1,6 +1,8 @@
 import { z } from "@hono/zod-openapi";
 import {
   assistantMessageSchema,
+  type Message,
+  type reasoningPartSchema,
   type textPartSchema,
   type toolCallPartSchema,
   toolResultMessageSchema,
@@ -118,10 +120,14 @@ export function taskJson(task: Task): z.infer<typeof taskSchema> {
   };
 }
 
-// An assistant message's part types as @iris/agent defines them. Typed as exactly these two, so
+// An assistant message's part types as @iris/agent defines them. Typed as exactly these three, so
 // a part type added there stops this from compiling until the API document says how to send it.
-const [textPart, toolCallPart]: readonly [typeof textPartSchema, typeof toolCallPartSchema] =
-  assistantMessageSchema.shape.parts.element.options;
+// Reasoning is the model's alone and is never sent.
+const [textPart, toolCallPart]: readonly [
+  typeof textPartSchema,
+  typeof toolCallPartSchema,
+  typeof reasoningPartSchema,
+] = assistantMessageSchema.shape.parts.element.options;
 
 // A message as @iris/agent defines it, except that a tool call's input is written as any value:
 // the OpenAPI generator can't describe the JSON-value check the agent runs on it.
@@ -182,9 +188,15 @@ export function runJson(run: Run): z.infer<typeof runSchema> {
     endedAt: run.endedAt === null ? null : timeJson(run.endedAt),
     lastError: run.lastError,
     failedAttempts: run.failedAttempts,
-    messages: run.messages,
+    messages: run.messages.map(messageJson),
     consults: run.consults.map(({ callId, thread }) => ({ callId, thread: threadJson(thread) })),
   };
+}
+
+function messageJson(message: Message): z.infer<typeof messageSchema> {
+  return message.role === "assistant"
+    ? { ...message, parts: message.parts.filter((part) => part.type !== "reasoning") }
+    : message;
 }
 
 /**

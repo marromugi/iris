@@ -808,7 +808,7 @@ export function* earlierInThread(
       const name = agentNames.get(row.agentId) ?? "";
       return [{ role: "user", text: `${name}: ${replyText(conversation)}` }];
     }
-    return row.postId === null ? conversation : conversation.slice(1);
+    return (row.postId === null ? conversation : conversation.slice(1)).map(withoutReasoning);
   };
   for (const entry of entries.toSorted((a, b) => b.at.getTime() - a.at.getTime())) {
     if ("run" in entry) {
@@ -823,6 +823,16 @@ export function* earlierInThread(
       yield [{ role: "user", text: postAsRead(entry.post, agentNames) }, ...replies];
     }
   }
+}
+
+/**
+ * A message of an earlier run as a later run reads it. The model's reasoning stays with the run
+ * that produced it: it was written against that run's view of the thread, not the later one's.
+ */
+function withoutReasoning(message: Message): Message {
+  return message.role === "assistant"
+    ? { ...message, parts: message.parts.filter((part) => part.type !== "reasoning") }
+    : message;
 }
 
 /** The text of a finished conversation's last message. */
