@@ -92,3 +92,46 @@ test("the real model calls tools, gets its stored thinking back unchanged, and a
   // With the binding beta, the API lists any block it dropped; none should be.
   expect(responses.map(leftOut)).toEqual(responses.map(() => []));
 });
+
+const subtract = defineTool({
+  name: "subtract",
+  description: "Subtracts b from a and returns the difference.",
+  input: z.object({ a: z.number(), b: z.number() }),
+  async run({ a, b }) {
+    return { ok: true, content: String(a - b) };
+  },
+});
+
+test("when a run's tools change between steps, the real API leaves out the earlier thinking and carries on", async () => {
+  const conversation: Message[] = [
+    {
+      role: "user",
+      text: "A box held 17 apples and 25 more were put in. Use the add tool to work out how many it holds now, then tell me.",
+    },
+  ];
+  // The first steps: Claude's call and the tool's result, stored.
+  for (const _ of [1, 2]) {
+    const message = await step({ model, tools: [add] }, conversation);
+    if (message !== undefined) {
+      conversation.push(stored(message));
+    }
+  }
+  const thought = conversation.some(
+    (message) =>
+      message.role === "assistant" && message.parts.some((part) => part.type === "reasoning"),
+  );
+
+  // The next step is given one more tool, as when the user adds an agent while a run waits.
+  const asked = exchanges.length;
+  const reply = await step({ model, tools: [add, subtract] }, conversation);
+
+  const response = await exchanges[asked]?.response;
+  console.log(JSON.stringify(conversation, null, 2));
+  console.log("Left out:", JSON.stringify(leftOut(response ?? "")));
+  // The check is about thinking that was sent back, so a run where Claude didn't think proves nothing.
+  expect(thought).toBe(true);
+  expect(reply?.role).toBe("assistant");
+  expect(leftOut(response ?? "")).toContainEqual(
+    expect.objectContaining({ type: "thinking_dropped", reason: "prefix_binding_mismatch" }),
+  );
+});
