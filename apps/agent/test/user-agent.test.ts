@@ -3,7 +3,7 @@ import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:tes
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
 import migrations from "../drizzle/migrations";
-import { MAX_FAILED_ATTEMPTS, RETRY_DELAY_MS, runNext } from "../src/runner";
+import { MAX_FAILED_ATTEMPTS, RETRY_DELAY_MS, runDue } from "../src/runner";
 import { RunBroadcast } from "../src/run-broadcast";
 import * as store from "../src/store";
 import { listen } from "./run-events";
@@ -85,9 +85,7 @@ async function startRun(id: string, agentId: string, text: string, startedAt: Da
 
 /** Does the next piece of due work as if it were `now`. */
 function runNextAt(now: Date) {
-  return runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => now),
-  );
+  return runInDurableObject(userAgent(), (_, state) => runDue(state.storage, testAgent, () => now));
 }
 
 test("every user starts with one agent that hasn't run", async () => {
@@ -152,7 +150,7 @@ test("each agent has its own tasks and runs, and runs when its own task is due",
   scriptedModel.push(reply("Stocks are up."));
 
   await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => dueAt),
+    runDue(state.storage, testAgent, () => dueAt),
   );
 
   expect(await userAgent().listTasks(first)).toEqual([]);
@@ -264,7 +262,7 @@ test("a failed run is tried again later and carried on, not started again", asyn
   const agentId = await firstAgentId();
 
   const wakeAt = await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => startedAt),
+    runDue(state.storage, testAgent, () => startedAt),
   );
 
   expect(wakeAt).toEqual(new Date(startedAt.getTime() + RETRY_DELAY_MS));
@@ -275,7 +273,7 @@ test("a failed run is tried again later and carried on, not started again", asyn
   scriptedModel.push(reply("You have 3 new emails."));
   const retryAt = new Date(startedAt.getTime() + RETRY_DELAY_MS);
   await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => retryAt),
+    runDue(state.storage, testAgent, () => retryAt),
   );
 
   const runs = (await userAgent().recentRuns(agentId)) ?? [];
@@ -299,7 +297,7 @@ test("a run that keeps failing is given up, keeping its error, and stops calling
   for (let attempt = 0; attempt < MAX_FAILED_ATTEMPTS; attempt += 1) {
     const now = new Date(startedAt.getTime() + attempt * RETRY_DELAY_MS);
     wakeAt = await runInDurableObject(userAgent(), (_, state) =>
-      runNext(state.storage, testAgent, () => now),
+      runDue(state.storage, testAgent, () => now),
     );
   }
 
@@ -317,7 +315,7 @@ test("a task that missed several times runs once and moves to its next time afte
   const agentId = await firstAgentId();
 
   const wakeAt = await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => now),
+    runDue(state.storage, testAgent, () => now),
   );
 
   expect(await userAgent().recentRuns(agentId)).toHaveLength(1);
@@ -326,43 +324,64 @@ test("a task that missed several times runs once and moves to its next time afte
   expect(task?.nextRunAt).toEqual(new Date("2026-11-11T08:00:00Z"));
 });
 
-test("does one run per wake-up and wakes again right away while more is due", async () => {
+test("one wake-up carries on every due run side by side, and wakes for nothing more", async () => {
   const dueAt = new Date("2026-11-10T08:00:00Z");
+  const other = await insertAgent("株価の確認");
   await insertTask(dueAt, "task-1");
-  await insertTask(dueAt, "task-2");
-  scriptedModel.push(reply("First done."), reply("Second done."));
-  const agentId = await firstAgentId();
+  await runInDurableObject(userAgent(), (_, state) => {
+    store.insertTask(state.storage, {
+      id: "task-2",
+      agentId: other,
+      threadId: agentThread(state.storage, other),
+      prompt: "Check stocks",
+      schedule: dailyAtEightUtc,
+      nextRunAt: dueAt,
+    });
+  });
+  const { promise: bothAsked, resolve: release } = Promise.withResolvers<void>();
+  // Each reply waits until both runs have asked the model, so they only end if they go side by side.
+  const waitForBoth = async () => {
+    if (modelRequests.length === 2) {
+      release();
+    }
+    await bothAsked;
+    return reply("Done.");
+  };
+  scriptedModel.push(waitForBoth, waitForBoth);
 
-  const first = await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => dueAt),
+  const next = await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => dueAt),
   );
-  expect(await userAgent().recentRuns(agentId)).toHaveLength(1);
-  expect(first).toEqual(dueAt);
 
-  await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => dueAt),
+  expect(modelRequests).toHaveLength(2);
+  expect(next).toEqual(new Date("2026-11-11T08:00:00Z"));
+  const ended = await runInDurableObject(userAgent(), (_, state) =>
+    state.storage.sql.exec("SELECT count(*) AS ended FROM runs WHERE ended_at IS NOT NULL").one(),
   );
-  const runs = (await userAgent().recentRuns(agentId)) ?? [];
-  expect(new Set(runs.map((run) => run.taskId))).toEqual(new Set(["task-1", "task-2"]));
+  expect(ended).toEqual({ ended: 2 });
 });
 
-test("a task removed while another task's run waits on the model doesn't start", async () => {
+test("a run still going when the wake-up runs out of time stops after its message and is due at once", async () => {
   const dueAt = new Date("2026-11-10T08:00:00Z");
   await insertTask(dueAt, "task-1");
-  await insertTask(dueAt, "task-2");
-  const agentId = await firstAgentId();
-
-  await runInDurableObject(userAgent(), async (_, state) => {
-    scriptedModel.push(() => {
-      store.deleteTask(state.storage, agentId, "task-2");
-      return reply("Done.");
-    });
-    await runNext(state.storage, testAgent, () => dueAt);
-    await runNext(state.storage, testAgent, () => dueAt);
+  let clock = dueAt.getTime();
+  const toolCall: AssistantMessage = {
+    role: "assistant",
+    parts: [{ type: "tool-call", id: "call-1", name: "missing", input: {} }],
+  };
+  scriptedModel.push(() => {
+    clock += RETRY_DELAY_MS * 3;
+    return toolCall;
   });
 
-  const runs = (await userAgent().recentRuns(agentId)) ?? [];
-  expect(runs.map((run) => run.taskId)).toEqual(["task-1"]);
+  const next = await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => new Date(clock)),
+  );
+
+  const [run] = (await userAgent().recentRuns(await firstAgentId())) ?? [];
+  expect(run?.endedAt).toBeNull();
+  expect(run?.messages.at(-1)).toEqual(toolCall);
+  expect(next).toEqual(new Date(clock));
 });
 
 test("adding a task after a run failed doesn't put off the run's retry", async () => {
@@ -374,7 +393,7 @@ test("adding a task after a run failed doesn't put off the run's retry", async (
   await insertTask(failedAt);
   scriptedModel.push(new Error("The model service is unreachable."));
   await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => failedAt),
+    runDue(state.storage, testAgent, () => failedAt),
   );
 
   await userAgent().addTask(await firstAgentId(), {
@@ -440,10 +459,13 @@ test("a watcher that throws changes nothing about the run", async () => {
     progress() {
       throw new Error("The socket went away.");
     },
+    stopped() {
+      throw new Error("The socket went away.");
+    },
   };
 
   await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => dueAt, throwing),
+    runDue(state.storage, testAgent, () => dueAt, throwing),
   );
 
   const [run] = (await userAgent().recentRuns(await firstAgentId())) ?? [];
@@ -457,7 +479,7 @@ test("a message starts a run due at once, which the model answers after the agen
   await insertTask(earlier);
   scriptedModel.push(reply("You have 3 new emails."));
   await runInDurableObject(userAgent(), (_, state) =>
-    runNext(state.storage, testAgent, () => earlier),
+    runDue(state.storage, testAgent, () => earlier),
   );
   const agentId = await firstAgentId();
 
@@ -520,7 +542,7 @@ test("while a run waits on the model, it is due again only after the retry delay
       due = store.earliestRunDueAt(state.storage);
       return reply("Hi.");
     });
-    await runNext(state.storage, testAgent, () => sentAt);
+    await runDue(state.storage, testAgent, () => sentAt);
     return due;
   });
 

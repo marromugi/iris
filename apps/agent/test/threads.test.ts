@@ -1,9 +1,12 @@
-import type { AssistantMessage } from "@iris/agent";
+import type { AssistantMessage, ModelRequest } from "@iris/agent";
 import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
+import { RunBroadcast } from "../src/run-broadcast";
+import { runDue, Waker } from "../src/runner";
 import * as store from "../src/store";
-import { modelRequests, scriptedModel } from "./worker";
+import { listen } from "./run-events";
+import { modelRequests, scriptedModel, testAgent } from "./worker";
 
 /** Sorts IDs as text, for comparing sets of them. */
 const byText = (a: string | undefined, b: string | undefined) => (a ?? "").localeCompare(b ?? "");
@@ -52,6 +55,10 @@ test("a group needs a name and two or more of the user's agents, each once", asy
   expect(results.map((result) => result.ok)).toEqual([false, false, false, false]);
 });
 
+/** Sorts `[name, …]` rows by name. */
+const byName = (a: readonly unknown[], b: readonly unknown[]) =>
+  String(a[0]).localeCompare(String(b[0]));
+
 test("the home lists one-to-one threads and groups together, the latest activity first", async () => {
   const { agentIds, groupId } = await groupOf("メール", "株価");
   const [first] = await userAgent().listAgents();
@@ -62,14 +69,23 @@ test("the home lists one-to-one threads and groups together, the latest activity
 
   const threads = await userAgent().listThreads();
 
-  expect(threads.map((thread) => [thread.name, thread.agentIds])).toEqual([
-    ["エージェント", [first?.id]],
-    ["チーム", agentIds],
-    ["株価", [agentIds[1]]],
-    ["メール", [agentIds[0]]],
-  ]);
+  // The agents and the group are often made in the same millisecond and then tie; the sent message
+  // puts the first agent's thread on top.
+  expect(threads[0]).toMatchObject({ name: "エージェント", agentIds: [first?.id] });
+  expect(
+    threads
+      .slice(1)
+      .map((thread) => [thread.name, thread.agentIds.toSorted()])
+      .toSorted(byName),
+  ).toEqual(
+    [
+      ["チーム", agentIds.toSorted()],
+      ["メール", [agentIds[0]]],
+      ["株価", [agentIds[1]]],
+    ].toSorted(byName),
+  );
   expect(threads[0]?.id).toBe(firstThread?.id);
-  expect(threads[1]).toMatchObject({ id: groupId, agentId: null });
+  expect(threads.find((thread) => thread.id === groupId)).toMatchObject({ agentId: null });
 });
 
 test("a post naming nobody gets a reply from every member, and the next post reads them", async () => {
@@ -87,7 +103,11 @@ test("a post naming nobody gets a reply from every member, and the next post rea
   );
   const endOrder = (await userAgent().threadEntries(groupId, 10))
     ?.flatMap((entry) => (entry.type === "run" ? [entry.run] : []))
-    .toSorted((a, b) => (a.endedAt?.getTime() ?? 0) - (b.endedAt?.getTime() ?? 0))
+    // As the thread reads them: by when they ended, then by ID.
+    .toSorted(
+      (a, b) =>
+        (a.endedAt?.getTime() ?? 0) - (b.endedAt?.getTime() ?? 0) || a.id.localeCompare(b.id),
+    )
     .map((run) => run.agentId);
   scriptedModel.push(reply("了解。"));
   await userAgent().post(groupId, { text: "@株価 詳しく" });
@@ -173,4 +193,74 @@ test("a post is read together with its replies, and passed over when none ended 
   });
 
   expect(read).toEqual([[{ role: "user", text: "X" }, reply("Answer to X.")]]);
+});
+
+test("a group's replies to one post ask the model side by side, and a socket hears each one's progress", async () => {
+  const { groupId } = await groupOf("メール", "株価");
+  const { promise: bothAsked, resolve: release } = Promise.withResolvers<void>();
+  const waitForBoth = async (request: ModelRequest) => {
+    request.onProgress?.({ type: "thinking" });
+    if (modelRequests.length === 2) {
+      release();
+    }
+    await bothAsked;
+    return reply("はい。");
+  };
+  scriptedModel.push(waitForBoth, waitForBoth);
+  const heard = await runInDurableObject(userAgent(), async (instance, state) => {
+    const broadcast = new RunBroadcast(state);
+    const { 0: client, 1: server } = new WebSocketPair();
+    broadcast.accept(groupId, server, "runs-and-posts");
+    const socket = listen(client);
+    await instance.post(groupId, { text: "今日は？" });
+    await runDue(state.storage, testAgent, () => new Date(Date.now() + 1000), broadcast);
+    return socket.events;
+  });
+
+  expect(modelRequests).toHaveLength(2);
+  const thinking = heard.filter(
+    (event) => event.type === "progress" && event.progress.type === "thinking",
+  );
+  expect(
+    new Set(thinking.map((event) => (event.type === "progress" ? event.runId : ""))),
+  ).toHaveProperty("size", 2);
+});
+
+test("a post sent while a wake-up carries runs on is started by that wake-up at once", async () => {
+  const { groupId } = await groupOf("メール", "株価");
+  const waker = new Waker();
+  const { promise: firstAsked, resolve: firstStarted } = Promise.withResolvers<void>();
+  const { promise: secondAsked, resolve: secondStarted } = Promise.withResolvers<void>();
+  scriptedModel.push(
+    async () => {
+      firstStarted();
+      await secondAsked;
+      return reply("一つ目。");
+    },
+    () => {
+      secondStarted();
+      return reply("二つ目。");
+    },
+  );
+
+  await runInDurableObject(userAgent(), async (_, state) => {
+    await userAgent().post(groupId, { text: "@メール 一つ目" });
+    const going = runDue(
+      state.storage,
+      testAgent,
+      () => new Date(Date.now() + 1000),
+      undefined,
+      waker,
+    );
+    await firstAsked;
+    const [first] = await userAgent().listAgents();
+    await userAgent().sendMessage(first?.id ?? "", { text: "二つ目" });
+    waker.wake();
+    await going;
+  });
+
+  expect(modelRequests.map((request) => request.messages.at(-1))).toEqual([
+    { role: "user", text: "@メール 一つ目" },
+    { role: "user", text: "二つ目" },
+  ]);
 });

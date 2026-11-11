@@ -17,14 +17,16 @@ export const MAX_EARLIER_MESSAGES = 40;
 /** How a run is getting on while it is carried on: picked up, then the model's progress on each message. */
 export type RunProgress = { readonly type: "starting" } | ModelProgress;
 
-/** Hears what happens to runs while `runNext` works, for anyone watching them as they happen. */
+/** Hears what happens to runs while `runDue` works, for anyone watching them as they happen. */
 export interface RunWatcher {
   /** A run started, got a message, or ended or failed an attempt; read it again to see how. */
   changed(runId: string): void;
   progress(runId: string, progress: RunProgress): void;
+  /** A run stopped for this wake-up without ending; it is no longer being carried on. */
+  stopped(runId: string): void;
 }
 
-const nobodyWatching: RunWatcher = { changed() {}, progress() {} };
+const nobodyWatching: RunWatcher = { changed() {}, progress() {}, stopped() {} };
 
 /** The watcher with its failures logged instead of thrown: watching a run never changes how the run goes. */
 function safely(watcher: RunWatcher): RunWatcher {
@@ -43,38 +45,101 @@ function safely(watcher: RunWatcher): RunWatcher {
         console.error(`Telling the watcher how run ${runId} is getting on failed.`, error);
       }
     },
+    stopped(runId) {
+      try {
+        watcher.stopped(runId);
+      } catch (error) {
+        console.error(`Telling the watcher that run ${runId} stopped failed.`, error);
+      }
+    },
   };
 }
 
+/** How many runs one wake-up carries on at the same time at most. A Worker waits on six connections at once. */
+export const MAX_PARALLEL_RUNS = 6;
+
 /**
- * Does one piece of work that is due, then returns when to wake up next (a time already passed
- * when more work is due), or undefined when nothing is waiting. One piece per wake-up keeps each
- * wake-up within the platform's time limit however much is due.
+ * How long a wake-up starts and carries on runs before it stops, short of the platform's 15
+ * minutes for an alarm, so it can save where each run got to.
+ */
+export const WAKE_UP_BUDGET_MS = 13 * 60 * 1000;
+
+/**
+ * Lets a wake-up that is carrying on runs hear that more work may be due, such as a post just
+ * sent, so it starts that work without waiting for a run to end.
+ */
+export class Waker {
+  private woken: Promise<void> | undefined;
+  private wakeUp: (() => void) | undefined;
+
+  /** Resolves at the next `wake()`. */
+  next(): Promise<void> {
+    this.woken ??= new Promise((resolve) => {
+      this.wakeUp = resolve;
+    });
+    return this.woken;
+  }
+
+  wake(): void {
+    this.wakeUp?.();
+    this.woken = undefined;
+    this.wakeUp = undefined;
+  }
+}
+
+/**
+ * Carries on all the work that is due, several runs at the same time, then returns when to wake
+ * up next (a time already passed when more work is due), or undefined when nothing is waiting.
  *
- * The piece is, first, the run next in line whose due time came first: one a message started, or
- * one to try again. It is carried on from its saved messages. Otherwise it is the task whose time
- * came first: a run of it starts and the task moves to its next time after now, so a task that
- * missed several times runs once. A run that throws keeps its messages so far and is due again
- * `RETRY_DELAY_MS` later, until it has failed `MAX_FAILED_ATTEMPTS` times and is given up.
+ * Due runs are carried on from their saved messages, up to `MAX_PARALLEL_RUNS` at once; as each
+ * ends, and whenever `waker` wakes, more due work is started. A task whose time came starts a run
+ * and moves to its next time after now, so a task that missed several times runs once. A run that
+ * throws keeps its messages so far and is due again `RETRY_DELAY_MS` later, until it has failed
+ * `MAX_FAILED_ATTEMPTS` times and is given up.
  *
  * A run waits while a run of the same thread that started before it hasn't ended, the task's new
- * run included; runs that started together, such as the replies to one post, don't wait for each
- * other.
+ * run included; runs that started together, such as the replies to one post, go side by side.
+ *
+ * Once `WAKE_UP_BUDGET_MS` has passed since it began, nothing new starts, and each run going on
+ * stops after its current message and is due again at once, so the next wake-up carries it on.
  */
-export async function runNext(
+export async function runDue(
   storage: DurableObjectStorage,
   agent: Agent,
   now: () => Date,
   watching: RunWatcher = nobodyWatching,
+  waker: Waker = new Waker(),
 ): Promise<Date | undefined> {
   const watcher = safely(watching);
-  const due = store.nextDueRun(storage, now());
-  if (due !== undefined) {
-    await carryOn(storage, agent, due, now, watcher);
-    return nextWakeAt(storage);
+  const stopAt = now().getTime() + WAKE_UP_BUDGET_MS;
+  const outOfTime = () => now().getTime() >= stopAt;
+  const going = new Map<string, Promise<void>>();
+  for (;;) {
+    if (!outOfTime()) {
+      startDueTasks(storage, now, watcher);
+      for (const runId of store.nextDueRuns(storage, now(), MAX_PARALLEL_RUNS - going.size)) {
+        going.set(
+          runId,
+          carryOn(storage, agent, runId, now, watcher, outOfTime).finally(() =>
+            going.delete(runId),
+          ),
+        );
+      }
+    }
+    if (going.size === 0) {
+      return nextWakeAt(storage);
+    }
+    await Promise.race([...going.values(), waker.next()]);
   }
-  const task = store.nextDueTask(storage, now());
-  if (task !== undefined) {
+}
+
+/** Starts a run of each task whose time came, and moves the task to its next time after now. */
+function startDueTasks(storage: DurableObjectStorage, now: () => Date, watcher: RunWatcher): void {
+  for (
+    let task = store.nextDueTask(storage, now());
+    task !== undefined;
+    task = store.nextDueTask(storage, now())
+  ) {
     const runId = crypto.randomUUID();
     const startedAt = now();
     store.startRun(storage, {
@@ -86,11 +151,7 @@ export async function runNext(
       task: { id: task.id, nextRunAt: nextRunAt(task.schedule, startedAt) },
     });
     watcher.changed(runId);
-    if (store.nextDueRun(storage, startedAt) === runId) {
-      await carryOn(storage, agent, runId, now, watcher);
-    }
   }
-  return nextWakeAt(storage);
 }
 
 /** The earliest of the next task time and the due times of runs next in line. */
@@ -120,12 +181,17 @@ export function earlierMessages(earlier: Iterable<Message[]>, limit: number): Me
   return taken.toReversed().flat();
 }
 
+/**
+ * Carries the run on from its saved messages until it ends, or until `outOfTime` says so after a
+ * message, when it is due again at once.
+ */
 async function carryOn(
   storage: DurableObjectStorage,
   agent: Agent,
   runId: string,
   now: () => Date,
   watcher: RunWatcher,
+  outOfTime: () => boolean,
 ): Promise<void> {
   store.postponeRun(storage, runId, new Date(now().getTime() + RETRY_DELAY_MS));
   watcher.progress(runId, { type: "starting" });
@@ -138,6 +204,11 @@ async function carryOn(
       store.appendMessage(storage, runId, seq, message);
       seq += 1;
       watcher.changed(runId);
+      if (outOfTime()) {
+        store.postponeRun(storage, runId, now());
+        watcher.stopped(runId);
+        return;
+      }
     }
     store.endRun(storage, runId, now());
     watcher.changed(runId);

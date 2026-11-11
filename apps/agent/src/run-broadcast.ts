@@ -2,17 +2,23 @@ import { postJson, type RunEvent, runJson, WRITING_EVERY_MS } from "./api/schema
 import type { RunProgress, RunWatcher } from "./runner";
 import * as store from "./store";
 
+/** How a run being carried on is getting on, and its writing waiting to go out. */
+interface Live {
+  readonly threadId: string;
+  progress: RunProgress;
+  lastWritingAt: number;
+  waitingWriting: ReturnType<typeof setTimeout> | undefined;
+}
+
 /**
- * Tells each thread's open sockets what happens in it: every run as it changes, how the run being
+ * Tells each thread's open sockets what happens in it: every run as it changes, how each run being
  * carried on is getting on, and, to sockets that asked for them, the posts sent. A socket that
- * opens during a run hears the latest progress at once. Sockets are tagged with their thread's ID
- * and survive the object's hibernation; the progress lives only while this object carries the run
- * on.
+ * opens during runs hears the latest progress of each at once. Sockets are tagged with their
+ * thread's ID and survive the object's hibernation; the progress lives only while this object
+ * carries the runs on. Each run's writing goes out at most every `WRITING_EVERY_MS`.
  */
 export class RunBroadcast implements RunWatcher {
-  private live: { threadId: string; runId: string; progress: RunProgress } | undefined;
-  private lastWritingAt = Number.NEGATIVE_INFINITY;
-  private waitingWriting: ReturnType<typeof setTimeout> | undefined;
+  private readonly live = new Map<string, Live>();
 
   constructor(private readonly ctx: DurableObjectState) {}
 
@@ -25,8 +31,10 @@ export class RunBroadcast implements RunWatcher {
       socket,
       hears === "runs" ? [threadId] : [threadId, postsTag(threadId)],
     );
-    if (this.live?.threadId === threadId) {
-      socket.send(JSON.stringify(progressEvent(this.live.runId, this.live.progress)));
+    for (const [runId, live] of this.live) {
+      if (live.threadId === threadId) {
+        socket.send(JSON.stringify(progressEvent(runId, live.progress)));
+      }
     }
   }
 
@@ -35,9 +43,7 @@ export class RunBroadcast implements RunWatcher {
     if (run === undefined) {
       return;
     }
-    if (this.live?.runId === runId) {
-      this.idle();
-    }
+    this.stopped(runId);
     this.send(run.threadId, { type: "run", run: runJson(run) });
   }
 
@@ -47,42 +53,59 @@ export class RunBroadcast implements RunWatcher {
   }
 
   progress(runId: string, progress: RunProgress): void {
-    const threadId =
-      this.live?.runId === runId ? this.live.threadId : store.threadOfRun(this.ctx.storage, runId);
-    if (threadId === undefined) {
-      return;
-    }
-    this.live = { threadId, runId, progress };
-    if (progress.type === "writing") {
-      const wait = this.lastWritingAt + WRITING_EVERY_MS - Date.now();
-      if (wait > 0) {
-        this.waitingWriting ??= setTimeout(() => this.sendWaitingWriting(), wait);
+    let live = this.live.get(runId);
+    if (live === undefined) {
+      const threadId = store.threadOfRun(this.ctx.storage, runId);
+      if (threadId === undefined) {
         return;
       }
-      this.lastWritingAt = Date.now();
+      live = {
+        threadId,
+        progress,
+        lastWritingAt: Number.NEGATIVE_INFINITY,
+        waitingWriting: undefined,
+      };
+      this.live.set(runId, live);
     }
-    this.stopWaiting();
-    this.send(threadId, progressEvent(runId, progress));
+    live.progress = progress;
+    if (progress.type === "writing") {
+      const wait = live.lastWritingAt + WRITING_EVERY_MS - Date.now();
+      if (wait > 0) {
+        live.waitingWriting ??= setTimeout(() => this.sendWaitingWriting(runId), wait);
+        return;
+      }
+      live.lastWritingAt = Date.now();
+    }
+    clearTimeout(live.waitingWriting);
+    live.waitingWriting = undefined;
+    this.send(live.threadId, progressEvent(runId, progress));
+  }
+
+  /** The run is no longer being carried on, for now: its progress is let go. */
+  stopped(runId: string): void {
+    const live = this.live.get(runId);
+    clearTimeout(live?.waitingWriting);
+    this.live.delete(runId);
   }
 
   /** No run is being carried on any more, as when the alarm's wake-up is over. */
   idle(): void {
-    this.stopWaiting();
-    this.live = undefined;
+    for (const runId of this.live.keys()) {
+      this.stopped(runId);
+    }
   }
 
-  private sendWaitingWriting(): void {
-    this.waitingWriting = undefined;
-    if (this.live?.progress.type !== "writing") {
+  private sendWaitingWriting(runId: string): void {
+    const live = this.live.get(runId);
+    if (live === undefined) {
       return;
     }
-    this.lastWritingAt = Date.now();
-    this.send(this.live.threadId, progressEvent(this.live.runId, this.live.progress));
-  }
-
-  private stopWaiting(): void {
-    clearTimeout(this.waitingWriting);
-    this.waitingWriting = undefined;
+    live.waitingWriting = undefined;
+    if (live.progress.type !== "writing") {
+      return;
+    }
+    live.lastWritingAt = Date.now();
+    this.send(live.threadId, progressEvent(runId, live.progress));
   }
 
   private send(tag: string, event: RunEvent): void {
