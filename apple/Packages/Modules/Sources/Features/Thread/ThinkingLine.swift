@@ -6,7 +6,7 @@ import SwiftUI
 /// new status starts the line over, so nothing changes while it shows. The moving blob goes beside the message, where
 /// the agent's orb goes once it is done.
 struct ThinkingLine: View {
-    /// `.running`, `.starting` or `.thinking`; it sets the phrases and how lively the blob is.
+    /// `.running`, `.starting` or `.thinking`; it sets the phrases.
     let status: RunStatus
 
     private static let waiting = PhraseFader(phrases: ThinkingPhrases.waiting)

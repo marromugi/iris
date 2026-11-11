@@ -2,7 +2,7 @@ import Backend
 import SwiftUI
 
 /// One thread, oldest first, opening at the latest: the user's posts, and the runs that reply to them or that a schedule
-/// started, each run with its agent's name when the thread has several agents. A field at the bottom sends a post. While
+/// started, each run with its agent's name and orb. A field at the bottom sends a post. While
 /// it is shown, the thread's events keep it current: each post and run as it changes, and while a run is carried on,
 /// whether it is starting or thinking, and its reply as it is written. An agent's one-to-one thread has its tasks a step
 /// away.

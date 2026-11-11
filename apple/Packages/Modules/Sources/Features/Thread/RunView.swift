@@ -16,6 +16,8 @@ struct RunView: View {
     /// How wide the space on the left of a message is, where the blob and the orb go.
     static let gutter: CGFloat = 28
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         let conversation = Conversation(run.messages)
         let status = RunStatus(of: run, progress: progress)
@@ -26,11 +28,13 @@ struct RunView: View {
             HStack(alignment: .bottom, spacing: 12) {
                 RunMark(status: status, look: agent?.look)
                     .frame(width: Self.gutter)
+                    // Heard after the message, as it is seen at its foot.
+                    .accessibilitySortPriority(-1)
                 VStack(alignment: .leading, spacing: 24) {
                     if let agent {
                         Text(agent.name)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(OrbPalette.of(agent.look).ink)
+                            .foregroundStyle(OrbPalette.of(agent.look).ink(in: colorScheme))
                     }
                     ForEach(conversation.blocks) { block in
                         BlockView(kind: block.kind)
@@ -44,7 +48,7 @@ struct RunView: View {
                             StreamingMarkdownView(text: writing.text)
                         }
                         // A failure from an earlier attempt is no longer the news while another attempt is under way.
-                        RunEnd(status: status, lastError: progress == nil ? run.lastError : nil)
+                        RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -53,22 +57,29 @@ struct RunView: View {
     }
 }
 
-/// What sits beside a message's last line: the moving blob while the run goes on, and the agent's orb once it ended.
+/// What sits beside a message's last line: the moving blob while the run goes on, and once it ended, the agent's orb,
+/// or the status's mark when the agent isn't known. VoiceOver hears how the run stands.
 private struct RunMark: View {
     let status: RunStatus
     let look: AgentLook?
 
     var body: some View {
-        switch status {
-        case .finished, .gaveUp:
-            if let look {
-                AgentOrb(look: look, size: RunView.gutter)
+        Group {
+            switch status {
+            case .finished, .gaveUp:
+                if let look {
+                    AgentOrb(look: look, size: RunView.gutter)
+                } else {
+                    Image(systemName: status.systemImage)
+                        .foregroundStyle(.secondary)
+                }
+            default:
+                // One blob through every status of a run that goes on, so it keeps flowing when the status changes.
+                ThinkingBlob(energy: status == .thinking ? 1 : 0.4)
             }
-        case .thinking:
-            ThinkingBlob(energy: 1)
-        default:
-            ThinkingBlob(energy: 0.4)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(status.label)
     }
 }
 
@@ -131,17 +142,28 @@ struct UserBubble: View {
     }
 }
 
-/// How the run stands, when there is something to say: that it waits to be tried again or failed, and why its last
-/// attempt failed. A run that finished says nothing; its orb shows it is done.
+/// How the run stands, when there is something to say: that it waits to be tried again, or that it failed and when,
+/// and why its last attempt failed. A run that finished says nothing; its orb shows it is done.
 private struct RunEnd: View {
     let status: RunStatus
+    let endedAt: Date?
     let lastError: String?
 
     var body: some View {
         if status == .retrying || status == .gaveUp || lastError != nil {
             VStack(alignment: .leading, spacing: 4) {
-                Label(status.label, systemImage: status.systemImage)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 4) {
+                    Image(systemName: status.systemImage)
+                        .accessibilityLabel(status.label)
+                    if let endedAt {
+                        AgoText(date: endedAt)
+                    } else {
+                        Text(status.label)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
                 if let lastError {
                     Text(lastError)
                         .foregroundStyle(.red)
