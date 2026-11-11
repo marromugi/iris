@@ -394,6 +394,9 @@
           "name": {
             "type": "string"
           },
+          "look": {
+            "$ref": "#/components/schemas/Look"
+          },
           "lastRanAt": {
             "type": [
               "string",
@@ -406,8 +409,29 @@
         "required": [
           "id",
           "name",
+          "look",
           "lastRanAt"
         ]
+      },
+      "Look": {
+        "type": "object",
+        "properties": {
+          "palette": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        },
+        "required": [
+          "palette",
+          "seed"
+        ],
+        "description": "How an agent's orb is drawn: one of the app's palettes, taken modulo how many the app has, and the seed of its noise"
       },
       "NewAgent": {
         "type": "object",
@@ -416,6 +440,9 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 40
+          },
+          "look": {
+            "$ref": "#/components/schemas/Look"
           }
         },
         "required": [

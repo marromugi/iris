@@ -11,6 +11,9 @@ import { listen } from "./run-events";
 import { scriptedModel } from "./worker";
 import { agentThread } from "./agent-thread";
 
+/** Any look; agents get one at random unless they are given one. */
+const anyLook = { palette: expect.any(Number), seed: expect.any(Number) };
+
 afterEach(async () => {
   scriptedModel.length = 0;
   await reset();
@@ -68,7 +71,7 @@ test("lists the agent a user starts with", async () => {
 
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual([
-    { id: expect.any(String), name: "エージェント", lastRanAt: null },
+    { id: expect.any(String), name: "エージェント", look: anyLook, lastRanAt: null },
   ]);
 });
 
@@ -80,7 +83,12 @@ test("adds an agent, which then lists last, and says why one can't be added", as
 
   expect(added.status).toBe(201);
   const agent = await added.json();
-  expect(agent).toEqual({ id: expect.any(String), name: "株価の確認", lastRanAt: null });
+  expect(agent).toEqual({
+    id: expect.any(String),
+    name: "株価の確認",
+    look: anyLook,
+    lastRanAt: null,
+  });
   const listed: { name: string }[] = await (await call(userId, "/api/agents")).json();
   expect(listed.map((each) => each.name)).toEqual(["エージェント", "株価の確認"]);
   expect(blank.status).toBe(400);
@@ -92,7 +100,12 @@ test("adds a task to one agent and lists it for that agent only", async () => {
   const agentId = await firstAgentId(user1);
   const other = crypto.randomUUID();
   await runInDurableObject(env.USER_AGENT.getByName(user1), (_, state) => {
-    store.insertAgent(state.storage, { id: other, name: "株価の確認", createdAt: new Date() });
+    store.insertAgent(state.storage, {
+      id: other,
+      name: "株価の確認",
+      look: { palette: 0, seed: 0 },
+      createdAt: new Date(),
+    });
   });
 
   const added = await post(user1, `/api/agents/${agentId}/tasks`, dailyMail);
@@ -215,7 +228,7 @@ test("lists an agent's latest runs with their conversations, and when it last ra
     ],
   });
   expect(await (await call(userId, "/api/agents")).json()).toEqual([
-    { id: agentId, name: "エージェント", lastRanAt: run?.startedAt },
+    { id: agentId, name: "エージェント", look: anyLook, lastRanAt: run?.startedAt },
   ]);
 });
 

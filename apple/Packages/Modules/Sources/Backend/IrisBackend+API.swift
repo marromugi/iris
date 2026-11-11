@@ -12,9 +12,9 @@ extension IrisBackend {
         }
     }
 
-    /// Adds an agent with the name, and gives it back as the list will show it, last.
-    public func addAgent(named name: String) async throws(AppError) -> Agent {
-        switch try await call({ try await client.addAgent(body: .json(NewAgent(name: name))) }) {
+    /// Adds an agent with the name and look, and gives it back as the list will show it, last.
+    public func addAgent(named name: String, look: AgentLook) async throws(AppError) -> Agent {
+        switch try await call({ try await client.addAgent(body: .json(NewAgent(name: name, look: look))) }) {
         case .created(let created): return try decoded { try created.body.json }
         case .badRequest(let refused): throw try refusal { try refused.body.json }
         case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }

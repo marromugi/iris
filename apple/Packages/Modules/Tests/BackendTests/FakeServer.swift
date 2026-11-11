@@ -174,7 +174,8 @@ actor FakeServer {
     private func api(_ request: URLRequest, path: String) -> (Data, URLResponse) {
         if request.httpMethod == "GET", path == "/api/agents" {
             return Self.answer(
-                request, 200, #"[{"id":"\#(Self.agentID)","name":"エージェント","lastRanAt":"2026-11-09T22:00:00Z"}]"#)
+                request, 200,
+                #"[{"id":"\#(Self.agentID)","name":"エージェント","look":{"palette":3,"seed":42},"lastRanAt":"2026-11-09T22:00:00Z"}]"#)
         }
         // The agent's ID also names its one-to-one thread here.
         let threadPath = "/api/threads/\(Self.agentID)"
