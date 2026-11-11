@@ -33,6 +33,36 @@ struct MarkdownTests {
             ])
     }
 
+    @Test func readsATableWithItsHeaderRowsAndCells() {
+        let text = """
+            銘柄の動きです。
+            | 銘柄 | 値動き | メモ |
+            |:--|:--:|--:|
+            | A社 | **+2%** | 決算 \\| 好調 |
+            | B社 | -1% |
+            | C社 | 0% | 横ばい | 余分 |
+            続きの段落。
+            """
+
+        #expect(
+            MarkdownBlock.blocks(of: text) == [
+                .paragraph("銘柄の動きです。"),
+                .table(
+                    header: ["銘柄", "値動き", "メモ"],
+                    rows: [["A社", "**+2%**", "決算 | 好調"], ["B社", "-1%", ""], ["C社", "0%", "横ばい"]]),
+                .paragraph("続きの段落。"),
+            ])
+    }
+
+    @Test func linesStartingWithABarWithoutADividerStayAParagraph() {
+        #expect(MarkdownBlock.blocks(of: "| a | b |\n| c | d |") == [.paragraph("| a | b |\n| c | d |")])
+    }
+
+    @Test func aBarInsideCodeIsCode() {
+        #expect(
+            MarkdownBlock.blocks(of: "```\n| a |\n|---|\n```") == [.code(language: "", text: "| a |\n|---|")])
+    }
+
     @Test func readsCRLFTabsContinuedItemsAndCodeInsideAList() {
         let text = "# T\r\n- a\r\n  続き\r\n\t- 深い\r\n- 手順\r\n  ```\r\n  code\r\n  ```"
 
