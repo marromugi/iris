@@ -1,38 +1,33 @@
 import Backend
 import SwiftUI
 
-/// One run in a thread: the schedule that started it with its prompt (a run that replies to a post leaves the post to
-/// be shown on its own), whose run it is when the thread has several agents, then the conversation, then, until the
-/// model writes, the thinking line where the reply will go; once it writes, the message so far and how the run stands.
+/// One run in an agent's one-to-one thread: the schedule that started it with its prompt (a run that replies to a post
+/// leaves the post to be shown on its own), then the conversation, then, until the model writes, the moving blob and
+/// the thinking line where the reply will go; once it writes, the message so far and how the run stands. The agent is
+/// the thread's, so neither its name nor its orb is shown.
 struct RunView: View {
     let run: Run
     /// How the run is getting on, while it is carried on.
     var progress: RunProgress?
-    /// The agent whose run it is, shown with its orb and name in a thread of several agents.
-    var speaker: Agent?
 
     var body: some View {
         let conversation = Conversation(run.messages)
+        let status = RunStatus(of: run, progress: progress)
         VStack(alignment: .leading, spacing: 24) {
             if run.postId == nil {
                 ScheduleRanCard(prompt: conversation.prompt, startedAt: run.startedAt)
             }
-            if let speaker {
-                HStack(spacing: 8) {
-                    AgentOrb(look: speaker.look, size: 22)
-                    Text(speaker.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
             ForEach(conversation.blocks) { block in
                 BlockView(kind: block.kind)
             }
-            let status = RunStatus(of: run, progress: progress)
             switch status {
             case .running, .starting, .thinking:
-                ThinkingLine(status: status)
-                    .id(status)
+                HStack(spacing: 8) {
+                    ThinkingBlob(energy: status == .thinking ? 1 : 0.4)
+                        .accessibilityHidden(true)
+                    ThinkingLine(status: status)
+                        .id(status)
+                }
             default:
                 if case .case3(let writing)? = progress {
                     StreamingMarkdownView(text: writing.text)
@@ -41,6 +36,97 @@ struct RunView: View {
                 RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
             }
         }
+    }
+}
+
+/// One run in a group: the agent's message, set in from the left. It starts with the agent's name, then the
+/// conversation, then, until the model writes, the thinking line where the reply will go, or the message so far.
+/// Beside the message's last line, in the space on the left, the blob moves while the run goes on, and the agent's orb
+/// takes its place once the run ends, so whose message it is shows at its foot however it grows.
+struct GroupRunView: View {
+    let run: Run
+    /// How the run is getting on, while it is carried on.
+    var progress: RunProgress?
+    /// The agent whose run it is; nil when the thread doesn't know it.
+    var agent: Agent?
+
+    /// How wide the space on the left of a message is, where the blob and the orb go.
+    static let gutter: CGFloat = 28
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let status = RunStatus(of: run, progress: progress)
+        HStack(alignment: .bottom, spacing: 12) {
+            RunMark(status: status, look: agent?.look)
+                .frame(width: Self.gutter)
+                // Heard after the message, as it is seen at its foot.
+                .accessibilitySortPriority(-1)
+            VStack(alignment: .leading, spacing: 6) {
+                if let agent {
+                    Text(agent.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(OrbPalette.of(agent.look).ink(in: colorScheme))
+                }
+                GroupRunMessage(run: run, progress: progress, status: status)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// A group run's message under the agent's name: the conversation, then the thinking line, or the message so far and
+/// how the run stands unless it simply finished.
+private struct GroupRunMessage: View {
+    let run: Run
+    let progress: RunProgress?
+    let status: RunStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            ForEach(Conversation(run.messages).blocks) { block in
+                BlockView(kind: block.kind)
+            }
+            switch status {
+            case .running, .starting, .thinking:
+                ThinkingLine(status: status)
+                    .id(status)
+            case .finished:
+                // The orb shows it is done.
+                EmptyView()
+            default:
+                if case .case3(let writing)? = progress {
+                    StreamingMarkdownView(text: writing.text)
+                }
+                RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
+            }
+        }
+    }
+}
+
+/// What sits beside a message's last line: the moving blob while the run goes on, and once it ended, the agent's orb,
+/// or the status's mark when the agent isn't known. VoiceOver hears how the run stands.
+private struct RunMark: View {
+    let status: RunStatus
+    let look: AgentLook?
+
+    var body: some View {
+        Group {
+            switch status {
+            case .finished, .gaveUp:
+                if let look {
+                    AgentOrb(look: look, size: GroupRunView.gutter)
+                } else {
+                    Image(systemName: status.systemImage)
+                        .foregroundStyle(.secondary)
+                }
+            default:
+                // One blob through every status of a run that goes on, so it keeps flowing when the status changes.
+                ThinkingBlob(energy: status == .thinking ? 1 : 0.4)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(status.label)
     }
 }
 
@@ -168,6 +254,17 @@ private struct RunEnd: View {
     #Preview("失敗") {
         ScrollView {
             RunView(run: Samples.gaveUpRun).padding()
+        }
+    }
+
+    #Preview("グループ") {
+        ScrollView {
+            VStack(spacing: 48) {
+                GroupRunView(run: Samples.mailRun, agent: Samples.agents[0])
+                GroupRunView(run: Samples.sentRun, progress: Samples.thinking, agent: Samples.agents[1])
+                GroupRunView(run: Samples.gaveUpRun, agent: Samples.agents[2])
+            }
+            .padding()
         }
     }
 #endif
