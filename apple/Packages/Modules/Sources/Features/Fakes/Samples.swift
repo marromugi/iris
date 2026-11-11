@@ -142,7 +142,7 @@
             guard let postID = run.postId, case .case1(let first)? = run.messages.first else {
                 preconditionFailure("Sample run \(run.id) doesn't reply to a post.")
             }
-            return Post(id: postID, text: first.text, createdAt: run.startedAt)
+            return Post(id: postID, agentId: nil, text: first.text, createdAt: run.startedAt)
         }
 
         /// What the events socket says when a post was sent.

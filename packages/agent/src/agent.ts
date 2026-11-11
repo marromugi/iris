@@ -169,7 +169,7 @@ async function runToolCall(
   if (!parsed.success) {
     return failed(`The input for "${call.name}" is invalid:\n${z.prettifyError(parsed.error)}`);
   }
-  const outcome = await tool.run(parsed.data);
+  const outcome = await tool.run(parsed.data, { id: call.id });
   if (!outcome.ok) {
     return failed(outcome.error);
   }

@@ -508,6 +508,9 @@ test("a watcher that throws changes nothing about the run", async () => {
     stopped() {
       throw new Error("The socket went away.");
     },
+    posted() {
+      throw new Error("The socket went away.");
+    },
   };
 
   await runInDurableObject(userAgent(), (_, state) =>

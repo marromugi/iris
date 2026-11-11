@@ -1,4 +1,12 @@
-import { type Agent, DEFAULT_MAX_STEPS, type Message, type ModelProgress, run } from "@iris/agent";
+import {
+  type Agent,
+  DEFAULT_MAX_STEPS,
+  type Message,
+  type ModelProgress,
+  run,
+  type Tool,
+} from "@iris/agent";
+import { type ConsultContext, consultTool, RunCut } from "./consult";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 
@@ -24,9 +32,11 @@ export interface RunWatcher {
   progress(runId: string, progress: RunProgress): void;
   /** A run stopped for this wake-up without ending; it is no longer being carried on. */
   stopped(runId: string): void;
+  /** A post was sent, such as an agent's question in a consult. */
+  posted(post: store.Post): void;
 }
 
-const nobodyWatching: RunWatcher = { changed() {}, progress() {}, stopped() {} };
+const nobodyWatching: RunWatcher = { changed() {}, progress() {}, stopped() {}, posted() {} };
 
 /** The watcher with its failures logged instead of thrown: watching a run never changes how the run goes. */
 function safely(watcher: RunWatcher): RunWatcher {
@@ -50,6 +60,13 @@ function safely(watcher: RunWatcher): RunWatcher {
         watcher.stopped(runId);
       } catch (error) {
         console.error(`Telling the watcher that run ${runId} stopped failed.`, error);
+      }
+    },
+    posted(post) {
+      try {
+        watcher.posted(post);
+      } catch (error) {
+        console.error(`Telling the watcher that post ${post.id} was sent failed.`, error);
       }
     },
   };
@@ -114,18 +131,39 @@ export async function runDue(
   const stopAt = now().getTime() + WAKE_UP_BUDGET_MS;
   const outOfTime = () => now().getTime() >= stopAt;
   const going = new Map<string, Promise<void>>();
+  // Runs waiting for another run's answer don't count against the limit, so the answer can start.
+  const waiting = new Set<string>();
   for (;;) {
     if (!outOfTime()) {
       startDueTasks(storage, now, watcher);
-      const due = store.nextDueRuns(storage, now(), MAX_PARALLEL_RUNS - going.size, [
-        ...going.keys(),
-      ]);
-      for (const runId of due) {
+      const room = MAX_PARALLEL_RUNS - (going.size - waiting.size);
+      for (const runId of store.nextDueRuns(storage, now(), room, [...going.keys()])) {
+        const tools = runTools({
+          storage,
+          runId,
+          now,
+          outOfTime,
+          wake: () => waker.wake(),
+          asked: (post, answerRunId) => {
+            watcher.posted(post);
+            watcher.changed(answerRunId);
+          },
+          waiting: (isWaiting) => {
+            if (isWaiting) {
+              waiting.add(runId);
+            } else {
+              waiting.delete(runId);
+            }
+            waker.wake();
+          },
+        });
+        const withTools = { ...agent, tools: [...agent.tools, ...tools] };
         going.set(
           runId,
-          carryOn(storage, agent, runId, now, watcher, outOfTime).finally(() =>
-            going.delete(runId),
-          ),
+          carryOn(storage, withTools, runId, now, watcher, outOfTime).finally(() => {
+            going.delete(runId);
+            waiting.delete(runId);
+          }),
         );
       }
     }
@@ -134,6 +172,12 @@ export async function runDue(
     }
     await Promise.race([...going.values(), waker.next()]);
   }
+}
+
+/** The tools a run is offered on top of its agent's own: asking another agent, unless it is in a consult. */
+function runTools(context: ConsultContext): Tool[] {
+  const consult = consultTool(context);
+  return consult === undefined ? [] : [consult];
 }
 
 /** Starts a run of each task whose time came, and moves the task to its next time after now. */
@@ -228,6 +272,11 @@ async function carryOn(
     store.endRun(storage, runId, now());
     watcher.changed(runId);
   } catch (error) {
+    if (error instanceof RunCut) {
+      store.postponeRun(storage, runId, now());
+      watcher.stopped(runId);
+      return;
+    }
     const failedAt = now();
     const failed = store.recordRunFailure(storage, runId, {
       error: error instanceof Error ? error.message : String(error),

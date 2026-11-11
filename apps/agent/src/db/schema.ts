@@ -12,12 +12,13 @@ export const agents = sqliteTable("agents", {
 
 /**
  * Where runs happen. `agentId` is set on an agent's own one-to-one thread, made with the agent;
- * `name` on a group.
+ * `name` on a group; `consultRunId` on a consult, the run whose agent asked in it.
  */
 export const threads = sqliteTable("threads", {
   id: text("id").primaryKey(),
   agentId: text("agent_id").unique(),
   name: text("name"),
+  consultRunId: text("consult_run_id"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
@@ -31,10 +32,15 @@ export const threadMembers = sqliteTable(
   (table) => [primaryKey({ columns: [table.threadId, table.agentId] })],
 );
 
-/** What the user said in a thread. Each reply to it is a run that carries its ID. */
+/**
+ * What was said in a thread: by the user, or in a consult by the agent that asked (`agentId`),
+ * with the tool call it asked in (`callId`). Each reply to it is a run that carries its ID.
+ */
 export const posts = sqliteTable("posts", {
   id: text("id").primaryKey(),
   threadId: text("thread_id").notNull(),
+  agentId: text("agent_id"),
+  callId: text("call_id"),
   text: text("text").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
