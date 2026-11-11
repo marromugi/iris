@@ -9,8 +9,10 @@ static float smoothUnion(float a, float b, float melt) {
     return min(a, b) - h * h * melt * 0.25;
 }
 
+// Products rather than `pow`, which is undefined for a negative base.
 static float easeOut(float x) {
-    return 1.0 - pow(1.0 - x, 3.0);
+    float left = 1.0 - x;
+    return 1.0 - left * left * left;
 }
 
 static float easeIn(float x) {
@@ -20,7 +22,8 @@ static float easeIn(float x) {
 // Goes a little past 1 before settling, so the drop swells as it takes a droplet back.
 static float easeOutBack(float x) {
     const float pull = 1.7;
-    return 1.0 + (pull + 1.0) * pow(x - 1.0, 3.0) + pull * pow(x - 1.0, 2.0);
+    float past = x - 1.0;
+    return 1.0 + (pull + 1.0) * past * past * past + pull * past * past;
 }
 
 // A drop in one colour, the colour of what it is drawn over. Each round it sends four droplets out one by one, a
