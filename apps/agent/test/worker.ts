@@ -1,4 +1,5 @@
-import type { AssistantMessage, Model, ModelRequest } from "@iris/agent";
+import type { AssistantMessage, Model, ModelRequest, Tool } from "@iris/agent";
+import type { RunOf } from "../src/runner";
 import { createUserAgent } from "../src/user-agent";
 
 /**
@@ -28,7 +29,16 @@ const model: Model = async (request) => {
 
 export const testAgent = { model, tools: [] };
 
-export const UserAgent = createUserAgent(() => testAgent);
+/**
+ * The tools each run gets for its own agent, made by `ownTools` with the run's agent's ID. None
+ * unless a test sets it.
+ */
+export const ownTools: { make: (run: RunOf) => Tool[] } = { make: () => [] };
+
+export const UserAgent = createUserAgent(
+  () => testAgent,
+  (_env, run) => ownTools.make(run),
+);
 export type UserAgent = InstanceType<typeof UserAgent>;
 
 export default {} satisfies ExportedHandler<Env>;

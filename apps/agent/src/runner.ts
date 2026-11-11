@@ -126,6 +126,7 @@ export async function runDue(
   now: () => Date,
   watching: RunWatcher = nobodyWatching,
   waker: Waker = new Waker(),
+  toolsFor: (run: RunOf) => Tool[] = () => [],
 ): Promise<Date | undefined> {
   const watcher = safely(watching);
   const stopAt = now().getTime() + WAKE_UP_BUDGET_MS;
@@ -157,7 +158,8 @@ export async function runDue(
             waker.wake();
           },
         });
-        const withTools = { ...agent, tools: [...agent.tools, ...tools] };
+        const ownTools = toolsFor({ runId, agentId: store.agentOfRun(storage, runId) ?? "" });
+        const withTools = { ...agent, tools: [...agent.tools, ...ownTools, ...tools] };
         going.set(
           runId,
           carryOn(storage, withTools, runId, now, watcher, outOfTime).finally(() => {
@@ -226,6 +228,12 @@ export function earlierMessages(earlier: Iterable<Message[]>, limit: number): Me
     count += entry.length;
   }
   return taken.toReversed().flat();
+}
+
+/** Which run, of which agent, tools are made for. */
+export interface RunOf {
+  readonly runId: string;
+  readonly agentId: string;
 }
 
 /** A run with no steps left: it ends where it is. */

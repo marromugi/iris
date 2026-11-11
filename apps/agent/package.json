@@ -15,6 +15,7 @@
     "build:client": "esbuild src/sign-in/client/main.ts --bundle --format=iife --target=es2022 --minify --outfile=build/sign-in-client.txt"
   },
   "dependencies": {
+    "@cloudflare/sandbox": "1.0.3",
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@hono/zod-openapi": "1.6.3",
     "@iris/agent": "workspace:*",
