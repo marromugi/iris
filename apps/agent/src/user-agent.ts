@@ -6,7 +6,7 @@ import { type NewGroup, newGroupSchema } from "./group";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
-import { nextWakeAt, runNext } from "./runner";
+import { nextWakeAt, runDue, Waker } from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
@@ -46,6 +46,8 @@ export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
 export function createUserAgent(agentFor: (env: Env) => Agent) {
   return class UserAgent extends DurableObject<Env> {
     private readonly broadcast: RunBroadcast;
+    /** Wakes the alarm's wake-up, while one carries runs on, to start work that just became due. */
+    private readonly waker = new Waker();
 
     constructor(ctx: DurableObjectState, env: Env) {
       super(ctx, env);
@@ -252,11 +254,12 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
 
     override async alarm(): Promise<void> {
       try {
-        const wakeAt = await runNext(
+        const wakeAt = await runDue(
           this.ctx.storage,
           agentFor(this.env),
           () => new Date(),
           this.broadcast,
+          this.waker,
         );
         await this.wakeAt(wakeAt);
       } finally {
@@ -300,7 +303,9 @@ export function createUserAgent(agentFor: (env: Env) => Agent) {
       return { post, runs };
     }
 
+    /** Sets the alarm for `time`, and tells a wake-up going on that work may be due. */
     private async wakeAt(time: Date | undefined): Promise<void> {
+      this.waker.wake();
       if (time === undefined) {
         await this.ctx.storage.deleteAlarm();
       } else {

@@ -11,6 +11,7 @@ import {
   max,
   min,
   notExists,
+  notInArray,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -443,14 +444,30 @@ function nextInLine(storage: DurableObjectStorage) {
 
 /** The ID of the run next in line whose due time came first, among every thread's runs due by `now`. */
 export function nextDueRun(storage: DurableObjectStorage, now: Date): string | undefined {
-  const row = database(storage)
+  return nextDueRuns(storage, now, 1)[0];
+}
+
+/**
+ * The IDs of up to `limit` runs next in line that are due by `now`, the earliest due first,
+ * leaving out `going`, the runs already being carried on.
+ */
+export function nextDueRuns(
+  storage: DurableObjectStorage,
+  now: Date,
+  limit: number,
+  going: readonly string[] = [],
+): string[] {
+  if (limit <= 0) {
+    return [];
+  }
+  return database(storage)
     .select({ id: runs.id })
     .from(runs)
-    .where(and(nextInLine(storage), lte(runs.dueAt, now)))
+    .where(and(nextInLine(storage), lte(runs.dueAt, now), notInArray(runs.id, [...going])))
     .orderBy(asc(runs.dueAt), asc(runs.id))
-    .limit(1)
-    .get();
-  return row?.id;
+    .limit(limit)
+    .all()
+    .map((row) => row.id);
 }
 
 /** When the earliest run next in line is due. */
