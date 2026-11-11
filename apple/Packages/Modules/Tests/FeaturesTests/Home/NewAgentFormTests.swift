@@ -24,6 +24,7 @@ struct NewAgentFormTests {
         form.name = "株価の確認"
         await form.add(onAdded: { added = $0 }, onSignedOut: {}).value
 
+        #expect(shuffled != AgentLook(palette: 0, seed: 0))
         #expect(added?.look == shuffled)
         #expect((0..<OrbPalette.all.count).contains(shuffled.palette))
     }
