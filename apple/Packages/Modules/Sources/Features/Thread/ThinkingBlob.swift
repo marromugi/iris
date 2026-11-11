@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A small drop drawn by a Metal shader (`ThinkingBlob.metal`) that, while the agent works, sends four droplets out,
-/// takes them back, swells, and shrinks again, over and over. It is in the text's colour, so it follows light and
-/// dark. `energy`, from 0 to 1, sets how quick it is. With Reduce Motion it holds still.
+/// A small sun drawn by a Metal shader (`ThinkingBlob.metal`) that, while the agent works, has four droplets come out
+/// from behind it, circle round, and melt into it from the front, swelling with each and shrinking again, over and
+/// over. It is in the text's colour, so it follows light and dark. `energy`, from 0 to 1, sets how quick it is. With
+/// Reduce Motion it holds still.
 struct ThinkingBlob: View {
     let energy: Double
 
