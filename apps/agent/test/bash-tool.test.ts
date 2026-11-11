@@ -9,7 +9,7 @@ import * as store from "../src/store";
 import { modelRequests, ownTools, scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
-  ownTools.make = () => [];
+  ownTools.make = () => ({ tools: [] });
   scriptedModel.length = 0;
   modelRequests.length = 0;
   await reset();
@@ -52,14 +52,16 @@ test("a run's bash commands go to its own agent's shell, and the model reads wha
       () => new Date(Date.now() + 1000),
       undefined,
       undefined,
-      (run) => [
-        bashTool({
-          async run(command) {
-            ran.push({ agentId: run.agentId, command });
-            return { exitCode: 0, stdout: "notes.md\n", stderr: "", truncated: false };
-          },
-        }),
-      ],
+      (run) => ({
+        tools: [
+          bashTool({
+            async run(command) {
+              ran.push({ agentId: run.agentId, command });
+              return { exitCode: 0, stdout: "notes.md\n", stderr: "", truncated: false };
+            },
+          }),
+        ],
+      }),
     );
   });
 
@@ -98,14 +100,16 @@ test("long output keeps its end", () => {
 test("the alarm offers each run its own agent's tools", async () => {
   const [agent] = await userAgent().listAgents();
   const ranFor: string[] = [];
-  ownTools.make = (run) => [
-    bashTool({
-      async run() {
-        ranFor.push(run.agentId);
-        return { exitCode: 0, stdout: "", stderr: "", truncated: false };
-      },
-    }),
-  ];
+  ownTools.make = (run) => ({
+    tools: [
+      bashTool({
+        async run() {
+          ranFor.push(run.agentId);
+          return { exitCode: 0, stdout: "", stderr: "", truncated: false };
+        },
+      }),
+    ],
+  });
   scriptedModel.push(runBash("pwd"), reply("済みました。"));
 
   await userAgent().sendMessage(agent?.id ?? "", { text: "pwd して" });

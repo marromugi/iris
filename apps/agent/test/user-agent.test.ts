@@ -638,6 +638,7 @@ function storageMigratedUpTo(storage: DurableObjectStorage, count: number) {
     "runs",
     "tasks",
     "posts",
+    "search_counts",
     "thread_members",
     "threads",
     "agents",

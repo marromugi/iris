@@ -126,7 +126,7 @@ export async function runDue(
   now: () => Date,
   watching: RunWatcher = nobodyWatching,
   waker: Waker = new Waker(),
-  toolsFor: (run: RunOf) => Tool[] = () => [],
+  toolsFor: (run: RunOf) => RunTools = () => ({ tools: [] }),
 ): Promise<Date | undefined> {
   const watcher = safely(watching);
   const stopAt = now().getTime() + WAKE_UP_BUDGET_MS;
@@ -160,11 +160,16 @@ export async function runDue(
             waker.wake();
           },
         });
-        const ownTools = toolsFor({ runId, agentId: store.agentOfRun(storage, runId) ?? "" });
-        const withTools = { ...agent, tools: [...agent.tools, ...ownTools, ...tools] };
+        const own = toolsFor({ runId, agentId: store.agentOfRun(storage, runId) ?? "" });
+        const withTools = { ...agent, tools: [...agent.tools, ...own.tools, ...tools] };
         going.set(
           runId,
-          carryOn(storage, withTools, runId, now, watcher, outOfTime).finally(() => {
+          carryOn(storage, withTools, runId, now, watcher, outOfTime).finally(async () => {
+            try {
+              await own.release?.();
+            } catch (error) {
+              console.error(`Letting go of run ${runId}'s tools failed.`, error);
+            }
             going.delete(runId);
             waiting.delete(runId);
           }),
@@ -236,6 +241,15 @@ export function earlierMessages(earlier: Iterable<Message[]>, limit: number): Me
 export interface RunOf {
   readonly runId: string;
   readonly agentId: string;
+}
+
+/**
+ * The tools a run gets for its own agent, and what lets go of what they hold, such as a browser,
+ * once the run stops for this wake-up: ended, failed, or cut.
+ */
+export interface RunTools {
+  readonly tools: Tool[];
+  readonly release?: () => Promise<void>;
 }
 
 /** A run with no steps left: it ends where it is. */
