@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A small blob drawn by a Metal shader (`ThinkingBlob.metal`) that keeps flowing from one organic shape into the
-/// next, turning and breathing, while the agent works. It is in the text's colour, so it follows light and dark.
-/// `energy`, from 0 to 1, sets how lively it is. With Reduce Motion it holds still.
+/// A small sun drawn by a Metal shader (`ThinkingBlob.metal`) that, while the agent works, has four droplets come out
+/// from behind it, circle round, and melt into it from the front, swelling with each and shrinking again, over and
+/// over. It is in the text's colour, so it follows light and dark. `energy`, from 0 to 1, sets how quick it is. With
+/// Reduce Motion it holds still.
 struct ThinkingBlob: View {
     let energy: Double
 
