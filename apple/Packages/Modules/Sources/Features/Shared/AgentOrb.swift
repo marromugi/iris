@@ -22,32 +22,35 @@ struct AgentOrb: View {
     }
 }
 
-/// The colours an orb runs through, from its centre to its rim.
+/// The colours an orb runs through, from its centre to its rim, and the colour its agent's name is written in, deep
+/// enough to read on light and dark.
 struct OrbPalette {
     let center: Color
     let middle: Color
     let rim: Color
+    let ink: Color
 
     /// The palettes an agent's look picks from, by its number modulo how many there are.
     static let all: [OrbPalette] = [
-        OrbPalette(0xFFE8A3, 0xFA7E1E, 0xD62976),
-        OrbPalette(0x9FE3FF, 0x635BFF, 0x2A1A7A),
-        OrbPalette(0xFFD567, 0xFF7139, 0xE31587),
-        OrbPalette(0xE8FFF4, 0x7FE0B8, 0xFF8A7A),
-        OrbPalette(0xD6F7FF, 0x00B4D8, 0xC6F432),
-        OrbPalette(0xFFD1F0, 0xB05CFF, 0x3D2BFF),
-        OrbPalette(0xFFF3C4, 0xFF9EBB, 0x7A5CFF),
-        OrbPalette(0xF2FFD6, 0x1DB954, 0x0B4F3C),
+        OrbPalette(0xFFE8A3, 0xFA7E1E, 0xD62976, ink: 0xD62976),
+        OrbPalette(0x9FE3FF, 0x635BFF, 0x2A1A7A, ink: 0x5B4FF0),
+        OrbPalette(0xFFD567, 0xFF7139, 0xE31587, ink: 0xE0461E),
+        OrbPalette(0xE8FFF4, 0x7FE0B8, 0xFF8A7A, ink: 0xE0604F),
+        OrbPalette(0xD6F7FF, 0x00B4D8, 0xC6F432, ink: 0x0091B0),
+        OrbPalette(0xFFD1F0, 0xB05CFF, 0x3D2BFF, ink: 0x8A45F0),
+        OrbPalette(0xFFF3C4, 0xFF9EBB, 0x7A5CFF, ink: 0x6A4BE0),
+        OrbPalette(0xF2FFD6, 0x1DB954, 0x0B4F3C, ink: 0x179A47),
     ]
 
     static func of(_ look: AgentLook) -> OrbPalette {
         all[look.palette % all.count]
     }
 
-    private init(_ center: Int, _ middle: Int, _ rim: Int) {
+    private init(_ center: Int, _ middle: Int, _ rim: Int, ink: Int) {
         self.center = Color(hex: center)
         self.middle = Color(hex: middle)
         self.rim = Color(hex: rim)
+        self.ink = Color(hex: ink)
     }
 }
 

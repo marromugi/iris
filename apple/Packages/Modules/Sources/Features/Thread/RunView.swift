@@ -2,44 +2,72 @@ import Backend
 import SwiftUI
 
 /// One run in a thread: the schedule that started it with its prompt (a run that replies to a post leaves the post to
-/// be shown on its own), whose run it is when the thread has several agents, then the conversation, then, until the
-/// model writes, the thinking line where the reply will go; once it writes, the message so far and how the run stands.
+/// be shown on its own), then the agent's message, set in from the left. It starts with the agent's name, then the
+/// conversation, then, until the model writes, the thinking line where the reply will go, or the message so far.
+/// Beside the message's last line, in the space on the left, the blob moves while the run goes on, and the agent's orb
+/// takes its place once the run ends, so whose message it is shows at its foot however it grows.
 struct RunView: View {
     let run: Run
     /// How the run is getting on, while it is carried on.
     var progress: RunProgress?
-    /// The agent whose run it is, shown with its orb and name in a thread of several agents.
-    var speaker: Agent?
+    /// The agent whose run it is; nil when the thread doesn't know it.
+    var agent: Agent?
+
+    /// How wide the space on the left of a message is, where the blob and the orb go.
+    static let gutter: CGFloat = 28
 
     var body: some View {
         let conversation = Conversation(run.messages)
+        let status = RunStatus(of: run, progress: progress)
         VStack(alignment: .leading, spacing: 24) {
             if run.postId == nil {
                 ScheduleRanCard(prompt: conversation.prompt, startedAt: run.startedAt)
             }
-            if let speaker {
-                HStack(spacing: 8) {
-                    AgentOrb(look: speaker.look, size: 22)
-                    Text(speaker.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: 12) {
+                RunMark(status: status, look: agent?.look)
+                    .frame(width: Self.gutter)
+                VStack(alignment: .leading, spacing: 24) {
+                    if let agent {
+                        Text(agent.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(OrbPalette.of(agent.look).ink)
+                    }
+                    ForEach(conversation.blocks) { block in
+                        BlockView(kind: block.kind)
+                    }
+                    switch status {
+                    case .running, .starting, .thinking:
+                        ThinkingLine(status: status)
+                            .id(status)
+                    default:
+                        if case .case3(let writing)? = progress {
+                            StreamingMarkdownView(text: writing.text)
+                        }
+                        // A failure from an earlier attempt is no longer the news while another attempt is under way.
+                        RunEnd(status: status, lastError: progress == nil ? run.lastError : nil)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            ForEach(conversation.blocks) { block in
-                BlockView(kind: block.kind)
+        }
+    }
+}
+
+/// What sits beside a message's last line: the moving blob while the run goes on, and the agent's orb once it ended.
+private struct RunMark: View {
+    let status: RunStatus
+    let look: AgentLook?
+
+    var body: some View {
+        switch status {
+        case .finished, .gaveUp:
+            if let look {
+                AgentOrb(look: look, size: RunView.gutter)
             }
-            let status = RunStatus(of: run, progress: progress)
-            switch status {
-            case .running, .starting, .thinking:
-                ThinkingLine(status: status)
-                    .id(status)
-            default:
-                if case .case3(let writing)? = progress {
-                    StreamingMarkdownView(text: writing.text)
-                }
-                // A failure from an earlier attempt is no longer the news while another attempt is under way.
-                RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
-            }
+        case .thinking:
+            ThinkingBlob(energy: 1)
+        default:
+            ThinkingBlob(energy: 0.4)
         }
     }
 }
@@ -103,71 +131,63 @@ struct UserBubble: View {
     }
 }
 
-/// How the run stands: when it ended, or that it is still going, and why its last attempt failed.
+/// How the run stands, when there is something to say: that it waits to be tried again or failed, and why its last
+/// attempt failed. A run that finished says nothing; its orb shows it is done.
 private struct RunEnd: View {
     let status: RunStatus
-    let endedAt: Date?
     let lastError: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Spacer()
-                Image(systemName: status.systemImage)
-                    .accessibilityLabel(status.label)
-                if let endedAt {
-                    AgoText(date: endedAt)
-                } else {
-                    Text(status.label)
-                        .accessibilityHidden(true)
+        if status == .retrying || status == .gaveUp || lastError != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(status.label, systemImage: status.systemImage)
+                    .foregroundStyle(.secondary)
+                if let lastError {
+                    Text(lastError)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
                 }
             }
-            .foregroundStyle(.secondary)
-            .accessibilityElement(children: .combine)
-            if let lastError {
-                Text(lastError)
-                    .foregroundStyle(.red)
-                    .textSelection(.enabled)
-            }
+            .font(.caption)
         }
-        .font(.caption)
     }
 }
 
 #if DEBUG
     #Preview("完了") {
         ScrollView {
-            RunView(run: Samples.mailRun).padding()
+            RunView(run: Samples.mailRun, agent: Samples.agents[0]).padding()
         }
     }
 
     #Preview("返事待ち") {
         ScrollView {
-            RunView(run: Samples.sentRun).padding()
+            RunView(run: Samples.sentRun, agent: Samples.agents[0]).padding()
         }
     }
 
     #Preview("考え中") {
         ScrollView {
-            RunView(run: Samples.sentRun, progress: Samples.thinking).padding()
+            RunView(run: Samples.sentRun, progress: Samples.thinking, agent: Samples.agents[0]).padding()
         }
     }
 
     #Preview("書いている途中") {
         ScrollView {
-            RunView(run: Samples.sentRun, progress: Samples.writing("下書きを作りました。件名は「請求書の")).padding()
+            RunView(run: Samples.sentRun, progress: Samples.writing("下書きを作りました。件名は「請求書の"), agent: Samples.agents[0])
+                .padding()
         }
     }
 
     #Preview("やり直し待ち") {
         ScrollView {
-            RunView(run: Samples.retryingRun).padding()
+            RunView(run: Samples.retryingRun, agent: Samples.agents[1]).padding()
         }
     }
 
     #Preview("失敗") {
         ScrollView {
-            RunView(run: Samples.gaveUpRun).padding()
+            RunView(run: Samples.gaveUpRun, agent: Samples.agents[1]).padding()
         }
     }
 #endif

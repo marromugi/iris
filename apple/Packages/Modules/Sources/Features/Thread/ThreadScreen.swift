@@ -29,9 +29,7 @@ struct ThreadScreen: View {
                         case .post(let post):
                             UserBubble(text: post.text)
                         case .run(let run):
-                            RunView(
-                                run: run, progress: open.progress[run.id],
-                                speaker: thread.agentId == nil ? agents[run.agentId] : nil)
+                            RunView(run: run, progress: open.progress[run.id], agent: agents[run.agentId])
                         }
                     }
                 }
