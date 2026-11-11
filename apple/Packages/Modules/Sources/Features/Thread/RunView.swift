@@ -56,37 +56,50 @@ struct GroupRunView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let conversation = Conversation(run.messages)
         let status = RunStatus(of: run, progress: progress)
         HStack(alignment: .bottom, spacing: 12) {
             RunMark(status: status, look: agent?.look)
                 .frame(width: Self.gutter)
                 // Heard after the message, as it is seen at its foot.
                 .accessibilitySortPriority(-1)
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 6) {
                 if let agent {
                     Text(agent.name)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(OrbPalette.of(agent.look).ink(in: colorScheme))
                 }
-                ForEach(conversation.blocks) { block in
-                    BlockView(kind: block.kind)
-                }
-                switch status {
-                case .running, .starting, .thinking:
-                    ThinkingLine(status: status)
-                        .id(status)
-                case .finished:
-                    // The orb shows it is done.
-                    EmptyView()
-                default:
-                    if case .case3(let writing)? = progress {
-                        StreamingMarkdownView(text: writing.text)
-                    }
-                    RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
-                }
+                GroupRunMessage(run: run, progress: progress, status: status)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// A group run's message under the agent's name: the conversation, then the thinking line, or the message so far and
+/// how the run stands unless it simply finished.
+private struct GroupRunMessage: View {
+    let run: Run
+    let progress: RunProgress?
+    let status: RunStatus
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            ForEach(Conversation(run.messages).blocks) { block in
+                BlockView(kind: block.kind)
+            }
+            switch status {
+            case .running, .starting, .thinking:
+                ThinkingLine(status: status)
+                    .id(status)
+            case .finished:
+                // The orb shows it is done.
+                EmptyView()
+            default:
+                if case .case3(let writing)? = progress {
+                    StreamingMarkdownView(text: writing.text)
+                }
+                RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
+            }
         }
     }
 }
