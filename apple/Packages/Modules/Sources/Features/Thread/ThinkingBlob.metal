@@ -17,33 +17,45 @@ static float easeOutBack(float x) {
     return 1.0 + (pull + 1.0) * past * past * past + pull * past * past;
 }
 
+static float easeInOut(float x) {
+    return 0.5 - 0.5 * cos(M_PI_F * x);
+}
+
+static float easeIn(float x) {
+    return x * x * x;
+}
+
 // How much of a point is inside an edge, softened over `soft`.
 static float inside(float edge, float soft) {
     return 1.0 - smoothstep(-soft * 0.5, soft * 0.5, edge);
 }
 
-// How far droplet `i` is through its trip this round, from 0 (not left) to 1 (taken in).
+// How far droplet `i` is through its trip this round: 0 when it leaves, 1 when it is taken in, and on past 1 while
+// the sun settles.
 static float tripOf(int i, float progress) {
-    return saturate((progress - 0.02 - float(i) * 0.12) / 0.42);
+    return (progress - 0.02 - float(i) * 0.12) / 0.4;
 }
 
 // A sun with four droplets for planets, in one colour, the colour of what it is drawn over. Each round the droplets
 // set off one by one, each on its own orbit, tipped toward the viewer and turned a quarter turn from the last. A
-// droplet comes out from behind the sun small and faint, swings round one side, and comes to the front large and
-// full, where it melts into the sun. The sun swells with each one it takes in, then shrinks to where it started.
-// Its edge is crisp, and a soft shade drifts across it. `energy`, from 0 to 1, makes all of it quicker.
+// droplet comes out from behind the sun small and faint, swings round one side, slowing as it comes to the front
+// large and full, then is pulled into the sun, quicker and quicker. The sun swells with each one it takes in, then
+// shrinks to where it started. Its edge is crisp, and a soft shade drifts across it. `energy`, from 0 to 1, makes
+// all of it quicker.
 [[ stitchable ]] half4 thinkingBlob(float2 position, half4 color, float2 size, float time, float energy) {
     float2 uv = position / size * 2.0 - 1.0;
 
     const float rest = 0.22;
     const float full = 0.42;
-    const float droplet = 0.14;
-    const float reach = 0.72;
+    const float droplet = 0.11;
+    const float reach = 0.6;
     // How far an orbit is tipped toward the viewer (0 edge on, 1 face on), and how much bigger a droplet is in front
     // of the sun than beside it, and smaller behind.
     const float tip = 0.38;
     const float perspective = 0.35;
-    const float melt = 0.13;
+    const float melt = 0.11;
+    // The part of a trip spent on the orbit; the rest is the pull into the sun.
+    const float orbiting = 0.75;
     // About a point of softening, so the edge stays crisp at any size.
     float soft = 2.0 / max(size.x, 1.0);
 
@@ -52,9 +64,9 @@ static float tripOf(int i, float progress) {
 
     float swallowed = 0.0;
     for (int i = 0; i < 4; i++) {
-        swallowed += easeOutBack(saturate((tripOf(i, progress) - 0.85) / 0.15)) / 4.0;
+        swallowed += easeOutBack(saturate((tripOf(i, progress) - 0.95) / 0.15)) / 4.0;
     }
-    float radius = mix(mix(rest, full, swallowed), rest, smoothstep(0.84, 0.98, progress));
+    float radius = mix(mix(rest, full, swallowed), rest, smoothstep(0.86, 0.98, progress));
 
     // The sun with the droplets in front of it melted in, and how dark that is where each droplet is.
     float front = length(uv) - radius;
@@ -62,18 +74,20 @@ static float tripOf(int i, float progress) {
     // The droplets behind the sun, which it hides.
     float behindInk = 0.0;
     for (int i = 0; i < 4; i++) {
-        float trip = tripOf(i, progress);
-        // Straight behind the sun at the start, round one side, straight in front at the end.
-        float turn = M_PI_F * (trip - 0.5);
+        float trip = saturate(tripOf(i, progress));
+        float pull = easeIn(saturate((trip - orbiting) / (1.0 - orbiting)));
+        // Straight behind the sun at the start, round one side to the front while on the orbit, and on toward
+        // straight in front while pulled in.
+        float turn = M_PI_F * (-0.5 + 0.78 * easeInOut(saturate(trip / orbiting)) + 0.22 * pull);
         float nearness = sin(turn);
         float scale = 1.0 + perspective * nearness;
         // Out of the sun's middle while hidden behind it, and back into it from the front.
-        float out = smoothstep(0.0, 0.12, trip) * (1.0 - smoothstep(0.8, 1.0, trip));
+        float out = smoothstep(0.0, 0.12, trip) * (1.0 - pull);
         float2 onOrbit = reach * out * scale * float2(cos(turn), tip * nearness);
         float heading = float(i) * M_PI_F / 2.0;
         float2 at = float2(
             onOrbit.x * cos(heading) - onOrbit.y * sin(heading), onOrbit.x * sin(heading) + onOrbit.y * cos(heading));
-        float edge = length(uv - at) - droplet * scale * (1.0 - smoothstep(0.9, 1.0, trip));
+        float edge = length(uv - at) - droplet * scale * (1.0 - smoothstep(0.96, 1.0, trip));
         // Fainter the farther it is.
         float ink = 0.7 + 0.3 * nearness;
         if (nearness < 0.0) {
