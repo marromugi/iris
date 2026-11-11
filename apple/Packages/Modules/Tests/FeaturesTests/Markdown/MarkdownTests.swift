@@ -58,6 +58,22 @@ struct MarkdownTests {
         #expect(MarkdownBlock.blocks(of: "| a | b |\n| c | d |") == [.paragraph("| a | b |\n| c | d |")])
     }
 
+    @Test func aLineStartingWithABarInAParagraphStaysInIt() {
+        #expect(MarkdownBlock.blocks(of: "foo\n| bar\nbaz") == [.paragraph("foo\n| bar\nbaz")])
+    }
+
+    @Test func aCellEndingInAnEscapedBackslashStillEndsAtTheBar() {
+        #expect(
+            MarkdownBlock.blocks(of: "| a | C:\\\\ |\n|---|---|")
+                == [.table(header: ["a", "C:\\\\"], rows: [])])
+    }
+
+    @Test func aTableRightAfterAQuoteComesAfterIt() {
+        #expect(
+            MarkdownBlock.blocks(of: "> 引用\n| a |\n|---|\n| 1 |")
+                == [.quote("引用"), .table(header: ["a"], rows: [["1"]])])
+    }
+
     @Test func aBarInsideCodeIsCode() {
         #expect(
             MarkdownBlock.blocks(of: "```\n| a |\n|---|\n```") == [.code(language: "", text: "| a |\n|---|")])

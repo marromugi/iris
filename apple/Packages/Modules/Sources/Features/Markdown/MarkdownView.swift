@@ -61,38 +61,57 @@ private struct MarkdownBlockView: View {
             Divider()
                 .opacity(fadingTail.first?.opacity ?? 1)
         case .table(let header, let rows):
+            // Not faded: a table grows a row at a time, and fading it whole would make it blink with each.
             TableView(header: header, rows: rows)
-                .opacity(fadingTail.first?.opacity ?? 1)
         }
     }
 }
 
-/// A table: the header in bold over a line, then the rows, each cell with its inline Markdown. It scrolls sideways
-/// when it is wider than the screen.
+/// A table: the header in bold over a line, then the rows, each cell with its inline Markdown, wrapping past
+/// `cellWidth`. It scrolls sideways when it is wider than the screen. VoiceOver reads each cell after its column's
+/// name.
 private struct TableView: View {
     let header: [String]
     let rows: [[String]]
+
+    @ScaledMetric private var cellWidth: CGFloat = 220
 
     var body: some View {
         ScrollView(.horizontal) {
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 8) {
                 GridRow {
                     ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
-                        InlineText(text: cell, style: .primary, fadingTail: []).bold()
+                        cellView(cell)
+                            .bold()
+                            .accessibilityAddTraits(.isHeader)
                     }
                 }
                 Divider()
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                            InlineText(text: cell, style: .primary, fadingTail: [])
+                        ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
+                            cellView(cell)
+                                .accessibilityLabel(
+                                    "\(Self.plain(header.indices.contains(column) ? header[column] : "")): \(Self.plain(cell))")
                         }
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
             .font(.subheadline)
             .padding(.vertical, 4)
         }
+    }
+
+    private func cellView(_ text: String) -> some View {
+        InlineText(text: text, style: .primary, fadingTail: [])
+            .frame(maxWidth: cellWidth, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// A cell's text without its inline Markdown, for VoiceOver.
+    private static func plain(_ text: String) -> String {
+        String(InlineText.attributed(text).characters)
     }
 }
 

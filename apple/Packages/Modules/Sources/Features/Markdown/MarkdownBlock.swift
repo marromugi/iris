@@ -39,6 +39,7 @@ enum MarkdownBlock: Equatable {
         func endTable() {
             guard !table.isEmpty else { return }
             if table.count >= 2, Self.isTableDivider(table[1]) {
+                endParagraph()
                 let header = Self.cells(table[0])
                 let rows = table.dropFirst(2).map { row in
                     let cells = Self.cells(row)
@@ -65,7 +66,7 @@ enum MarkdownBlock: Equatable {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             let indent = line.prefix { $0 == " " }.count
             if code == nil, trimmed.hasPrefix("|") {
-                if table.isEmpty { endParagraph() }
+                // A paragraph before stays open: lines that turn out not to be a table go on with it.
                 endQuote()
                 table.append(trimmed)
                 continue
@@ -118,15 +119,15 @@ enum MarkdownBlock: Equatable {
         return blocks
     }
 
-    /// The cells of a table row: what is between its `|`s, trimmed, with `\|` read as a `|` inside a cell.
+    /// The cells of a table row: what is between its `|`s, trimmed, with `\|` read as a `|` inside a cell. A `|` that
+    /// starts or ends the row only bounds it.
     private static func cells(_ row: String) -> [String] {
-        var inner = Substring(row)
-        if inner.hasPrefix("|") { inner = inner.dropFirst() }
-        if inner.hasSuffix("|"), !inner.hasSuffix("\\|") { inner = inner.dropLast() }
         var cells: [String] = []
         var cell = ""
         var escaped = false
-        for character in inner {
+        var endsWithBar = false
+        for character in row {
+            endsWithBar = false
             if escaped {
                 cell.append(character == "|" ? "|" : "\\\(character)")
                 escaped = false
@@ -135,12 +136,18 @@ enum MarkdownBlock: Equatable {
             } else if character == "|" {
                 cells.append(cell.trimmingCharacters(in: .whitespaces))
                 cell = ""
+                endsWithBar = true
             } else {
                 cell.append(character)
             }
         }
         if escaped { cell.append("\\") }
-        cells.append(cell.trimmingCharacters(in: .whitespaces))
+        if !endsWithBar || !cell.trimmingCharacters(in: .whitespaces).isEmpty {
+            cells.append(cell.trimmingCharacters(in: .whitespaces))
+        }
+        if row.hasPrefix("|"), !cells.isEmpty {
+            cells.removeFirst()
+        }
         return cells
     }
 
