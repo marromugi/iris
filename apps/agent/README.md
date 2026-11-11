@@ -66,7 +66,7 @@ bash ツールのために、デプロイの前に次が要る（一度だけ）
 
 - R2 バケット `iris-workspaces`（`pnpm exec wrangler r2 bucket create iris-workspaces`）。
 - そのバケットだけに「Object Read & Write」の R2 API トークン。ダッシュボードで作り、`pnpm exec wrangler secret put S3_ACCESS_KEY_ID` と `S3_SECRET_ACCESS_KEY` に入れる。コンテナには渡らず、Worker が保存先への要求に署名するのに使う。
-- `wrangler deploy` のときに Docker が動いていること（サンドボックスのイメージを作って送る）。
+- `wrangler deploy` と `pnpm dev`、`test:live` のときに Docker が動いていること（サンドボックスのイメージを作る）。
 
 `ORIGIN` は Worker が配られる URL と同じにする（`src/api/api.ts` の `PRODUCTION_ORIGIN` とも同じで、`openapi.json` のテストがそれを確かめる）。
 

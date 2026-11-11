@@ -1,14 +1,15 @@
 import type { AssistantMessage } from "@iris/agent";
-import { reset, runInDurableObject } from "cloudflare:test";
+import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
 import { runDue } from "../src/runner";
 import { bashTool, shellReport } from "../src/sandbox/bash-tool";
-import { lastOutput, MAX_OUTPUT_BYTES, type ShellResult } from "../src/sandbox/shell";
+import { lastOutput, MAX_OUTPUT_BYTES, OutputTail, type ShellResult } from "../src/sandbox/shell";
 import * as store from "../src/store";
-import { modelRequests, scriptedModel, testAgent } from "./worker";
+import { modelRequests, ownTools, scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
+  ownTools.make = () => [];
   scriptedModel.length = 0;
   modelRequests.length = 0;
   await reset();
@@ -92,4 +93,67 @@ test("long output keeps its end", () => {
     text: "short",
     truncated: false,
   });
+});
+
+test("the alarm offers each run its own agent's tools", async () => {
+  const [agent] = await userAgent().listAgents();
+  const ranFor: string[] = [];
+  ownTools.make = (run) => [
+    bashTool({
+      async run() {
+        ranFor.push(run.agentId);
+        return { exitCode: 0, stdout: "", stderr: "", truncated: false };
+      },
+    }),
+  ];
+  scriptedModel.push(runBash("pwd"), reply("済みました。"));
+
+  await userAgent().sendMessage(agent?.id ?? "", { text: "pwd して" });
+  await runDurableObjectAlarm(userAgent());
+
+  expect(ranFor).toEqual([agent?.id]);
+});
+
+test("a sandbox that can't run anything comes back to the model as the tool's error", async () => {
+  const tool = bashTool({
+    run: () => Promise.reject(new Error("The bucket's token was refused.")),
+  });
+
+  const outcome = await tool.run({ command: "ls" }, { id: "call-1" });
+
+  expect(outcome).toEqual({
+    ok: false,
+    error: "The sandbox couldn't run the command: The bucket's token was refused.",
+  });
+});
+
+test("a report tells a kill apart from the time limit", () => {
+  const killed: ShellResult = { exitCode: 137, stdout: "", stderr: "", truncated: false };
+
+  expect(shellReport(killed)).toBe(
+    "exit code: 137\n(killed: it ran past 60 seconds, or ran out of memory)\nstdout:\n\nstderr:\n",
+  );
+});
+
+test("output of exactly the limit is whole, and one byte more is cut", () => {
+  const exactly = new TextEncoder().encode("a".repeat(MAX_OUTPUT_BYTES));
+
+  expect(lastOutput(exactly).truncated).toBe(false);
+  expect(lastOutput(new TextEncoder().encode(`b${"a".repeat(MAX_OUTPUT_BYTES)}`)).truncated).toBe(
+    true,
+  );
+});
+
+test("a cut never splits a character, and the tail keeps only the end of output however long", () => {
+  const tail = new OutputTail();
+  for (let index = 0; index < 1000; index += 1) {
+    tail.push(new TextEncoder().encode("日本語の出力。"));
+  }
+
+  const { text, truncated } = tail.read();
+
+  expect(truncated).toBe(true);
+  expect(text).not.toContain("\uFFFD");
+  expect(text.endsWith("日本語の出力。")).toBe(true);
+  expect(new TextEncoder().encode(text).length).toBeLessThanOrEqual(MAX_OUTPUT_BYTES);
 });
