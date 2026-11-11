@@ -100,6 +100,7 @@ const ask = (text: string): ModelRequest => ({
 });
 
 test("sends the system prompt, the conversation with Claude's thinking, and the tools as Claude takes them, streamed", async () => {
+  // Another service's model wrote the second call: its ID and input are ones Claude refuses.
   const { client, requests } = claudeStreaming([{ type: "text", text: ["OK"] }]);
 
   await createAnthropicModel(client)({
@@ -113,12 +114,18 @@ test("sends the system prompt, the conversation with Claude's thinking, and the 
           { type: "reasoning", data: { type: "redacted_thinking", data: "r1" } },
           { type: "reasoning", data: { reasoning_content: "another service's" } },
           { type: "text", text: "Checking." },
+          { type: "text", text: " \n" },
           { type: "tool-call", id: "c1", name: "forecast", input: { city: "Osaka" } },
-          { type: "tool-call", id: "c2", name: "forecast", input: "Kobe" },
+          { type: "tool-call", id: "functions.forecast:1", name: "forecast", input: "Kobe" },
         ],
       },
-      { role: "tool", callId: "c1", isError: false, content: "Sunny." },
-      { role: "tool", callId: "c2", isError: true, content: "The input isn't an object." },
+      { role: "tool", callId: "c1", isError: false, content: "" },
+      {
+        role: "tool",
+        callId: "functions.forecast:1",
+        isError: true,
+        content: "The input isn't an object.",
+      },
       { role: "assistant", parts: [{ type: "text", text: "Osaka is sunny." }] },
       { role: "user", text: "Thanks." },
     ],
@@ -155,16 +162,21 @@ test("sends the system prompt, the conversation with Claude's thinking, and the 
           { type: "redacted_thinking", data: "r1" },
           { type: "text", text: "Checking." },
           { type: "tool_use", id: "c1", name: "forecast", input: { city: "Osaka" } },
-          { type: "tool_use", id: "c2", name: "forecast", input: {} },
+          {
+            type: "tool_use",
+            id: "iris-66756e6374696f6e732e666f7265636173743a31",
+            name: "forecast",
+            input: {},
+          },
         ],
       },
       {
         role: "user",
         content: [
-          { type: "tool_result", tool_use_id: "c1", is_error: false, content: "Sunny." },
+          { type: "tool_result", tool_use_id: "c1", is_error: false },
           {
             type: "tool_result",
-            tool_use_id: "c2",
+            tool_use_id: "iris-66756e6374696f6e732e666f7265636173743a31",
             is_error: true,
             content: "The input isn't an object.",
           },
@@ -187,12 +199,13 @@ test("sends the system prompt, the conversation with Claude's thinking, and the 
   });
 });
 
-test("reports thinking, then writing as the text streams, and keeps Claude's thinking as reasoning in the order it came", async () => {
+test("reports thinking, then writing as the text streams, and keeps Claude's thinking as reasoning where it came, leaving out blank text", async () => {
   const { client } = claudeStreaming(
     [
       { type: "thinking", signature: "s1" },
-      { type: "redacted_thinking", data: "r1" },
       { type: "text", text: ["Chec", "king."] },
+      { type: "redacted_thinking", data: "r1" },
+      { type: "text", text: [" "] },
       { type: "tool_use", id: "toolu_1", name: "forecast", input: '{"city":"Osaka"}' },
     ],
     { reason: "tool_use" },
@@ -208,13 +221,14 @@ test("reports thinking, then writing as the text streams, and keeps Claude's thi
     { type: "thinking" },
     { type: "writing", text: "Chec" },
     { type: "writing", text: "Checking." },
+    { type: "writing", text: "Checking. " },
   ]);
   expect(message).toEqual({
     role: "assistant",
     parts: [
       { type: "reasoning", data: { type: "thinking", thinking: "", signature: "s1" } },
-      { type: "reasoning", data: { type: "redacted_thinking", data: "r1" } },
       { type: "text", text: "Checking." },
+      { type: "reasoning", data: { type: "redacted_thinking", data: "r1" } },
       { type: "tool-call", id: "toolu_1", name: "forecast", input: { city: "Osaka" } },
     ],
   });

@@ -24,9 +24,12 @@ export const ANTHROPIC_MODEL = "claude-haiku-5-5";
 const MAX_TOKENS = 64_000;
 
 // Lets the API drop a thinking block whose earlier conversation has changed, instead of failing
-// the request: a run's view of its thread is read again each time it is carried on, and a run that
-// ended in the meantime can join it.
+// the request: a run's tools are made again each time it is carried on, and they can change in
+// between (a tool's description can name the user's agents, who can be added while a run waits).
 const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
+
+// The IDs Claude takes for a tool call and its result.
+const TOOL_CALL_ID = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * A `Model` backed by Claude through the Anthropic API, read as it streams: it reports thinking as
@@ -59,7 +62,14 @@ export function createAnthropicModel(client: Anthropic): Model {
         request.onProgress?.({ type: "writing", text: written });
       }
     }
-    return toAssistantMessage(await stream.finalMessage());
+    const reply = await stream.finalMessage();
+    if ((reply.input_transformations ?? []).length > 0) {
+      console.warn(
+        `Claude (${reply.model}) left out thinking it couldn't match to the conversation:`,
+        JSON.stringify(reply.input_transformations),
+      );
+    }
+    return toAssistantMessage(reply);
   };
 }
 
@@ -96,8 +106,8 @@ function toAssistantMessage(reply: BetaMessage): AssistantMessage {
         parts.push({ type: "reasoning", data: { type: "redacted_thinking", data: block.data } });
         break;
       case "text":
-        // The API refuses an empty text block when the message is sent back.
-        if (block.text !== "") {
+        // Not kept when blank, since such a block isn't sent back.
+        if (!isBlank(block.text)) {
           parts.push({ type: "text", text: block.text });
         }
         break;
@@ -135,7 +145,7 @@ function toAnthropicMessages(messages: readonly Message[]): BetaMessageParam[] {
       }
       results.push({
         type: "tool_result",
-        tool_use_id: message.callId,
+        tool_use_id: toolCallId(message.callId),
         is_error: message.isError,
         ...(message.content === "" ? {} : { content: message.content }),
       });
@@ -157,9 +167,31 @@ function toAnthropicBlock(part: AssistantMessage["parts"][number]): BetaContentB
     return thinking.success ? [thinking.data] : [];
   }
   if (part.type === "text") {
-    return [{ type: "text", text: part.text }];
+    // The API refuses an empty text block, and a blank one says nothing.
+    return isBlank(part.text) ? [] : [{ type: "text", text: part.text }];
   }
-  return [{ type: "tool_use", id: part.id, name: part.name, input: toolInput(part.input) }];
+  return [
+    { type: "tool_use", id: toolCallId(part.id), name: part.name, input: toolInput(part.input) },
+  ];
+}
+
+function isBlank(text: string): boolean {
+  return text.trim() === "";
+}
+
+/**
+ * A tool call's ID as Claude takes it. Another service's model can write an ID Claude refuses,
+ * such as an empty one; that ID goes as `iris-` and the hex of its UTF-8 bytes, the same for the
+ * call and its result.
+ */
+function toolCallId(id: string): string {
+  if (TOOL_CALL_ID.test(id)) {
+    return id;
+  }
+  const hex = [...new TextEncoder().encode(id)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `iris-${hex}`;
 }
 
 /**

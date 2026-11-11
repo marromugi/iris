@@ -15,15 +15,20 @@ import { createAnthropicModel } from "../../src/anthropic-model";
 // Calls the real Claude API with ANTHROPIC_API_KEY (from .dev.vars or the environment), which is
 // charged to that key's account.
 
-/** The bodies of the requests sent to the API, in order. */
-const requestBodies: unknown[] = [];
+/** The bodies of the requests sent to the API, and the streams that answered them, in order. */
+const exchanges: { request: unknown; response: Promise<string> }[] = [];
 const model = createAnthropicModel(
   new Anthropic({
     apiKey: env.ANTHROPIC_API_KEY,
     fetch: async (url, init) => {
       const body = init?.body;
-      requestBodies.push(typeof body === "string" ? JSON.parse(body) : body);
-      return fetch(url, init);
+      const response = await fetch(url, init);
+      const [forClient, forTest] = response.body?.tee() ?? [null, null];
+      exchanges.push({
+        request: typeof body === "string" ? JSON.parse(body) : body,
+        response: new Response(forTest).text(),
+      });
+      return new Response(forClient, response);
     },
   }),
 );
@@ -41,11 +46,21 @@ const add = defineTool({
 const stored = (message: Message): Message =>
   messageSchema.parse(JSON.parse(JSON.stringify(message)));
 
-test("the real model calls tools, reads its stored thinking back, and answers with the result", async () => {
+/** What the API says it left out of a request: `input_transformations` from its `message_start`. */
+function leftOut(stream: string): unknown {
+  const start = stream
+    .split("\n")
+    .find((line) => line.startsWith("data:") && line.includes('"type":"message_start"'));
+  return start === undefined
+    ? "no message_start"
+    : JSON.parse(start.slice("data:".length)).message.input_transformations;
+}
+
+test("the real model calls tools, gets its stored thinking back unchanged, and answers with the result", async () => {
   const conversation: Message[] = [
     {
       role: "user",
-      text: "Use the add tool to add 17 and 25, then use it again to add 8 to that sum. Tell me the final result.",
+      text: "A shop sold 17 apples in the morning and 25 in the afternoon, then got 8 back as returns. Work out how many apples were sold in the end, using the add tool for each step (a negative number subtracts). Tell me the final number.",
     },
   ];
   const heard: ModelProgress["type"][] = [];
@@ -60,23 +75,20 @@ test("the real model calls tools, reads its stored thinking back, and answers wi
     conversation.push(stored(message));
   }
 
+  const responses = await Promise.all(exchanges.map((exchange) => exchange.response));
   console.log(JSON.stringify(conversation, null, 2));
+  console.log("Left out per request:", JSON.stringify(responses.map(leftOut)));
   expect(heard).toContain("writing");
   expect(conversation).toContainEqual({
     role: "tool",
     callId: expect.any(String),
     isError: false,
-    content: "50",
+    content: "34",
   });
   expect(nextAction(conversation).type).toBe("done");
-  // Thinking is up to the model; when it thought before a tool call, that thinking went back.
-  const thought = conversation.some(
-    (message) =>
-      message.role === "assistant" &&
-      message.parts.some((part) => part.type === "reasoning") &&
-      message !== conversation.at(-1),
-  );
-  const sentBack = JSON.stringify(requestBodies.slice(1)).includes('"type":"thinking"');
-  console.log(`Thought before a tool call: ${thought}; thinking sent back: ${sentBack}`);
-  expect(sentBack).toBe(thought);
+  // The check is about thinking that went back, so a run where Claude didn't think proves nothing.
+  const sentBack = JSON.stringify(exchanges.slice(1).map((exchange) => exchange.request));
+  expect(sentBack).toContain('"type":"thinking"');
+  // With the binding beta, the API lists any block it dropped; none should be.
+  expect(responses.map(leftOut)).toEqual(responses.map(() => []));
 });

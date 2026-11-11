@@ -14,6 +14,12 @@ import { createWorkersAiModel, WORKERS_AI_MODEL } from "./workers-ai-model";
 // Every export of this module is an entrypoint the runtime starts: the Durable Object classes, the
 // S3 gateway the sandboxes' mounts go through, and the fetch handler, nothing else.
 
+const modelProviderSchema = z.enum(["anthropic", "workers-ai"]);
+
+// Read when the Worker starts, so a value it doesn't know stops the Worker from starting (and a
+// deploy from going out) instead of failing each run.
+const modelProvider = modelProviderOf(workerEnv.MODEL_PROVIDER);
+
 export const UserAgent = createUserAgent(
   (env) => ({ model: modelOf(env), tools: [] }),
   (env, { agentId }, storage) => {
@@ -39,17 +45,19 @@ export { AgentSandbox } from "./sandbox/agent-sandbox";
 
 export default createApp(workerEnv.ORIGIN) satisfies ExportedHandler<Env>;
 
-const modelProviderSchema = z.enum(["anthropic", "workers-ai"]);
+function modelProviderOf(value: string): z.infer<typeof modelProviderSchema> {
+  const provider = modelProviderSchema.safeParse(value);
+  if (!provider.success) {
+    throw new Error(
+      `MODEL_PROVIDER is "${value}"; it must be one of ${modelProviderSchema.options.join(", ")}.`,
+    );
+  }
+  return provider.data;
+}
 
 /** The model of the provider `MODEL_PROVIDER` names. */
 function modelOf(env: Env): Model {
-  const provider = modelProviderSchema.safeParse(env.MODEL_PROVIDER);
-  if (!provider.success) {
-    throw new Error(
-      `MODEL_PROVIDER is "${env.MODEL_PROVIDER}"; it must be one of ${modelProviderSchema.options.join(", ")}.`,
-    );
-  }
-  return provider.data === "anthropic"
+  return modelProvider === "anthropic"
     ? createAnthropicModel(new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }))
     : createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input));
 }

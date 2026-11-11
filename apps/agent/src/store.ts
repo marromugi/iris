@@ -749,8 +749,8 @@ export function recentRuns(storage: DurableObjectStorage, threadId: string, limi
  * What was said in the run's thread before it, as its agent reads it, the latest first, each
  * entry to be kept whole. An entry is a post together with the replies to it that ended with
  * one, or a run a task started that ended with a reply. The agent's own reply is its
- * conversation (without the post, which comes first); another agent's is its reply as a user
- * message after the agent's name. A post without such a reply, and a run without one (given up,
+ * conversation (without the post, which comes first, and without the model's reasoning); another
+ * agent's is its reply as a user message after the agent's name. A post without such a reply, and a run without one (given up,
  * or stopped at its step limit), are passed over. Only what came before the run started counts,
  * so replies to the same post don't read each other. Conversations are read from storage only
  * when the caller asks for their entry.
