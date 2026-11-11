@@ -665,6 +665,14 @@ function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Ru
   };
 }
 
+export function agentOfRun(storage: DurableObjectStorage, runId: string): string | undefined {
+  return database(storage)
+    .select({ agentId: runs.agentId })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .get()?.agentId;
+}
+
 export function threadOfRun(storage: DurableObjectStorage, runId: string): string | undefined {
   return database(storage)
     .select({ threadId: runs.threadId })
