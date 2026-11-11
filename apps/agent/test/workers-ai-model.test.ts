@@ -56,7 +56,7 @@ function completionStreaming(
   return { complete, inputs };
 }
 
-test("sends the system prompt, the conversation and the tools in the chat completions format, streamed", async () => {
+test("sends the system prompt, the conversation without another service's reasoning, and the tools in the chat completions format, streamed", async () => {
   const { complete, inputs } = completionStreaming([{ content: "OK" }]);
 
   await createWorkersAiModel(complete)({
@@ -66,6 +66,7 @@ test("sends the system prompt, the conversation and the tools in the chat comple
       {
         role: "assistant",
         parts: [
+          { type: "reasoning", data: { type: "thinking", thinking: "", signature: "s1" } },
           { type: "text", text: "Checking." },
           { type: "tool-call", id: "c1", name: "forecast", input: { city: "Osaka" } },
         ],

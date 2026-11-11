@@ -1,4 +1,8 @@
+import Anthropic from "@anthropic-ai/sdk";
+import type { Model } from "@iris/agent";
 import { env as workerEnv } from "cloudflare:workers";
+import { z } from "zod";
+import { createAnthropicModel } from "./anthropic-model";
 import { createApp } from "./app";
 import { bashTool } from "./sandbox/bash-tool";
 import { countSearch } from "./store";
@@ -11,10 +15,7 @@ import { createWorkersAiModel, WORKERS_AI_MODEL } from "./workers-ai-model";
 // S3 gateway the sandboxes' mounts go through, and the fetch handler, nothing else.
 
 export const UserAgent = createUserAgent(
-  (env) => ({
-    model: createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input)),
-    tools: [],
-  }),
+  (env) => ({ model: modelOf(env), tools: [] }),
   (env, { agentId }, storage) => {
     const browser = browserRun(env.BROWSER);
     return {
@@ -37,3 +38,18 @@ export { S3Gateway } from "@cloudflare/sandbox";
 export { AgentSandbox } from "./sandbox/agent-sandbox";
 
 export default createApp(workerEnv.ORIGIN) satisfies ExportedHandler<Env>;
+
+const modelProviderSchema = z.enum(["anthropic", "workers-ai"]);
+
+/** The model of the provider `MODEL_PROVIDER` names. */
+function modelOf(env: Env): Model {
+  const provider = modelProviderSchema.safeParse(env.MODEL_PROVIDER);
+  if (!provider.success) {
+    throw new Error(
+      `MODEL_PROVIDER is "${env.MODEL_PROVIDER}"; it must be one of ${modelProviderSchema.options.join(", ")}.`,
+    );
+  }
+  return provider.data === "anthropic"
+    ? createAnthropicModel(new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }))
+    : createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input));
+}
