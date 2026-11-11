@@ -148,6 +148,8 @@ export async function runDue(
           asked: (post, answerRunId) => {
             watcher.posted(post);
             watcher.changed(answerRunId);
+            // The asking run now has the consult, which can be opened while it waits.
+            watcher.changed(runId);
           },
           waiting: (isWaiting) => {
             if (isWaiting) {

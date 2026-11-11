@@ -12,6 +12,7 @@ import {
   min,
   notExists,
   notInArray,
+  type SQL,
   sql,
 } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
@@ -147,21 +148,30 @@ export interface Thread {
 
 /** The user's threads as the home lists them, the latest activity first: consults are left out. */
 export function listThreads(storage: DurableObjectStorage): Thread[] {
-  return allThreads(storage).filter((thread) => thread.consultRunId === null);
+  return readThreads(storage, isNull(threads.consultRunId));
 }
 
 /** One of the user's threads by its ID, a consult included. */
 export function findThread(storage: DurableObjectStorage, id: string): Thread | undefined {
-  return allThreads(storage).find((thread) => thread.id === id);
+  return readThreads(storage, eq(threads.id, id))[0];
 }
 
-/** Every thread, consults included, the latest activity first. */
-function allThreads(storage: DurableObjectStorage): Thread[] {
+/**
+ * The threads `where` picks, the latest activity first. Only their own posts, runs, and members
+ * are read.
+ */
+function readThreads(storage: DurableObjectStorage, where: SQL | undefined): Thread[] {
   const db = database(storage);
+  const rows = db.select().from(threads).where(where).all();
+  if (rows.length === 0) {
+    return [];
+  }
+  const ids = rows.map((row) => row.id);
   const lastPostAt = new Map(
     db
       .select({ threadId: posts.threadId, at: max(posts.createdAt) })
       .from(posts)
+      .where(inArray(posts.threadId, ids))
       .groupBy(posts.threadId)
       .all()
       .map((row) => [row.threadId, row.at]),
@@ -170,16 +180,14 @@ function allThreads(storage: DurableObjectStorage): Thread[] {
     db
       .select({ threadId: runs.threadId, at: max(runs.startedAt) })
       .from(runs)
+      .where(inArray(runs.threadId, ids))
       .groupBy(runs.threadId)
       .all()
       .map((row) => [row.threadId, row.at]),
   );
-  const members = threadMembersById(storage);
-  const agentNames = new Map(listAgents(storage).map((agent) => [agent.id, agent.name]));
-  return db
-    .select()
-    .from(threads)
-    .all()
+  const members = threadMembersById(storage, ids);
+  const agentNames = agentNamesById(storage);
+  return rows
     .map((row): Thread => {
       const times = [row.createdAt, lastPostAt.get(row.id), lastRunAt.get(row.id)]
         .filter((time) => time !== undefined && time !== null)
@@ -198,13 +206,17 @@ function allThreads(storage: DurableObjectStorage): Thread[] {
     );
 }
 
-/** Each thread's member IDs, in the order the agents were added. */
-function threadMembersById(storage: DurableObjectStorage): Map<string, string[]> {
+/** The member IDs of the threads `ids`, in the order the agents were added. */
+function threadMembersById(
+  storage: DurableObjectStorage,
+  ids: readonly string[],
+): Map<string, string[]> {
   const byThread = new Map<string, string[]>();
   for (const row of database(storage)
     .select({ threadId: threadMembers.threadId, agentId: threadMembers.agentId })
     .from(threadMembers)
     .innerJoin(agents, eq(agents.id, threadMembers.agentId))
+    .where(inArray(threadMembers.threadId, [...ids]))
     .orderBy(asc(agents.createdAt), asc(agents.id))
     .all()) {
     byThread.set(row.threadId, [...(byThread.get(row.threadId) ?? []), row.agentId]);
@@ -673,25 +685,22 @@ function consultsOf(
   storage: DurableObjectStorage,
   runId: string,
 ): { callId: string; thread: Thread }[] {
-  const asked = database(storage)
-    .select({ callId: posts.callId, threadId: posts.threadId })
-    .from(posts)
-    .innerJoin(threads, eq(threads.id, posts.threadId))
-    .where(eq(threads.consultRunId, runId))
-    .orderBy(asc(posts.createdAt), asc(posts.id))
-    .all();
-  if (asked.length === 0) {
+  const consults = new Map(
+    readThreads(storage, eq(threads.consultRunId, runId)).map((thread) => [thread.id, thread]),
+  );
+  if (consults.size === 0) {
     return [];
   }
-  const consults = new Map(
-    allThreads(storage)
-      .filter((thread) => thread.consultRunId === runId)
-      .map((thread) => [thread.id, thread]),
-  );
-  return asked.flatMap(({ callId, threadId }) => {
-    const thread = consults.get(threadId);
-    return callId === null || thread === undefined ? [] : [{ callId, thread }];
-  });
+  return database(storage)
+    .select({ callId: posts.callId, threadId: posts.threadId })
+    .from(posts)
+    .where(inArray(posts.threadId, [...consults.keys()]))
+    .orderBy(asc(posts.createdAt), asc(posts.id))
+    .all()
+    .flatMap(({ callId, threadId }) => {
+      const thread = consults.get(threadId);
+      return callId === null || thread === undefined ? [] : [{ callId, thread }];
+    });
 }
 
 export function agentOfRun(storage: DurableObjectStorage, runId: string): string | undefined {

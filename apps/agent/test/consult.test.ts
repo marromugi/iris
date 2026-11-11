@@ -3,7 +3,9 @@ import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:tes
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
 import { RETRY_DELAY_MS, runDue, WAKE_UP_BUDGET_MS } from "../src/runner";
+import { RunBroadcast } from "../src/run-broadcast";
 import * as store from "../src/store";
+import { listen } from "./run-events";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
@@ -221,4 +223,51 @@ test("a run asking with a call ID another run used asks anew", async () => {
 
   const [latest] = (await userAgent().recentRuns(asker)) ?? [];
   expect(latest?.messages.at(-1)).toEqual(reply("わからないそうです。"));
+});
+
+test("the asking run's socket hears it with its consult while it waits for the answer", async () => {
+  const { asker } = await twoAgents();
+  let heardWhileWaiting: unknown;
+  await runInDurableObject(userAgent(), async (_, state) => {
+    const threadId = store.agentThreadId(state.storage, asker) ?? "";
+    const broadcast = new RunBroadcast(state);
+    const { 0: client, 1: server } = new WebSocketPair();
+    broadcast.accept(threadId, server, "runs");
+    const socket = listen(client);
+    const askerConsults = () =>
+      socket.events
+        .flatMap((event) =>
+          event.type === "run" && event.run.agentId === asker ? [event.run] : [],
+        )
+        .at(-1)?.consults;
+    scriptedModel.push(
+      ask("株価", "今日の株価は？"),
+      async () => {
+        // Socket messages arrive a moment after they are sent.
+        for (let waited = 0; (askerConsults()?.length ?? 0) === 0 && waited < 2000; waited += 10) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        heardWhileWaiting = askerConsults();
+        return reply("上がっています。");
+      },
+      reply("上がっているそうです。"),
+    );
+    store.insertPost(
+      state.storage,
+      {
+        id: crypto.randomUUID(),
+        threadId,
+        agentId: null,
+        callId: null,
+        text: "株価を聞いてきて",
+        createdAt: new Date(),
+      },
+      [asker],
+    );
+    await runDue(state.storage, testAgent, () => new Date(Date.now() + 1000), broadcast);
+  });
+
+  expect(heardWhileWaiting).toEqual([
+    { callId: "call-1", thread: expect.objectContaining({ name: "株価" }) },
+  ]);
 });

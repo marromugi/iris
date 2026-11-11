@@ -117,10 +117,9 @@ struct ThreadScreen: View {
     #Preview("相談（読むだけ）") {
         NavigationStack {
             ThreadScreen(
-                thread: ChatThread(
-                    id: "consult", name: "株価の確認", agentId: nil, consultRunId: "run", agentIds: ["mail", "stocks"],
-                    lastActivityAt: Samples.moment("2026-11-10T00:10:00Z")),
-                agents: agents, directory: FakeAgentDirectory())
+                thread: Samples.consult, agents: agents,
+                directory: FakeAgentDirectory(
+                    thread: FakeThreadBackend(.init(runs: [Samples.consultAnswer], posts: [Samples.consultQuestion]))))
         }
     }
 #endif

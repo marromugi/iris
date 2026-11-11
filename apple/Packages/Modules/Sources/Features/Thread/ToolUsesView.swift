@@ -77,6 +77,9 @@ private struct ToolUseTimeline: View {
             .init(id: 0, name: "weather", result: .init(content: "{\"rain\": 0.7, \"high\": 16}", isError: false)),
             .init(id: 1, name: "calendar", result: .init(content: "The calendar could not be reached.", isError: true)),
             .init(id: 2, name: "maillist", result: nil),
+            .init(
+                id: 3, name: "ask_agent", result: .init(content: "朝から少し上がっています。", isError: false),
+                consult: Samples.consult),
         ])
         .padding()
     }
