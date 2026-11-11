@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@iris/agent";
+import type { AssistantMessage, ModelRequest } from "@iris/agent";
 import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
@@ -144,4 +144,75 @@ test("an agent with no one to ask isn't offered the tool", async () => {
   await runDurableObjectAlarm(userAgent());
 
   expect(modelRequests[0]?.tools).toEqual([]);
+});
+
+/** Each run asks 物知り, which answers, and each asker ends with what it heard. */
+function playEachPart(request: ModelRequest): AssistantMessage {
+  if (request.tools.length === 0) {
+    return reply("答えです。");
+  }
+  return request.messages.at(-1)?.role === "tool" ? reply("聞けました。") : ask("物知り", "教えて");
+}
+
+test("six runs that all ask at once still get their answers", async () => {
+  const added = await userAgent().addAgent({ name: "物知り" });
+  if (!added.ok) {
+    throw new Error(added.error);
+  }
+  for (let index = 0; index < 18; index += 1) {
+    scriptedModel.push(playEachPart);
+  }
+  const askers = await runInDurableObject(userAgent(), (_, state) =>
+    Array.from({ length: 6 }, (_unused, index) => {
+      const id = crypto.randomUUID();
+      store.insertAgent(state.storage, {
+        id,
+        name: `聞き手 ${index}`,
+        look: { palette: 0, seed: 0 },
+        createdAt: new Date(),
+      });
+      store.insertPost(
+        state.storage,
+        {
+          id: crypto.randomUUID(),
+          threadId: store.agentThreadId(state.storage, id) ?? "",
+          agentId: null,
+          callId: null,
+          text: "聞いてきて",
+          createdAt: new Date(),
+        },
+        [id],
+      );
+      return id;
+    }),
+  );
+
+  await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => new Date(Date.now() + 1000)),
+  );
+
+  for (const asker of askers) {
+    const [run] = (await userAgent().recentRuns(asker)) ?? [];
+    expect(run?.messages.at(-1)).toEqual(reply("聞けました。"));
+  }
+});
+
+test("a run asking with a call ID another run used asks anew", async () => {
+  const { asker } = await twoAgents();
+  scriptedModel.push(
+    ask("株価", "今日は？"),
+    reply("上がっています。"),
+    reply("上がっているそうです。"),
+    ask("株価", "明日は？"),
+    reply("わかりません。"),
+    reply("わからないそうです。"),
+  );
+
+  await userAgent().sendMessage(asker, { text: "今日の株価を聞いて" });
+  await runDurableObjectAlarm(userAgent());
+  await userAgent().sendMessage(asker, { text: "明日の株価を聞いて" });
+  await runDurableObjectAlarm(userAgent());
+
+  const [latest] = (await userAgent().recentRuns(asker)) ?? [];
+  expect(latest?.messages.at(-1)).toEqual(reply("わからないそうです。"));
 });

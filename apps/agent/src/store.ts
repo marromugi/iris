@@ -402,21 +402,32 @@ function agentNamesById(storage: DurableObjectStorage): Map<string, string> {
 }
 
 /**
- * Makes a consult: a thread in which the agent of `runId` asks `answererId`, with both as its
- * members. Returns its ID.
+ * Makes a consult: a thread in which the agent of `runId` asks `answerer`, with both as its
+ * members, named after the agent asked.
  */
 export function insertConsult(
   storage: DurableObjectStorage,
-  consult: { id: string; runId: string; askerId: string; answererId: string; createdAt: Date },
+  consult: {
+    id: string;
+    runId: string;
+    askerId: string;
+    answerer: { id: string; name: string };
+    createdAt: Date;
+  },
 ): void {
   database(storage).transaction((tx) => {
     tx.insert(threads)
-      .values({ id: consult.id, consultRunId: consult.runId, createdAt: consult.createdAt })
+      .values({
+        id: consult.id,
+        name: consult.answerer.name,
+        consultRunId: consult.runId,
+        createdAt: consult.createdAt,
+      })
       .run();
     tx.insert(threadMembers)
       .values([
         { threadId: consult.id, agentId: consult.askerId },
-        { threadId: consult.id, agentId: consult.answererId },
+        { threadId: consult.id, agentId: consult.answerer.id },
       ])
       .run();
   });
@@ -436,16 +447,21 @@ export function findConsult(
     .get()?.id;
 }
 
-/** The question asked in the tool call, and the run that answers it, if the call asked already. */
+/**
+ * The question the run asked in the tool call, and the run that answers it, if the call asked
+ * already. Calls are told apart within the run only: models may number them the same in each.
+ */
 export function consultAsked(
   storage: DurableObjectStorage,
+  runId: string,
   callId: string,
 ): { postId: string; runId: string } | undefined {
   return database(storage)
     .select({ postId: posts.id, runId: runs.id })
     .from(posts)
     .innerJoin(runs, eq(runs.postId, posts.id))
-    .where(eq(posts.callId, callId))
+    .innerJoin(threads, eq(threads.id, posts.threadId))
+    .where(and(eq(posts.callId, callId), eq(threads.consultRunId, runId)))
     .get();
 }
 

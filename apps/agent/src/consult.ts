@@ -26,7 +26,10 @@ export interface ConsultContext {
   readonly wake: () => void;
   /** Tells whoever watches that a question was asked in a consult, and its answer started. */
   readonly asked: (post: store.Post, answerRunId: string) => void;
-  /** Called while the run waits for an answer, so the wake-up doesn't count it against its limit. */
+  /**
+   * Called while the run waits for an answer, so the wake-up doesn't count it against its limit.
+   * A run whose answer came counts again, which may put the wake-up over its limit until a run ends.
+   */
   readonly waiting: (isWaiting: boolean) => void;
 }
 
@@ -56,7 +59,7 @@ export function consultTool(context: ConsultContext): Tool | undefined {
       question: z.string().trim().min(1),
     }),
     async run({ agent, question }, call) {
-      let answerRunId = store.consultAsked(storage, call.id)?.runId;
+      let answerRunId = store.consultAsked(storage, runId, call.id)?.runId;
       if (answerRunId === undefined) {
         const answerer = others.find((each) => each.name === agent);
         if (answerer === undefined) {
@@ -71,7 +74,7 @@ export function consultTool(context: ConsultContext): Tool | undefined {
             id: threadId,
             runId,
             askerId: run.agentId,
-            answererId: answerer.id,
+            answerer: { id: answerer.id, name: answerer.name },
             createdAt: context.now(),
           });
         }
@@ -110,5 +113,7 @@ async function answer(context: ConsultContext, answerRunId: string) {
       throw new RunCut();
     }
     await new Promise((resolve) => setTimeout(resolve, ANSWER_CHECK_MS));
+    // An answer due again later, after a failed attempt, starts in this wake-up when its time comes.
+    context.wake();
   }
 }
