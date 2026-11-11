@@ -128,8 +128,7 @@ struct AgentPostView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(OrbPalette.of(agent.look).ink(in: colorScheme))
                 }
-                Text(post.text)
-                    .textSelection(.enabled)
+                MarkdownView(blocks: MarkdownBlock.blocks(of: post.text))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
