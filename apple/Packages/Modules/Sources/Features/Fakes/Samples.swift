@@ -49,7 +49,7 @@
               "id": "2f4e6a8c-0b1d-4e3f-8a5c-7d9e1f3a5b7c",
               "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": null,
-              "postId": null,
+              "postId": "a1b2c3d4-0001-4a00-8000-000000000001",
               "startedAt": "2026-11-10T00:00:00Z",
               "endedAt": "2026-11-10T00:04:00Z",
               "lastError": null,
@@ -100,7 +100,7 @@
               "id": "7d3c1f0e-2b4a-4c8e-9f6d-1a2b3c4d5e6f",
               "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": null,
-              "postId": null,
+              "postId": "a1b2c3d4-0002-4a00-8000-000000000002",
               "startedAt": "2026-11-08T20:00:00Z",
               "endedAt": "2026-11-08T20:20:00Z",
               "lastError": "The model did not answer in time.",
@@ -122,7 +122,7 @@
               "id": "9c1e3a5b-7d9f-4b1c-8e2a-4c6e8a0b2d4f",
               "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
               "taskId": null,
-              "postId": null,
+              "postId": "a1b2c3d4-0003-4a00-8000-000000000003",
               "startedAt": "2026-11-10T00:05:00Z",
               "endedAt": null,
               "lastError": null,
@@ -132,6 +132,23 @@
               ]
             }
             """)
+
+        /// The posts the sample runs that a post started reply to, each with its run's first message and start.
+        static let mailPost = post(of: mailRun)
+        static let gaveUpPost = post(of: gaveUpRun)
+        static let sentPost = post(of: sentRun)
+
+        static func post(of run: Run) -> Post {
+            guard let postID = run.postId, case .case1(let first)? = run.messages.first else {
+                preconditionFailure("Sample run \(run.id) doesn't reply to a post.")
+            }
+            return Post(id: postID, text: first.text, createdAt: run.startedAt)
+        }
+
+        /// What the events socket says when a post was sent.
+        static func posted(_ post: Post) -> RunEvent {
+            .case3(.init(_type: .post, post: post))
+        }
 
         /// The model is asked and hasn't written anything yet.
         static let thinking = RunProgress.case2(.init(_type: .thinking))
@@ -160,6 +177,19 @@
                 Agent(id: "new", name: "まだ動いていないエージェント", lastRanAt: nil),
             ]
             + (1...16).map { Agent(id: "pod-\($0)", name: "Pod \($0)", lastRanAt: moment("2026-11-01T00:00:00Z")) }
+
+        /// A group of two agents first, then each agent's one-to-one thread, as the home lists them.
+        static let threads: [ChatThread] =
+            [
+                ChatThread(
+                    id: "team", name: "朝のチーム", agentId: nil, agentIds: ["mail", "stocks"],
+                    lastActivityAt: moment("2026-11-10T00:10:00Z"))
+            ]
+            + agents.map {
+                ChatThread(
+                    id: "thread-\($0.id)", name: $0.name, agentId: $0.id, agentIds: [$0.id],
+                    lastActivityAt: $0.lastRanAt ?? moment("2026-11-01T00:00:00Z"))
+            }
 
         static func moment(_ text: String) -> Date {
             guard let date = try? Date(text, strategy: .iso8601) else {

@@ -1,28 +1,49 @@
 import Backend
 import SwiftUI
 
-/// The user's agents, each with when it last ran. Each opens to its thread, and a new one can be added.
+/// The user's threads in one list, the latest activity first, like a messaging app: each agent's one-to-one thread and
+/// the groups together. Each opens to its thread, and an agent or a group can be added.
 struct HomeScreen: View {
     let directory: any AgentDirectory
     let onSignOut: () -> Void
-    @State private var agents = Loadable<[Agent]>.loading
-    @State private var isAddingAgent = false
+    @State private var home = Loadable<Home>.loading
+    @State private var adding: Adding?
+
+    /// What the home reads: the threads, and the agents, for naming who is in a group and choosing a group's members.
+    struct Home {
+        let threads: [ChatThread]
+        let agents: [Agent]
+
+        var agentNames: [Agent.ID: String] {
+            Dictionary(agents.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        }
+    }
+
+    /// Which sheet for adding is open.
+    enum Adding: String, Identifiable {
+        case agent
+        case group
+        var id: String { rawValue }
+    }
 
     var body: some View {
         LoadableContent(
-            state: agents,
+            state: home,
             onRetry: {
-                agents = .loading
+                home = .loading
                 Task { await load() }
             }
-        ) { agents in
-            List(agents) { agent in
-                NavigationLink(value: agent) {
-                    AgentRow(name: agent.name, lastRanAt: agent.lastRanAt)
+        ) { home in
+            List(home.threads) { thread in
+                NavigationLink(value: thread) {
+                    ThreadRow(thread: thread)
                 }
             }
             .listStyle(.plain)
             .refreshable { await load() }
+            .navigationDestination(for: ChatThread.self) { thread in
+                ThreadScreen(thread: thread, agentNames: home.agentNames, directory: directory)
+            }
         }
         .navigationTitle("Iris")
         #if os(iOS)
@@ -30,51 +51,63 @@ struct HomeScreen: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("エージェントを追加", systemImage: "plus") { isAddingAgent = true }
+                Menu {
+                    Button("エージェントを追加", systemImage: "person.badge.plus") { adding = .agent }
+                    Button("グループを作成", systemImage: "person.3") { adding = .group }
+                        .disabled((home.value?.agents.count ?? 0) < 2)
+                } label: {
+                    Label("追加", systemImage: "plus")
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 AccountMenu(onSignOut: onSignOut)
             }
         }
-        .sheet(isPresented: $isAddingAgent) {
-            NewAgentSheet(
-                directory: directory,
-                onAdded: { _ in Task { await load() } },
-                onSignedOut: { agents = .failed(.signedOut) }
-            )
-        }
-        .navigationDestination(for: Agent.self) { agent in
-            ThreadScreen(agent: directory.agent(id: agent.id), name: agent.name)
+        .sheet(item: $adding) { adding in
+            switch adding {
+            case .agent:
+                NewAgentSheet(
+                    directory: directory,
+                    onAdded: { _ in Task { await load() } },
+                    onSignedOut: { home = .failed(.signedOut) }
+                )
+            case .group:
+                NewGroupSheet(
+                    directory: directory,
+                    agents: home.value?.agents ?? [],
+                    onAdded: { _ in Task { await load() } },
+                    onSignedOut: { home = .failed(.signedOut) }
+                )
+            }
         }
         .task { await load() }
     }
 
     private func load() async {
-        agents = await agents.reading { () async throws(AppError) -> [Agent] in try await directory.agents() }
+        home = await home.reading { () async throws(AppError) -> Home in
+            Home(threads: try await directory.threads(), agents: try await directory.agents())
+        }
     }
 }
 
-/// One agent: its name, and when it last ran.
-private struct AgentRow: View {
-    let name: String
-    let lastRanAt: Date?
+/// One thread: its name, a mark for a group, and when something last happened in it.
+private struct ThreadRow: View {
+    let thread: ChatThread
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(name)
-                .font(.headline)
-                .lineLimit(1)
-            Spacer()
-            HStack(spacing: 4) {
-                if let lastRanAt {
-                    AgoText(date: lastRanAt)
-                    Text("に稼働")
-                } else {
-                    Text("まだ動いていません")
-                }
+            Label {
+                Text(thread.name)
+                    .font(.headline)
+                    .lineLimit(1)
+            } icon: {
+                Image(systemName: thread.agentId == nil ? "person.3.fill" : "person.fill")
+                    .foregroundStyle(.secondary)
             }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
+            Spacer()
+            AgoText(date: thread.lastActivityAt)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 12)
     }
@@ -94,15 +127,19 @@ private struct AccountMenu: View {
 }
 
 #if DEBUG
-    #Preview("エージェント 1 つ") {
+    #Preview("スレッドがたくさん") {
         NavigationStack {
-            HomeScreen(directory: FakeAgentDirectory(listed: Array(Samples.agents.prefix(1)))) {}
+            HomeScreen(directory: FakeAgentDirectory()) {}
         }
     }
 
-    #Preview("エージェントがたくさん") {
+    #Preview("エージェント 1 つ") {
         NavigationStack {
-            HomeScreen(directory: FakeAgentDirectory()) {}
+            HomeScreen(
+                directory: FakeAgentDirectory(
+                    listed: Array(Samples.agents.prefix(1)), threadsListed: Array(Samples.threads.dropFirst().prefix(1))
+                )
+            ) {}
         }
     }
 

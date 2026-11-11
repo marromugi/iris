@@ -104,7 +104,7 @@ actor FakeServer {
             return .failure(SocketRefusal(status: 401, failure: .unexpected))
         }
         if namesNoUser { return .failure(SocketRefusal(status: 403, failure: .unexpected)) }
-        guard request.url?.path == "/api/agents/\(Self.agentID)/events" else {
+        guard request.url?.path == "/api/threads/\(Self.agentID)/events" else {
             return .failure(SocketRefusal(status: 404, failure: .unexpected))
         }
         return .success(socketScript)
@@ -176,6 +176,11 @@ actor FakeServer {
             return Self.answer(
                 request, 200, #"[{"id":"\#(Self.agentID)","name":"エージェント","lastRanAt":"2026-11-09T22:00:00Z"}]"#)
         }
+        // The agent's ID also names its one-to-one thread here.
+        let threadPath = "/api/threads/\(Self.agentID)"
+        if path.hasPrefix("\(threadPath)/") {
+            return thread(request, rest: String(path.dropFirst(threadPath.count)))
+        }
         let agentPath = "/api/agents/\(Self.agentID)"
         guard path.hasPrefix("\(agentPath)/") else {
             return Self.answer(request, 404, #"{"message":"No agent of this user has this ID"}"#)
@@ -209,7 +214,15 @@ actor FakeServer {
             }
             tasks.remove(at: index)
             return Self.answer(request, 204, "")
-        case ("POST", "/messages"):
+        default:
+            return Self.answer(request, 404, #"{"message":"Not found"}"#)
+        }
+    }
+
+    /// The agent's one-to-one thread, as `/api/threads/{threadId}` answers.
+    private func thread(_ request: URLRequest, rest: String) -> (Data, URLResponse) {
+        switch (request.httpMethod, rest) {
+        case ("POST", "/posts"):
             struct Sent: Decodable { let text: String }
             guard request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/json") == true,
                 let body = request.httpBody, let sent = try? JSONDecoder().decode(Sent.self, from: body)
@@ -220,12 +233,12 @@ actor FakeServer {
             }
             return Self.answer(
                 request, 202,
-                #"{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":null,"startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"\#(sent.text)"}]}"#
+                #"{"post":{"id":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","text":"\#(sent.text)","createdAt":"2026-11-10T09:00:00Z"},"runs":[{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"\#(sent.text)"}]}]}"#
             )
-        case ("GET", "/runs"):
+        case ("GET", "/entries"):
             return Self.answer(
                 request, 200,
-                #"[{"id":"8e2a4c6b-1d3f-4a5b-9c7d-2e4f6a8b0c1d","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":null,"startedAt":"2026-11-09T22:00:00Z","endedAt":"2026-11-09T22:00:07Z","lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"天気を教えて"},{"role":"assistant","parts":[{"type":"tool-call","id":"call-1","name":"weather","input":{"city":"Tokyo"}}]},{"role":"tool","callId":"call-1","isError":false,"content":"雨"},{"role":"assistant","parts":[{"type":"text","text":"傘を持っていきましょう。"}]}]}]"#
+                #"[{"type":"run","run":{"id":"8e2a4c6b-1d3f-4a5b-9c7d-2e4f6a8b0c1d","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2918","startedAt":"2026-11-09T22:00:00Z","endedAt":"2026-11-09T22:00:07Z","lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"天気を教えて"},{"role":"assistant","parts":[{"type":"tool-call","id":"call-1","name":"weather","input":{"city":"Tokyo"}}]},{"role":"tool","callId":"call-1","isError":false,"content":"雨"},{"role":"assistant","parts":[{"type":"text","text":"傘を持っていきましょう。"}]}]}},{"type":"post","post":{"id":"7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2918","text":"天気を教えて","createdAt":"2026-11-09T22:00:00Z"}}]"#
             )
         default:
             return Self.answer(request, 404, #"{"message":"Not found"}"#)

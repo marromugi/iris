@@ -74,7 +74,7 @@ struct TaskListTests {
     }
 
     @Test func aReadThatStartedBeforeARemovalIsDropped() async {
-        let backend = HeldReads(FakeAgentBackend())
+        let backend = HeldTaskReads(FakeAgentBackend())
         let list = TaskList(backend: backend)
         let firstRead = Task { await list.load() }
         await backend.release()

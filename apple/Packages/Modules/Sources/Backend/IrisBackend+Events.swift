@@ -4,7 +4,7 @@ import OSLog
 private let log = Logger(subsystem: "dev.marromugi.iris", category: "backend")
 
 extension IrisBackend {
-    /// Follows the agent's events: opens its socket with the user's token, calls `onOpen` once it is open, then
+    /// Follows the thread's events: opens its socket with the user's token, calls `onOpen` once it is open, then
     /// `onEvent` for each event, and returns when the socket closes. Cancelling the task closes it, even while it is
     /// opening. While it is open, the server is pinged every `socketPings.every`; a socket whose ping goes unanswered
     /// for `socketPings.answerWithin` is taken for dead and closed, as a connection can die without a word.
@@ -13,11 +13,11 @@ extension IrisBackend {
     /// user, the sign-in ends and this throws `.signedOut`, as every call does. A socket that can't be reached throws
     /// `.offline`; an answer or event the app does not expect, `.unexpected`.
     public func followEvents(
-        of agentID: Agent.ID,
+        of threadID: ChatThread.ID,
         onOpen: @Sendable () async -> Void,
         onEvent: @Sendable (RunEvent) async -> Void
     ) async throws(AppError) {
-        let socket = try await openEvents(of: agentID)
+        let socket = try await openEvents(of: threadID)
         defer { socket.close() }
         if Task.isCancelled { throw .cancelled }
         await onOpen()
@@ -62,11 +62,11 @@ extension IrisBackend {
         }
     }
 
-    private func openEvents(of agentID: Agent.ID) async throws(AppError) -> any EventSocket {
+    private func openEvents(of threadID: ChatThread.ID) async throws(AppError) -> any EventSocket {
         var token = try await vault.accessToken()
         var refreshed = false
         while true {
-            let socket = openSocket(try eventsRequest(of: agentID, token: token))
+            let socket = openSocket(try eventsRequest(of: threadID, token: token))
             do throws(SocketRefusal) {
                 try await socket.open()
                 return socket
@@ -88,10 +88,10 @@ extension IrisBackend {
         }
     }
 
-    private func eventsRequest(of agentID: Agent.ID, token: String) throws(AppError) -> URLRequest {
+    private func eventsRequest(of threadID: ChatThread.ID, token: String) throws(AppError) -> URLRequest {
         guard var url = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { throw .unexpected }
         url.scheme = url.scheme == "http" ? "ws" : "wss"
-        url.path = "/api/agents/\(agentID)/events"
+        url.path = "/api/threads/\(threadID)/events"
         guard let socketURL = url.url else { throw .unexpected }
         var request = URLRequest(url: socketURL)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
