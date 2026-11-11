@@ -27,8 +27,13 @@ struct ThreadScreen: View {
                     ForEach(entries.reversed()) { entry in
                         switch entry {
                         case .post(let post):
-                            UserBubble(text: post.text)
+                            if let asker = post.agentId {
+                                AgentPostView(post: post, agent: agents[asker])
+                            } else {
+                                UserBubble(text: post.text)
+                            }
                         case .run(let run):
+                            // A group's or a consult's runs show whose they are.
                             if thread.agentId == nil {
                                 GroupRunView(run: run, progress: open.progress[run.id], agent: agents[run.agentId])
                             } else {
@@ -52,7 +57,10 @@ struct ThreadScreen: View {
             }
             .refreshable { await open.load() }
             .safeAreaInset(edge: .bottom) {
-                MessageBar(text: $open.draft, canSend: open.canSend) { open.send() }
+                // A consult is only for reading: the agents ask and answer in it.
+                if thread.consultRunId == nil {
+                    MessageBar(text: $open.draft, canSend: open.canSend) { open.send() }
+                }
             }
         }
         .navigationTitle(thread.name)
@@ -103,6 +111,16 @@ struct ThreadScreen: View {
             ThreadScreen(
                 thread: Samples.threads[1], agents: agents,
                 directory: FakeAgentDirectory(thread: FakeThreadBackend(.init(runs: [], posts: []))))
+        }
+    }
+
+    #Preview("相談（読むだけ）") {
+        NavigationStack {
+            ThreadScreen(
+                thread: ChatThread(
+                    id: "consult", name: "株価の確認", agentId: nil, consultRunId: "run", agentIds: ["mail", "stocks"],
+                    lastActivityAt: Samples.moment("2026-11-10T00:10:00Z")),
+                agents: agents, directory: FakeAgentDirectory())
         }
     }
 #endif

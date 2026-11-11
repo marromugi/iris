@@ -151,6 +151,13 @@
             "items": {
               "$ref": "#/components/schemas/Message"
             }
+          },
+          "consults": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Consult"
+            },
+            "description": "The consults its agent asked in, the first asked first"
           }
         },
         "required": [
@@ -162,7 +169,8 @@
           "endedAt",
           "lastError",
           "failedAttempts",
-          "messages"
+          "messages",
+          "consults"
         ]
       },
       "Message": {
@@ -279,6 +287,72 @@
               "content"
             ]
           }
+        ]
+      },
+      "Consult": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "description": "The ask_agent tool call that asked"
+          },
+          "thread": {
+            "$ref": "#/components/schemas/Thread"
+          }
+        },
+        "required": [
+          "callId",
+          "thread"
+        ]
+      },
+      "Thread": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "The group's name, the agent's in its one-to-one thread, or in a consult the agent asked"
+          },
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The agent whose one-to-one thread this is; null for a group or a consult"
+          },
+          "consultRunId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "For a consult, the run whose agent asked in it; null otherwise. A consult is only for reading"
+          },
+          "agentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The members, in the order they were added as agents"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was made, a post was sent, or a run started, whichever came last"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "agentId",
+          "consultRunId",
+          "agentIds",
+          "lastActivityAt"
         ]
       },
       "RunProgress": {
@@ -535,47 +609,6 @@
         },
         "required": [
           "text"
-        ]
-      },
-      "Thread": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string",
-            "description": "The group's name, or the agent's in its one-to-one thread"
-          },
-          "agentId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The agent whose one-to-one thread this is; null for a group"
-          },
-          "agentIds": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "description": "The members, in the order they were added as agents"
-          },
-          "lastActivityAt": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When it was made, a post was sent, or a run started, whichever came last"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "agentId",
-          "agentIds",
-          "lastActivityAt"
         ]
       },
       "NewGroup": {

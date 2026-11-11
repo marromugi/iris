@@ -59,6 +59,12 @@ test("an agent asks another in a consult and carries on with the answer", async 
   });
   const [run] = (await userAgent().recentRuns(asker)) ?? [];
   expect(run?.endedAt).not.toBeNull();
+  expect(run?.consults).toEqual([
+    {
+      callId: "call-1",
+      thread: expect.objectContaining({ name: "株価", consultRunId: run?.id, agentId: null }),
+    },
+  ]);
   expect(run?.messages.at(-1)).toEqual(reply("株価は上がっているそうです。"));
 
   const threads = await userAgent().listThreads();

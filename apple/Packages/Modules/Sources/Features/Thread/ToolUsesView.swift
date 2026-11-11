@@ -50,6 +50,12 @@ private struct ToolUseTimeline: View {
                                 .lineLimit(4)
                                 .textSelection(.enabled)
                         }
+                        if let consult = use.consult {
+                            NavigationLink(value: consult) {
+                                Label("\(consult.name)との相談を見る", systemImage: "bubble.left.and.bubble.right")
+                            }
+                            .padding(.top, 4)
+                        }
                     }
                     .font(.subheadline)
                 }

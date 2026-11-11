@@ -239,7 +239,7 @@ struct IrisBackendTests {
         let backend = backend()
         try await signIn(backend)
         await server.sendOnEvents([
-            #"{"type":"run","run":{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":null,"startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"こんにちは"}]}}"#,
+            #"{"type":"run","run":{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":null,"startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"consults":[],"messages":[{"role":"user","text":"こんにちは"}]}}"#,
             #"{"type":"progress","runId":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","progress":{"type":"writing","text":"こん"}}"#,
         ])
         let heard = Mutex<[String]>([])

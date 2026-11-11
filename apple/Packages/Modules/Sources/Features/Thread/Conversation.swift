@@ -24,6 +24,8 @@ struct Conversation: Equatable {
         let id: Int
         let name: String
         let result: ToolResult?
+        /// The consult the call asked in, when it asked another agent.
+        var consult: ChatThread?
     }
 
     struct ToolResult: Equatable {
@@ -35,7 +37,13 @@ struct Conversation: Equatable {
     let prompt: String?
     let blocks: [Block]
 
-    init(_ messages: [RunMessage]) {
+    /// A run's conversation, its tool calls that asked another agent with their consults.
+    init(_ run: Run) {
+        self.init(run.messages, consults: run.consults)
+    }
+
+    init(_ messages: [RunMessage], consults: [Consult] = []) {
+        let consultByCall = Dictionary(consults.map { ($0.callId, $0.thread) }, uniquingKeysWith: { first, _ in first })
         // The generator numbers the cases in the order of the oneOf in openapi.json: user, assistant, tool; and for an
         // assistant's parts, text, tool call.
         //
@@ -72,7 +80,9 @@ struct Conversation: Equatable {
                         kinds.append(.assistant(text.text))
                     case .case2(let call):
                         tools.append(
-                            ToolUse(id: calls, name: call.name, result: calls < results.count ? results[calls] : nil))
+                            ToolUse(
+                                id: calls, name: call.name, result: calls < results.count ? results[calls] : nil,
+                                consult: consultByCall[call.id]))
                         calls += 1
                     }
                 }

@@ -10,6 +10,8 @@ public typealias ChatThread = Components.Schemas.Thread
 public typealias NewGroup = Components.Schemas.NewGroup
 /// What the user said in a thread.
 public typealias Post = Components.Schemas.Post
+/// A consult a run's agent asked in: the tool call that asked, and the consult's thread.
+public typealias Consult = Components.Schemas.Consult
 /// A post or a run of a thread.
 public typealias ThreadEntry = Components.Schemas.ThreadEntry
 /// A post sent, with the runs that reply to it as they start.

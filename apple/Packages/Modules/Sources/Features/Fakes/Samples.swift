@@ -29,6 +29,7 @@
               "endedAt": "2026-11-09T22:00:07Z",
               "lastError": null,
               "failedAttempts": 0,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "\(weatherTask.prompt)"},
                 {"role": "assistant", "parts": [
@@ -54,6 +55,7 @@
               "endedAt": "2026-11-10T00:04:00Z",
               "lastError": null,
               "failedAttempts": 0,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "昨日届いたメールを確認して、返信が必要そうなものをトリアージして教えて"},
                 {"role": "assistant", "parts": [
@@ -88,6 +90,7 @@
               "endedAt": null,
               "lastError": "The model did not answer in time.",
               "failedAttempts": 1,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "\(newsTask.prompt)"}
               ]
@@ -105,6 +108,7 @@
               "endedAt": "2026-11-08T20:20:00Z",
               "lastError": "The model did not answer in time.",
               "failedAttempts": 3,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "今週の予定を確かめて、空いている夜を教えて。"},
                 {"role": "assistant", "parts": [
@@ -127,6 +131,7 @@
               "endedAt": null,
               "lastError": null,
               "failedAttempts": 0,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "請求書の件、返信の下書きを作って。"}
               ]

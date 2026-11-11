@@ -11,7 +11,7 @@ struct RunView: View {
     var progress: RunProgress?
 
     var body: some View {
-        let conversation = Conversation(run.messages)
+        let conversation = Conversation(run)
         let status = RunStatus(of: run, progress: progress)
         VStack(alignment: .leading, spacing: 24) {
             if run.postId == nil {
@@ -84,7 +84,7 @@ private struct GroupRunMessage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            ForEach(Conversation(run.messages).blocks) { block in
+            ForEach(Conversation(run).blocks) { block in
                 BlockView(kind: block.kind)
             }
             switch status {
@@ -100,6 +100,38 @@ private struct GroupRunMessage: View {
                 }
                 RunEnd(status: status, endedAt: run.endedAt, lastError: progress == nil ? run.lastError : nil)
             }
+        }
+    }
+}
+
+/// A question an agent asked in a consult, set in from the left like the answers: the agent's name on top, and its orb
+/// at the foot.
+struct AgentPostView: View {
+    let post: Post
+    /// The agent that asked; nil when the thread doesn't know it.
+    let agent: Agent?
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            Group {
+                if let agent {
+                    AgentOrb(look: agent.look, size: GroupRunView.gutter)
+                }
+            }
+            .frame(width: GroupRunView.gutter)
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                if let agent {
+                    Text(agent.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(OrbPalette.of(agent.look).ink(in: colorScheme))
+                }
+                Text(post.text)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

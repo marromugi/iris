@@ -234,12 +234,12 @@ actor FakeServer {
             }
             return Self.answer(
                 request, 202,
-                #"{"post":{"id":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","agentId":null,"text":"\#(sent.text)","createdAt":"2026-11-10T09:00:00Z"},"runs":[{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"\#(sent.text)"}]}]}"#
+                #"{"post":{"id":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","agentId":null,"text":"\#(sent.text)","createdAt":"2026-11-10T09:00:00Z"},"runs":[{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"consults":[],"messages":[{"role":"user","text":"\#(sent.text)"}]}]}"#
             )
         case ("GET", "/entries"):
             return Self.answer(
                 request, 200,
-                #"[{"type":"run","run":{"id":"8e2a4c6b-1d3f-4a5b-9c7d-2e4f6a8b0c1d","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2918","startedAt":"2026-11-09T22:00:00Z","endedAt":"2026-11-09T22:00:07Z","lastError":null,"failedAttempts":0,"messages":[{"role":"user","text":"天気を教えて"},{"role":"assistant","parts":[{"type":"tool-call","id":"call-1","name":"weather","input":{"city":"Tokyo"}}]},{"role":"tool","callId":"call-1","isError":false,"content":"雨"},{"role":"assistant","parts":[{"type":"text","text":"傘を持っていきましょう。"}]}]}},{"type":"post","post":{"id":"7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2918","agentId":null,"text":"天気を教えて","createdAt":"2026-11-09T22:00:00Z"}}]"#
+                #"[{"type":"run","run":{"id":"8e2a4c6b-1d3f-4a5b-9c7d-2e4f6a8b0c1d","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2918","startedAt":"2026-11-09T22:00:00Z","endedAt":"2026-11-09T22:00:07Z","lastError":null,"failedAttempts":0,"consults":[],"messages":[{"role":"user","text":"天気を教えて"},{"role":"assistant","parts":[{"type":"tool-call","id":"call-1","name":"weather","input":{"city":"Tokyo"}}]},{"role":"tool","callId":"call-1","isError":false,"content":"雨"},{"role":"assistant","parts":[{"type":"text","text":"傘を持っていきましょう。"}]}]}},{"type":"post","post":{"id":"7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2918","agentId":null,"text":"天気を教えて","createdAt":"2026-11-09T22:00:00Z"}}]"#
             )
         default:
             return Self.answer(request, 404, #"{"message":"Not found"}"#)

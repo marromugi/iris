@@ -547,6 +547,7 @@ test("a message starts a run due at once, which the model answers after the agen
       lastError: null,
       failedAttempts: 0,
       messages: [{ role: "user", text: "Which one is urgent?" }],
+      consults: [],
     },
   });
   const alarm = await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm());

@@ -648,6 +648,8 @@ export interface Run {
   readonly lastError: string | null;
   readonly failedAttempts: number;
   readonly messages: Message[];
+  /** The consults its agent asked in, by the tool call that asked. */
+  readonly consults: readonly { readonly callId: string; readonly thread: Thread }[];
 }
 
 function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Run {
@@ -662,7 +664,34 @@ function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Ru
     lastError: row.lastError,
     failedAttempts: row.failedAttempts,
     messages: loadConversation(storage, row.id),
+    consults: consultsOf(storage, row.id),
   };
+}
+
+/** The consults the run's agent asked in, by the tool call that asked, the first asked first. */
+function consultsOf(
+  storage: DurableObjectStorage,
+  runId: string,
+): { callId: string; thread: Thread }[] {
+  const asked = database(storage)
+    .select({ callId: posts.callId, threadId: posts.threadId })
+    .from(posts)
+    .innerJoin(threads, eq(threads.id, posts.threadId))
+    .where(eq(threads.consultRunId, runId))
+    .orderBy(asc(posts.createdAt), asc(posts.id))
+    .all();
+  if (asked.length === 0) {
+    return [];
+  }
+  const consults = new Map(
+    allThreads(storage)
+      .filter((thread) => thread.consultRunId === runId)
+      .map((thread) => [thread.id, thread]),
+  );
+  return asked.flatMap(({ callId, threadId }) => {
+    const thread = consults.get(threadId);
+    return callId === null || thread === undefined ? [] : [{ callId, thread }];
+  });
 }
 
 export function agentOfRun(storage: DurableObjectStorage, runId: string): string | undefined {
