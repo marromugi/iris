@@ -2,46 +2,76 @@
 #include <SwiftUI/SwiftUI_Metal.h>
 using namespace metal;
 
-static float noiseHash(float n) {
-    return fract(sin(n * 127.1) * 43758.5453);
+// Two shapes as one, by their distance to the edge: where they come close they pull toward each other and melt
+// together, so a droplet leaving or coming back stretches a neck like a liquid.
+static float smoothUnion(float a, float b, float melt) {
+    float h = max(melt - abs(a - b), 0.0) / melt;
+    return min(a, b) - h * h * melt * 0.25;
 }
 
-// The shape a cycle aims for: how far each of 2, 3 and 4 lobes bulges, where it points, and how fast it turns.
-static float lobeAmount(float cycle, int lobes) {
-    return 0.035 + 0.075 * noiseHash(cycle * 7.0 + float(lobes));
+static float easeOut(float x) {
+    return 1.0 - pow(1.0 - x, 3.0);
 }
 
-static float lobeTurn(float cycle, int lobes) {
-    return noiseHash(cycle * 7.0 + float(lobes) + 3.1) * 6.2831;
+static float easeIn(float x) {
+    return x * x * x;
 }
 
-// A blob in one colour, the colour of what it is drawn over, that never stops changing shape: it flows from one
-// organic shape into the next, turns, and breathes a little. Its edge is crisp, and a soft shade drifts across it.
-// `energy`, from 0 to 1, makes all of it quicker.
+// Goes a little past 1 before settling, so the drop swells as it takes a droplet back.
+static float easeOutBack(float x) {
+    const float pull = 1.7;
+    return 1.0 + (pull + 1.0) * pow(x - 1.0, 3.0) + pull * pow(x - 1.0, 2.0);
+}
+
+// A drop in one colour, the colour of what it is drawn over. Each round it sends four droplets out one by one, a
+// quarter turn apart. Each circles the drop like a satellite on a tilted orbit, all the same way, growing as it
+// swings near and shrinking as it swings away. It takes them back in the order they left, swells with each one it
+// takes, and shrinks to where it started. Its edge is crisp, and a soft shade drifts across it. `energy`, from 0 to
+// 1, makes all of it quicker.
 [[ stitchable ]] half4 thinkingBlob(float2 position, half4 color, float2 size, float time, float energy) {
     float2 uv = position / size * 2.0 - 1.0;
 
-    float pace = 0.6 + 1.2 * energy;
-    float period = 2.6 - 1.2 * energy;
-    float cycle = floor(time / period);
-    float blend = smoothstep(0.0, 1.0, fract(time / period));
-    float breathe = 1.0 - 0.07 * (0.5 + 0.5 * sin(time * 2.4 * pace));
+    const float rest = 0.27;
+    const float full = 0.54;
+    const float droplet = 0.17;
+    const float reach = 0.66;
+    // How round the orbit looks (1 is a circle), and how much nearer and farther change a droplet's size.
+    const float roundness = 0.9;
+    const float depth = 0.4;
+    const float melt = 0.16;
 
-    float radius = length(uv) / breathe;
-    float angle = atan2(uv.y, uv.x) + time * 0.5 * pace;
-    float wobble = 0.0;
-    for (int lobes = 2; lobes <= 4; lobes++) {
-        float amount = mix(lobeAmount(cycle, lobes), lobeAmount(cycle + 1.0, lobes), blend);
-        float turn = mix(lobeTurn(cycle, lobes), lobeTurn(cycle + 1.0, lobes), blend);
-        wobble += amount * sin(float(lobes) * angle + turn + time * pace * (0.7 + 0.2 * float(lobes)));
+    float period = 4.2 - 1.0 * energy;
+    float progress = fract(time / period);
+
+    float swallowed = 0.0;
+    float droplets = 1e3;
+    for (int i = 0; i < 4; i++) {
+        float leaves = 0.02 + float(i) * 0.09;
+        float returns = 0.48 + float(i) * 0.075;
+        float outward = easeOut(saturate((progress - leaves) / 0.16));
+        float homeward = easeIn(saturate((progress - returns) / 0.12));
+        float away = outward - homeward;
+        swallowed += easeOutBack(saturate((homeward - 0.6) / 0.4)) / 4.0;
+
+        // One turn a round, so the orbit is where it started when the next round begins.
+        float turn = 2.0 * M_PI_F * (progress - leaves);
+        float2 onOrbit = reach * away * float2(cos(turn), roundness * sin(turn));
+        // Leaves where it will stay a quarter turn behind the one before, however far that one has turned since.
+        float heading = -M_PI_F / 2.0 + float(i) * M_PI_F / 2.0 + 2.0 * M_PI_F * leaves;
+        float2 at = float2(
+            onOrbit.x * cos(heading) - onOrbit.y * sin(heading), onOrbit.x * sin(heading) + onOrbit.y * cos(heading));
+        float nearness = 1.0 + depth * sin(turn) * away;
+        droplets = smoothUnion(droplets, length(uv - at) - droplet * nearness, melt);
     }
-    float edge = 0.66 + wobble;
-    // About a point and a half of softening, so the edge stays crisp at any size.
-    float soft = 3.0 / max(size.x, 1.0) / breathe;
-    float alpha = 1.0 - smoothstep(edge - soft, edge, radius);
+    float radius = mix(mix(rest, full, swallowed), rest, smoothstep(0.87, 0.99, progress));
+    float edge = smoothUnion(length(uv) - radius, droplets, melt);
 
-    // A shade that drifts across the blob: full ink on one side, lighter on the other.
-    float drift = time * 0.5 * pace;
+    // About a point of softening, so the edge stays crisp at any size.
+    float soft = 2.0 / max(size.x, 1.0);
+    float alpha = 1.0 - smoothstep(-soft * 0.5, soft * 0.5, edge);
+
+    // A shade that drifts across the drop: full ink on one side, lighter on the other.
+    float drift = time * (0.3 + 0.6 * energy);
     float2 towards = float2(cos(drift), sin(drift));
     float shade = 0.72 + 0.28 * smoothstep(-0.7, 0.7, dot(uv, towards));
 
