@@ -29,6 +29,7 @@
               "endedAt": "2026-11-09T22:00:07Z",
               "lastError": null,
               "failedAttempts": 0,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "\(weatherTask.prompt)"},
                 {"role": "assistant", "parts": [
@@ -54,6 +55,7 @@
               "endedAt": "2026-11-10T00:04:00Z",
               "lastError": null,
               "failedAttempts": 0,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "昨日届いたメールを確認して、返信が必要そうなものをトリアージして教えて"},
                 {"role": "assistant", "parts": [
@@ -88,6 +90,7 @@
               "endedAt": null,
               "lastError": "The model did not answer in time.",
               "failedAttempts": 1,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "\(newsTask.prompt)"}
               ]
@@ -105,6 +108,7 @@
               "endedAt": "2026-11-08T20:20:00Z",
               "lastError": "The model did not answer in time.",
               "failedAttempts": 3,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "今週の予定を確かめて、空いている夜を教えて。"},
                 {"role": "assistant", "parts": [
@@ -127,6 +131,7 @@
               "endedAt": null,
               "lastError": null,
               "failedAttempts": 0,
+              "consults": [],
               "messages": [
                 {"role": "user", "text": "請求書の件、返信の下書きを作って。"}
               ]
@@ -200,6 +205,33 @@
                     id: "thread-\($0.id)", name: $0.name, agentId: $0.id, agentIds: [$0.id],
                     lastActivityAt: $0.lastRanAt ?? moment("2026-11-01T00:00:00Z"))
             }
+
+        /// A consult メールの整理 asked 株価の確認 in, with the question and its answer.
+        static let consult = ChatThread(
+            id: "consult", name: "株価の確認", agentId: nil, consultRunId: "asking-run", agentIds: ["mail", "stocks"],
+            lastActivityAt: moment("2026-11-10T00:10:00Z"))
+
+        static let consultQuestion = Post(
+            id: "question", agentId: "mail", text: "今日の株価はどう？", createdAt: moment("2026-11-10T00:09:00Z"))
+
+        static let consultAnswer = run(
+            """
+            {
+              "id": "answer",
+              "agentId": "stocks",
+              "taskId": null,
+              "postId": "question",
+              "startedAt": "2026-11-10T00:09:00Z",
+              "endedAt": "2026-11-10T00:09:20Z",
+              "lastError": null,
+              "failedAttempts": 0,
+              "consults": [],
+              "messages": [
+                {"role": "user", "text": "メールの整理: 今日の株価はどう？"},
+                {"role": "assistant", "parts": [{"type": "text", "text": "朝から少し上がっています。"}]}
+              ]
+            }
+            """)
 
         static func moment(_ text: String) -> Date {
             guard let date = try? Date(text, strategy: .iso8601) else {

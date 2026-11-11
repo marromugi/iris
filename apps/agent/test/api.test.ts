@@ -222,6 +222,7 @@ test("lists an agent's latest runs with their conversations, and when it last ra
     endedAt: expect.any(String),
     lastError: null,
     failedAttempts: 0,
+    consults: [],
     messages: [
       { role: "user", text: "Summarize today's email" },
       { role: "assistant", parts: [{ type: "text", text: "3 new emails." }] },
@@ -250,6 +251,7 @@ test("sends a message to an agent, which starts one of its runs, and says why on
     endedAt: null,
     lastError: null,
     failedAttempts: 0,
+    consults: [],
     messages: [{ role: "user", text: "Hello" }],
   });
   expect(await (await call(userId, `/api/agents/${agentId}/runs`)).json()).toEqual([run]);
@@ -322,6 +324,7 @@ test("makes a group, lists it with the one-to-one threads, and posts in it", asy
     id: expect.any(String),
     name: "チーム",
     agentId: null,
+    consultRunId: null,
     agentIds: [first, second.id],
     lastActivityAt: expect.any(String),
   });

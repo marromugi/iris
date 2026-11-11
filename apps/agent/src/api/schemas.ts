@@ -45,13 +45,17 @@ export function agentJson(agent: Agent): z.infer<typeof agentSchema> {
 export const threadSchema = z
   .object({
     id: z.uuid(),
-    name: z
-      .string()
-      .meta({ description: "The group's name, or the agent's in its one-to-one thread" }),
-    agentId: z
-      .uuid()
-      .nullable()
-      .meta({ description: "The agent whose one-to-one thread this is; null for a group" }),
+    name: z.string().meta({
+      description:
+        "The group's name, the agent's in its one-to-one thread, or in a consult the agent asked",
+    }),
+    agentId: z.uuid().nullable().meta({
+      description: "The agent whose one-to-one thread this is; null for a group or a consult",
+    }),
+    consultRunId: z.uuid().nullable().meta({
+      description:
+        "For a consult, the run whose agent asked in it; null otherwise. A consult is only for reading",
+    }),
     agentIds: z
       .array(z.uuid())
       .meta({ description: "The members, in the order they were added as agents" }),
@@ -66,6 +70,7 @@ export function threadJson(thread: Thread): z.infer<typeof threadSchema> {
     id: thread.id,
     name: thread.name,
     agentId: thread.agentId,
+    consultRunId: thread.consultRunId,
     agentIds: [...thread.agentIds],
     lastActivityAt: timeJson(thread.lastActivityAt),
   };
@@ -154,6 +159,16 @@ export const runSchema = z
     lastError: z.string().nullable(),
     failedAttempts: z.int().nonnegative(),
     messages: z.array(messageSchema),
+    consults: z
+      .array(
+        z
+          .object({
+            callId: z.string().meta({ description: "The ask_agent tool call that asked" }),
+            thread: threadSchema,
+          })
+          .meta({ id: "Consult" }),
+      )
+      .meta({ description: "The consults its agent asked in, the first asked first" }),
   })
   .meta({ id: "Run" });
 
@@ -168,6 +183,7 @@ export function runJson(run: Run): z.infer<typeof runSchema> {
     lastError: run.lastError,
     failedAttempts: run.failedAttempts,
     messages: run.messages,
+    consults: run.consults.map(({ callId, thread }) => ({ callId, thread: threadJson(thread) })),
   };
 }
 

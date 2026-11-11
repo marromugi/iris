@@ -60,7 +60,7 @@
                     Run(
                         id: "sent-\(answers.runs.count + index + 1)", agentId: agentID, postId: post.id,
                         startedAt: answers.sentAt, failedAttempts: 0,
-                        messages: [.case1(.init(role: .user, text: text))])
+                        messages: [.case1(.init(role: .user, text: text))], consults: [])
                 }
                 answers.posts.append(post)
                 answers.runs.insert(contentsOf: runs, at: 0)

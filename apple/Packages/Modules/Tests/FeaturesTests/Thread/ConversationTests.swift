@@ -36,4 +36,18 @@ struct ConversationTests {
                 ])
             ])
     }
+
+    @Test func onlyTheToolCallThatAskedCarriesItsConsult() {
+        var run = Samples.mailRun
+        let consult = ChatThread(
+            id: "consult-1", name: "株価の確認", agentId: nil, consultRunId: run.id, agentIds: ["mail", "stocks"],
+            lastActivityAt: Samples.moment("2026-11-10T00:01:00Z"))
+        run.consults = [Consult(callId: "call-2", thread: consult), Consult(callId: "call-9", thread: consult)]
+
+        let uses = Conversation(run).blocks.flatMap { block -> [Conversation.ToolUse] in
+            if case .tools(let uses) = block.kind { uses } else { [] }
+        }
+
+        #expect(uses.map(\.consult) == [nil, consult, nil])
+    }
 }
