@@ -33,6 +33,10 @@ actor FakeServer {
     private var holdsRefreshAnswers = false
     /// The time zone the app last set, nil until it sets one.
     private(set) var timeZone: String?
+    /// The mail address the user has, as `/api/me/mail` names it; nil until one is made.
+    private(set) var mailAddress: String?
+    /// How many times the app let go of Gmail's confirmation.
+    private(set) var confirmationsDismissed = 0
     /// Whether the agent is active, as deactivating and activating left it.
     private var agentActive = true
     private var heldRefreshAnswers: [CheckedContinuation<Void, Never>] = []
@@ -175,6 +179,11 @@ actor FakeServer {
     }
 
     /// `/api` as the real one answers it, for the requests the app sends.
+    private var mailSetupJSON: String {
+        let address = mailAddress.map { #""\#($0)""# } ?? "null"
+        return #"{"address":\#(address),"confirmation":null,"lastMailAt":null}"#
+    }
+
     private func api(_ request: URLRequest, path: String) -> (Data, URLResponse) {
         if request.httpMethod == "GET", path == "/api/agents" {
             return Self.answer(
@@ -191,6 +200,21 @@ actor FakeServer {
             }
             timeZone = sent.timeZone
             return Self.answer(request, 204, "")
+        }
+        switch (request.httpMethod, path) {
+        case ("GET", "/api/me/mail"):
+            return Self.answer(request, 200, mailSetupJSON)
+        case ("POST", "/api/me/mail/address"):
+            mailAddress = "iris+0123456789abcdef01234567@marromugi.me"
+            return Self.answer(request, 200, mailSetupJSON)
+        case ("DELETE", "/api/me/mail/address"):
+            mailAddress = nil
+            return Self.answer(request, 204, "")
+        case ("DELETE", "/api/me/mail/confirmation"):
+            confirmationsDismissed += 1
+            return Self.answer(request, 204, "")
+        default:
+            break
         }
         // The agent's ID also names its one-to-one thread here.
         let threadPath = "/api/threads/\(Self.agentID)"

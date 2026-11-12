@@ -186,6 +186,21 @@ struct IrisBackendTests {
         }
     }
 
+    @Test func makesStopsAndReadsTheMailSetup() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        let none = try await backend.mailSetup()
+        let made = try await backend.makeMailAddress()
+        try await backend.dismissMailConfirmation()
+        try await backend.stopMail()
+
+        #expect(none == MailSetup())
+        #expect(made == MailSetup(address: "iris+0123456789abcdef01234567@marromugi.me"))
+        #expect(await server.confirmationsDismissed == 1)
+        #expect(await server.mailAddress == nil)
+    }
+
     @Test func listsTheAgentsAndRefusesOneTheUserDoesNotHave() async throws {
         let backend = backend()
         try await signIn(backend)

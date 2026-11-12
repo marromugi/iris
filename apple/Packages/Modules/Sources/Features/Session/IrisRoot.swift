@@ -54,6 +54,7 @@ public struct IrisRoot: View {
         case .signedIn:
             NavigationStack {
                 HomeScreen(directory: agents) {
+                    mail.reset()
                     Task { await session.signOut() }
                 }
             }

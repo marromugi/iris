@@ -183,6 +183,7 @@ private struct ThreadPicture: View {
         NavigationStack {
             HomeScreen(directory: FakeAgentDirectory()) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 
     #Preview("エージェント 1 つ") {
@@ -193,6 +194,7 @@ private struct ThreadPicture: View {
                 )
             ) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 
     #Preview("停止中のエージェント") {
@@ -206,11 +208,13 @@ private struct ThreadPicture: View {
                     })
             ) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 
     #Preview("読み込めない") {
         NavigationStack {
             HomeScreen(directory: FakeAgentDirectory(failure: .offline)) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 #endif

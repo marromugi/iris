@@ -12,9 +12,13 @@
             var stop: Result<Void, AppError> = .success(())
             var dismiss: Result<Void, AppError> = .success(())
             var follow: AppError? = nil
-            /// How many times each call was made.
+            /// Whether reads wait for `releaseRead()` before they answer.
+            var holdsReads = false
+            /// How many times each call was made, and each events socket opened.
             var madeAddresses = 0
+            var stopped = 0
             var dismissed = 0
+            var socketsOpened = 0
         }
 
         static let address = "iris+0123456789abcdef01234567@marromugi.me"
@@ -27,6 +31,7 @@
             address: address, lastMailAt: Date(timeIntervalSince1970: 1_794_480_600))
 
         private let answers: Mutex<Answers>
+        private let heldReads = Mutex<[CheckedContinuation<Void, Never>]>([])
         private let events: AsyncStream<UserEvent>
         private let eventSink: AsyncStream<UserEvent>.Continuation
 
@@ -46,10 +51,26 @@
         }
 
         var madeAddresses: Int { answers.withLock { $0.madeAddresses } }
+        var stopped: Int { answers.withLock { $0.stopped } }
         var dismissed: Int { answers.withLock { $0.dismissed } }
+        var socketsOpened: Int { answers.withLock { $0.socketsOpened } }
+        var readsWaiting: Int { heldReads.withLock { $0.count } }
+
+        /// Lets the reads waiting go on, each answering what `setup` says by then.
+        func releaseReads() {
+            for read in heldReads.withLock({ held in
+                defer { held = [] }
+                return held
+            }) {
+                read.resume()
+            }
+        }
 
         func mailSetup() async throws(AppError) -> MailSetup {
-            try answers.withLock { $0.setup }.get()
+            if answers.withLock({ $0.holdsReads }) {
+                await withCheckedContinuation { read in heldReads.withLock { $0.append(read) } }
+            }
+            return try answers.withLock { $0.setup }.get()
         }
 
         func makeMailAddress() async throws(AppError) -> MailSetup {
@@ -60,7 +81,10 @@
         }
 
         func stopMail() async throws(AppError) {
-            try answers.withLock { $0.stop }.get()
+            try answers.withLock {
+                $0.stopped += 1
+                return $0.stop
+            }.get()
         }
 
         func dismissMailConfirmation() async throws(AppError) {
@@ -74,7 +98,11 @@
             onOpen: @Sendable () async -> Void,
             onEvent: @Sendable (UserEvent) async -> Void
         ) async throws(AppError) {
-            if let failure = answers.withLock({ $0.follow }) { throw failure }
+            let failure = answers.withLock {
+                $0.socketsOpened += 1
+                return $0.follow
+            }
+            if let failure { throw failure }
             await onOpen()
             for await event in events {
                 await onEvent(event)

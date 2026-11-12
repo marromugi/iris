@@ -24,6 +24,10 @@ struct MailConfirmationSheet: View {
                     if let code = confirmation.code {
                         LabeledContent("確認コード", value: code)
                             .textSelection(.enabled)
+                        Text("リンクの代わりに、Gmail の転送の設定でこのコードを入れても確認できます。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
                     }
                     if let url = URL(string: confirmation.url) {
                         Button("リンクを開く") {

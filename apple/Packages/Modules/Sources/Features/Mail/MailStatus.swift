@@ -29,7 +29,7 @@ enum MailStatus: Equatable {
         switch self {
         case .noAddress: "未設定"
         case .waiting: "設定中"
-        case .confirmationArrived: "確認待ち"
+        case .confirmationArrived: "要確認"
         case .receiving: "受け取り中"
         }
     }

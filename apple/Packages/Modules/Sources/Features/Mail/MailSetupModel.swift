@@ -17,12 +17,8 @@ final class MailSetupModel {
         /// The link was opened: turn forwarding on in Gmail's settings.
         case turnOnForwarding
 
-        var id: String {
-            switch self {
-            case .confirm(let confirmation): "confirm \(confirmation.url)"
-            case .turnOnForwarding: "turn on forwarding"
-            }
-        }
+        /// One for both, so going from one step to the next keeps the sheet up and changes what it shows.
+        var id: String { "mail setup" }
     }
 
     private(set) var setup = Loadable<MailSetup>.loading
@@ -35,6 +31,11 @@ final class MailSetupModel {
 
     /// When the confirmation the user already opened or put off arrived; that one isn't offered again by itself.
     private var handledConfirmationAt: Date?
+    /// Each read and change takes the next number when it starts; `shown` is the number of what the screen shows. A
+    /// read or change that ends after a later one started is dropped, so an answer that left earlier never replaces one
+    /// that left later, as when the event of a new address starts a read before the new address comes back.
+    private var started = 0
+    private var shown = 0
     private var openedAt: ContinuousClock.Instant?
     private let backend: any MailBackend
     private let wait: @Sendable (Duration) async throws -> Void
@@ -52,8 +53,15 @@ final class MailSetupModel {
 
     /// Reads where the setup stands.
     func load() async {
-        let read = await setup.reading { () async throws(AppError) in try await backend.mailSetup() }
-        show(read)
+        let number = start()
+        let result: Result<MailSetup, AppError>
+        do throws(AppError) {
+            result = .success(try await backend.mailSetup())
+        } catch {
+            result = .failure(error)
+        }
+        guard isLatest(number) else { return }
+        show(setup.applying(result))
     }
 
     /// Keeps the setup current while the app is in the foreground: opens the user's events socket, reads the setup
@@ -72,7 +80,8 @@ final class MailSetupModel {
             } catch .cancelled {
                 return
             } catch .signedOut {
-                show(.failed(.signedOut))
+                reset()
+                setup = .failed(.signedOut)
                 return
             } catch {
                 // Counted below, by how long the socket stayed open.
@@ -99,36 +108,48 @@ final class MailSetupModel {
         change { () async throws(AppError) in try await self.backend.makeMailAddress() }
     }
 
-    /// Stops receiving mail: the address goes, and so does the mail kept for the agents.
+    /// Stops receiving mail: the address goes, and so does the mail kept for the agents. The setup is then empty, so
+    /// it isn't read again.
     func stop() {
         change { () async throws(AppError) in
             try await self.backend.stopMail()
-            return try await self.backend.mailSetup()
+            return MailSetup()
         }
     }
 
-    /// The user opened the confirmation's link: what is left is turning forwarding on in Gmail, and the server lets
-    /// go of the confirmation so it isn't offered again.
+    /// The user opened the confirmation's link: what is left is turning forwarding on in Gmail. The confirmation
+    /// stays on the server until that step is closed, so a link that didn't work can be opened again from the mail
+    /// screen.
     func openedConfirmation() {
         guard case .confirm(let confirmation) = offer else { return }
         handledConfirmationAt = confirmation.receivedAt
         offer = .turnOnForwarding
-        Task {
-            do throws(AppError) {
-                try await backend.dismissMailConfirmation()
-            } catch .cancelled {
-            } catch {
-                log.error("Could not let go of the confirmation: \(String(describing: error))")
-            }
-        }
     }
 
-    /// The user closed the sheet. A confirmation closed unopened stays on the mail screen, which can offer it again.
+    /// The user closed the sheet. A confirmation closed unopened stays, and the mail screen can offer it again. Closing
+    /// the last step has the server let go of the confirmation it followed. A confirmation that arrived while the
+    /// sheet showed that step is offered now.
     func closeOffer() {
-        if case .confirm(let confirmation) = offer {
+        switch offer {
+        case .confirm(let confirmation):
             handledConfirmationAt = confirmation.receivedAt
+        case .turnOnForwarding:
+            letGoOfConfirmation()
+        case nil:
+            break
         }
         offer = nil
+        show(setup)
+    }
+
+    /// Forgets the user's setup, as when they sign out, so the next user starts from nothing. A read or change still
+    /// on its way is dropped.
+    func reset() {
+        shown = start()
+        setup = .loading
+        offer = nil
+        problem = nil
+        handledConfirmationAt = nil
     }
 
     /// Offers the confirmation waiting on the server again, as from the mail screen.
@@ -146,17 +167,51 @@ final class MailSetupModel {
         guard !isChanging else { return }
         isChanging = true
         problem = nil
+        let number = start()
+        Task {
+            defer { isChanging = false }
+            let result: Result<MailSetup, AppError>
+            do throws(AppError) {
+                result = .success(try await make())
+            } catch {
+                result = .failure(error)
+            }
+            guard isLatest(number) else { return }
+            switch result {
+            case .success(let made): show(.loaded(made))
+            case .failure(.cancelled): break
+            case .failure(.signedOut): show(.failed(.signedOut))
+            case .failure(let error): problem = error
+            }
+        }
+    }
+
+    /// Has the server let go of the confirmation once its last step is done. A failure leaves it on the server, where
+    /// the mail screen still offers it, and says why.
+    private func letGoOfConfirmation() {
+        let number = start()
         Task {
             do throws(AppError) {
-                show(.loaded(try await make()))
+                try await backend.dismissMailConfirmation()
             } catch .cancelled {
-            } catch .signedOut {
-                show(.failed(.signedOut))
             } catch {
-                problem = error
+                log.error("Could not let go of the confirmation: \(String(describing: error))")
+                if isLatest(number) { problem = error }
             }
-            isChanging = false
         }
+    }
+
+    /// The number of a read or change starting now.
+    private func start() -> Int {
+        started += 1
+        return started
+    }
+
+    /// Whether the read or change numbered `number` is newer than what is shown, and so to be shown; it then is.
+    private func isLatest(_ number: Int) -> Bool {
+        guard number > shown else { return false }
+        shown = number
+        return true
     }
 
     /// Shows what was read, and offers a confirmation that arrived and isn't handled yet. A sheet already asking to
