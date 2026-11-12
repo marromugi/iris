@@ -138,8 +138,9 @@ export function createUserAgent(
 
     /**
      * Sends a post in the thread, and starts a run of each member that replies to it: those
-     * named with @, or every member when none is. Returns the post and its runs as they start.
-     * Empty text comes back as `ok: false`.
+     * named with @, or every member when none is, leaving out deactivated agents. Returns the
+     * post and its runs as they start. Empty text, or a post no active agent would reply to,
+     * comes back as `ok: false`.
      */
     async post(threadId: string, input: NewMessage): Promise<PostResult | undefined> {
       const thread = store.findThread(this.ctx.storage, threadId);

@@ -46,13 +46,13 @@ export function consultTool(context: ConsultContext): Tool | undefined {
   if (run === undefined || store.findThread(storage, run.threadId)?.consultRunId !== null) {
     return undefined;
   }
-  const others = store
-    .listAgents(storage)
-    .filter((agent) => agent.id !== run.agentId && agent.active);
-  if (others.length === 0) {
+  // Read again on each call: an agent deactivated after the run picked its tools isn't asked.
+  const others = () =>
+    store.listAgents(storage).filter((agent) => agent.id !== run.agentId && agent.active);
+  if (others().length === 0) {
     return undefined;
   }
-  const names = others.map((agent) => agent.name);
+  const names = others().map((agent) => agent.name);
   return defineTool({
     name: "ask_agent",
     description: `Ask another of the user's agents a question and wait for its answer, which comes back as this tool's result. The user can read the exchange. The agents you can ask: ${names.join(", ")}.`,
@@ -63,11 +63,12 @@ export function consultTool(context: ConsultContext): Tool | undefined {
     async run({ agent, question }, call) {
       let answerRunId = store.consultAsked(storage, runId, call.id)?.runId;
       if (answerRunId === undefined) {
-        const answerer = others.find((each) => each.name === agent);
+        const askable = others();
+        const answerer = askable.find((each) => each.name === agent);
         if (answerer === undefined) {
           return {
             ok: false,
-            error: `No agent is named "${agent}". You can ask: ${names.join(", ")}.`,
+            error: `No agent is named "${agent}". You can ask: ${askable.map((each) => each.name).join(", ")}.`,
           };
         }
         const threadId = store.findConsult(storage, runId, answerer.id) ?? crypto.randomUUID();
@@ -111,8 +112,7 @@ async function answer(context: ConsultContext, answerRunId: string) {
         ? { ok: true as const, content: answered.reply }
         : { ok: false as const, error: `No answer came: ${answered.failure}` };
     }
-    // A run ended while it waits, by deactivating its agent, stops waiting.
-    if (context.outOfTime() || store.hasRunEnded(context.storage, context.runId)) {
+    if (context.outOfTime()) {
       throw new RunCut();
     }
     await new Promise((resolve) => setTimeout(resolve, ANSWER_CHECK_MS));

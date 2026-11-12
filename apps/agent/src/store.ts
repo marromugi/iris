@@ -270,10 +270,15 @@ export function listAgents(storage: DurableObjectStorage): Agent[] {
 /** Why a run ended by deactivating its agent didn't reply. */
 export const DEACTIVATED_ERROR = "The agent was deactivated before this run ended.";
 
+/** Why a run answering in a consult ended when the agent that asked was deactivated. */
+export const ASKER_DEACTIVATED_ERROR =
+  "The agent that asked was deactivated before this run ended.";
+
 /**
  * Deactivates the agent and ends its runs that haven't ended, so no run in their threads waits on
- * them. Returns the IDs of the runs it ended; undefined when the user has no such agent. An agent
- * already deactivated keeps the time it was first deactivated.
+ * them, and the unended runs answering in the consults those runs asked in, whose answers no one
+ * would read. Returns the IDs of the runs it ended; undefined when the user has no such agent. An
+ * agent already deactivated keeps the time it was first deactivated.
  */
 export function deactivateAgent(
   storage: DurableObjectStorage,
@@ -292,13 +297,28 @@ export function deactivateAgent(
     if (agent.deactivatedAt === null) {
       tx.update(agents).set({ deactivatedAt: at }).where(eq(agents.id, agentId)).run();
     }
-    return tx
+    const own = tx
       .update(runs)
       .set({ endedAt: at, lastError: DEACTIVATED_ERROR })
       .where(and(eq(runs.agentId, agentId), isNull(runs.endedAt)))
       .returning({ id: runs.id })
       .all()
       .map((row) => row.id);
+    if (own.length === 0) {
+      return own;
+    }
+    const consults = tx
+      .select({ id: threads.id })
+      .from(threads)
+      .where(inArray(threads.consultRunId, own));
+    const answering = tx
+      .update(runs)
+      .set({ endedAt: at, lastError: ASKER_DEACTIVATED_ERROR })
+      .where(and(inArray(runs.threadId, consults), isNull(runs.endedAt)))
+      .returning({ id: runs.id })
+      .all()
+      .map((row) => row.id);
+    return [...own, ...answering];
   });
 }
 

@@ -1614,7 +1614,7 @@
         },
         "responses": {
           "202": {
-            "description": "The post, and the runs that reply to it as they start: one for each member named with @ and its name, or for every member when none is. Each reply is added to its run.",
+            "description": "The post, and the runs that reply to it as they start: one for each member named with @ and its name, or for every member when none is, leaving out deactivated agents. Each reply is added to its run.",
             "content": {
               "application/json": {
                 "schema": {

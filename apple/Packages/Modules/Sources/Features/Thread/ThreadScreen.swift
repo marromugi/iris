@@ -17,10 +17,11 @@ struct ThreadScreen: View {
     @State private var activity: AgentActivity?
     @State private var isConfirmingDeactivation = false
 
-    /// `onAgentSwitched` is called once the one-to-one thread's agent was deactivated or activated.
+    /// `onAgentSwitched` is called with the agent and whether it is now active, once the one-to-one thread's agent was
+    /// deactivated or activated.
     init(
         thread: ChatThread, agents: [Agent.ID: Agent], directory: any AgentDirectory,
-        onAgentSwitched: @escaping () -> Void = {}
+        onAgentSwitched: @escaping (Agent.ID, Bool) -> Void = { _, _ in }
     ) {
         self.thread = thread
         self.agents = agents
@@ -30,7 +31,7 @@ struct ThreadScreen: View {
             initialValue: thread.agentId.map { agentID in
                 AgentActivity(
                     backend: directory.agent(id: agentID), isActive: agents[agentID]?.active ?? true,
-                    onSwitched: onAgentSwitched)
+                    onSwitched: { active in onAgentSwitched(agentID, active) })
             })
     }
 
@@ -130,7 +131,7 @@ struct ThreadScreen: View {
 
     private var emptyDescription: String {
         thread.agentId == nil
-            ? "メッセージを送ると、@ で名前を挙げたエージェントが、挙げなければ全員が返事をします。"
+            ? "メッセージを送ると、@ で名前を挙げたエージェントが、挙げなければ全員が返事をします。停止中のエージェントは返事をしません。"
             : "メッセージを送るか、タスクが決まった時刻に動くと、ここに会話が残ります。"
     }
 }

@@ -24,6 +24,18 @@ struct HomeScreen: View {
             return thread.agentIds.compactMap { byID[$0]?.look }
         }
 
+        /// The home with the agent marked active or deactivated, as it was just switched.
+        func switching(_ agentID: Agent.ID, active: Bool) -> Home {
+            Home(
+                threads: threads,
+                agents: agents.map { agent in
+                    guard agent.id == agentID else { return agent }
+                    var switched = agent
+                    switched.active = active
+                    return switched
+                })
+        }
+
         /// Whether the thread is a one-to-one thread whose agent is deactivated.
         func isDeactivated(_ thread: ChatThread) -> Bool {
             guard let agentID = thread.agentId else { return false }
@@ -54,8 +66,8 @@ struct HomeScreen: View {
             .listStyle(.plain)
             .refreshable { await load() }
             .navigationDestination(for: ChatThread.self) { thread in
-                ThreadScreen(thread: thread, agents: home.agentsByID, directory: directory) {
-                    Task { await load() }
+                ThreadScreen(thread: thread, agents: home.agentsByID, directory: directory) { agentID, active in
+                    switched(agentID, active: active)
                 }
             }
         }
@@ -95,6 +107,15 @@ struct HomeScreen: View {
             }
         }
         .task { await load() }
+    }
+
+    /// Shows the switch at once, so the thread opened again before the home is read again shows it too, then reads
+    /// the home again.
+    private func switched(_ agentID: Agent.ID, active: Bool) {
+        if let value = home.value {
+            home = .loaded(value.switching(agentID, active: active))
+        }
+        Task { await load() }
     }
 
     private func load() async {

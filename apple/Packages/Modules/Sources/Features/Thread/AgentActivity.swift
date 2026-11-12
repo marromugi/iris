@@ -12,10 +12,11 @@ final class AgentActivity {
     private(set) var problem: AppError?
 
     private let backend: any AgentBackend
-    private let onSwitched: () -> Void
+    private let onSwitched: (Bool) -> Void
 
-    /// `onSwitched` is called once the server has switched the agent, so what lists it can read it again.
-    init(backend: any AgentBackend, isActive: Bool, onSwitched: @escaping () -> Void) {
+    /// `onSwitched` is called with whether the agent is now active, once the server has switched it, so what lists it
+    /// can show it.
+    init(backend: any AgentBackend, isActive: Bool, onSwitched: @escaping (Bool) -> Void) {
         self.backend = backend
         self.isActive = isActive
         self.onSwitched = onSwitched
@@ -49,7 +50,7 @@ final class AgentActivity {
                     try await backend.deactivate()
                 }
                 isActive = active
-                onSwitched()
+                onSwitched(active)
             } catch {
                 problem = error
             }

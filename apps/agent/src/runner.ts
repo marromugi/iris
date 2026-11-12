@@ -282,13 +282,19 @@ async function carryOn(
     // Steps count across attempts and wake-ups: the run's own messages after its first are the
     // steps it has taken.
     const stepsLeft = DEFAULT_MAX_STEPS - (conversation.length - 1);
-    const onProgress = (progress: ModelProgress) => watcher.progress(runId, progress);
+    // A run ended meanwhile, by deactivating its agent, tells no more of how it is getting on.
+    const onProgress = (progress: ModelProgress) => {
+      if (!store.hasRunEnded(storage, runId)) {
+        watcher.progress(runId, progress);
+      }
+    };
     const steps =
       stepsLeft > 0
         ? run(agent, [...earlier, ...conversation], { onProgress, maxSteps: stepsLeft })
         : noSteps();
     for await (const message of steps) {
       if (store.hasRunEnded(storage, runId)) {
+        watcher.stopped(runId);
         return;
       }
       store.appendMessage(storage, runId, seq, message);
@@ -303,12 +309,14 @@ async function carryOn(
       }
     }
     if (store.hasRunEnded(storage, runId)) {
+      watcher.stopped(runId);
       return;
     }
     store.endRun(storage, runId, now());
     watcher.changed(runId);
   } catch (error) {
     if (store.hasRunEnded(storage, runId)) {
+      watcher.stopped(runId);
       return;
     }
     if (error instanceof RunCut) {
