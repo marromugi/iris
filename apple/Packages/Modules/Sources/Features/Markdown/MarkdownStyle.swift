@@ -1,4 +1,4 @@
-import CoreGraphics
+import SwiftUI
 
 /// The sizes and spacing Markdown is drawn with, in points. Font sizes are at the default Dynamic Type size and scale
 /// with it.
@@ -6,10 +6,16 @@ nonisolated enum MarkdownStyle {
     static let bodySize: CGFloat = 17
     /// Added to each line's natural height.
     static let lineSpacing: CGFloat = 7
+    /// The text's color, a little off black and white so it sits softer on the background. Gray text, such as a
+    /// quote's, is drawn from it.
+    static func textColor(in scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 232 / 255, green: 232 / 255, blue: 235 / 255) : Color(red: 34 / 255, green: 34 / 255, blue: 36 / 255)
+    }
     static let tracking: CGFloat = -0.15
 
     /// Below a paragraph, quote, code block, rule, or table.
-    static let blockSpacing: CGFloat = 14
+    static let blockSpacing: CGFloat = 10
     /// Above and below a list as a whole.
     static let listSpacing: CGFloat = 20
     /// Between two list items in a row.

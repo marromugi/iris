@@ -9,6 +9,8 @@ struct MarkdownView: View {
     let blocks: [MarkdownBlock]
     var fadingTail: [FadingText] = []
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Blocks only grow at the end, so their place is their identity.
@@ -17,6 +19,7 @@ struct MarkdownView: View {
                     .padding(.top, index == 0 ? 0 : MarkdownStyle.spacing(above: block, after: blocks[index - 1]))
             }
         }
+        .foregroundStyle(MarkdownStyle.textColor(in: colorScheme))
         .lineSpacing(MarkdownStyle.lineSpacing)
         .tracking(MarkdownStyle.tracking)
         .frame(maxWidth: .infinity, alignment: .leading)

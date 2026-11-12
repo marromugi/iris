@@ -146,7 +146,7 @@ struct MarkdownTests {
         let title = MarkdownBlock.heading(level: 1, text: "見出し")
         let subsection = MarkdownBlock.heading(level: 3, text: "見出し")
 
-        #expect(MarkdownStyle.spacing(above: paragraph, after: paragraph) == 14)
+        #expect(MarkdownStyle.spacing(above: paragraph, after: paragraph) == 10)
         #expect(MarkdownStyle.spacing(above: item, after: item) == 10)
         // A list gets more space around it than a paragraph does.
         #expect(MarkdownStyle.spacing(above: item, after: paragraph) == 20)
