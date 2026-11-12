@@ -217,8 +217,10 @@ private struct InlineText: View {
         return attributed.runs.reduce(Text("")) { shown, run in
             let piece = Text(AttributedString(attributed[run.range]))
             guard run.inlinePresentationIntent?.contains(.code) == true else { return Text("\(shown)\(piece)") }
-            let code = Text("\(side)\(piece.font(.system(size: codeSize, design: .monospaced)))\(side)")
-                .customAttribute(InlineCodeMark())
+            let code = Text(
+                "\(side)\(piece.font(.system(size: codeSize, weight: MarkdownStyle.inlineCodeWeight, design: .monospaced)))\(side)"
+            )
+            .customAttribute(InlineCodeMark())
             return Text("\(shown)\(code)")
         }
     }
