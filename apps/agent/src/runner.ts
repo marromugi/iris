@@ -9,6 +9,7 @@ import {
 import { type ConsultContext, consultTool, RunCut } from "./consult";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
+import { systemPromptOfRun } from "./system-prompt";
 
 /**
  * How long after an attempt at a run started, or after it failed, the run is tried again. The wait
@@ -161,7 +162,11 @@ export async function runDue(
           },
         });
         const own = toolsFor({ runId, agentId: store.agentOfRun(storage, runId) ?? "" });
-        const withTools = { ...agent, tools: [...agent.tools, ...own.tools, ...tools] };
+        const withTools = {
+          ...agent,
+          system: systemPromptOfRun(storage, runId, now()) ?? agent.system,
+          tools: [...agent.tools, ...own.tools, ...tools],
+        };
         going.set(
           runId,
           carryOn(storage, withTools, runId, now, watcher, outOfTime).finally(async () => {
