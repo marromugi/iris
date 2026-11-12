@@ -174,6 +174,18 @@ struct IrisBackendTests {
         }
     }
 
+    @Test func setsTheTimeZoneAsJSONAndSaysWhyOneIsRefused() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        try await backend.setTimeZone("America/New_York")
+
+        #expect(await server.timeZone == "America/New_York")
+        await #expect(throws: AppError.refused(message: "✖ Not a known IANA time zone.\n  → at timeZone")) {
+            try await backend.setTimeZone("Mars/Olympus")
+        }
+    }
+
     @Test func listsTheAgentsAndRefusesOneTheUserDoesNotHave() async throws {
         let backend = backend()
         try await signIn(backend)

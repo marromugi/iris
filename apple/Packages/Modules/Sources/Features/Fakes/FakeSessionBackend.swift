@@ -7,6 +7,9 @@
         struct Answers: Sendable {
             var isSignedIn = false
             var signIn: Result<Void, AppError> = .success(())
+            var setTimeZone: Result<Void, AppError> = .success(())
+            /// Every time zone the app has sent, failed sends too, in order.
+            var timeZonesSent: [String] = []
         }
 
         private let answers: Mutex<Answers>
@@ -26,6 +29,17 @@
 
         func signOut() async {
             answers.withLock { $0.isSignedIn = false }
+        }
+
+        func setTimeZone(_ identifier: String) async throws(AppError) {
+            try answers.withLock {
+                $0.timeZonesSent.append(identifier)
+                return $0.setTimeZone
+            }.get()
+        }
+
+        var timeZonesSent: [String] {
+            answers.withLock { $0.timeZonesSent }
         }
     }
 #endif

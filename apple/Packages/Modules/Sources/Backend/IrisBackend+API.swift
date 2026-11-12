@@ -86,6 +86,19 @@ extension IrisBackend {
         }
     }
 
+    /// Sets the time zone the user's days are read in, as an IANA identifier such as Asia/Tokyo. The server refuses one
+    /// it doesn't know.
+    public func setTimeZone(_ identifier: String) async throws(AppError) {
+        switch try await call({ try await client.setTimeZone(body: .json(.init(timeZone: identifier))) }) {
+        case .noContent: return
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
     /// The user's threads, each agent's one-to-one thread and the groups together, the latest activity first.
     public func threads() async throws(AppError) -> [ChatThread] {
         switch try await call({ try await client.listThreads() }) {
