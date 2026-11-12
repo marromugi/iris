@@ -3,14 +3,14 @@ import CoreGraphics
 /// The sizes and spacing Markdown is drawn with, in points. Font sizes are at the default Dynamic Type size and scale
 /// with it.
 nonisolated enum MarkdownStyle {
-    static let bodySize: CGFloat = 16
+    static let bodySize: CGFloat = 17
     /// Added to each line's natural height.
     static let lineSpacing: CGFloat = 7
     static let tracking: CGFloat = -0.15
 
     static let blockSpacing: CGFloat = 14
     /// Between two list items in a row; other blocks are `blockSpacing` apart.
-    static let itemSpacing: CGFloat = 7
+    static let itemSpacing: CGFloat = 10
 
     static let markerSpacing: CGFloat = 7
     static let bulletWidth: CGFloat = 14.5

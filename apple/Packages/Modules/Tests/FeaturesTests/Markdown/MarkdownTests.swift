@@ -144,7 +144,7 @@ struct MarkdownTests {
         let paragraph = MarkdownBlock.paragraph("本文")
         let item = MarkdownBlock.item(marker: "•", depth: 0, text: "項目")
 
-        #expect(MarkdownStyle.spacing(above: item, after: item) == 7)
+        #expect(MarkdownStyle.spacing(above: item, after: item) == 10)
         #expect(MarkdownStyle.spacing(above: item, after: paragraph) == 14)
         #expect(MarkdownStyle.spacing(above: .heading(level: 1, text: "見出し"), after: paragraph) == 38)
         #expect(MarkdownStyle.spacing(above: .heading(level: 2, text: "見出し"), after: paragraph) == 23)
