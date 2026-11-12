@@ -40,19 +40,16 @@ export function systemPromptOfRun(
   runId: string,
   now: Date,
 ): string | undefined {
-  const run = store.findRun(storage, runId);
-  const thread = run === undefined ? undefined : store.findThread(storage, run.threadId);
-  if (run === undefined || thread === undefined) {
+  const setting = store.runSetting(storage, runId);
+  if (setting === undefined) {
     return undefined;
   }
-  const names = new Map(store.listAgents(storage).map((agent) => [agent.id, agent.name]));
-  const askerId =
-    thread.consultRunId === null ? undefined : store.agentOfRun(storage, thread.consultRunId);
+  const { thread } = setting;
   const place: RunPlace =
-    askerId !== undefined
-      ? { kind: "consult", asker: names.get(askerId) ?? "another agent" }
+    thread.askerName !== null
+      ? { kind: "consult", asker: thread.askerName }
       : thread.agentId === null
-        ? { kind: "group", name: thread.name }
+        ? { kind: "group", name: thread.name ?? "" }
         : { kind: "one-to-one" };
-  return systemPrompt(names.get(run.agentId) ?? "an agent", place, now);
+  return systemPrompt(setting.agentName ?? "an agent", place, now);
 }
