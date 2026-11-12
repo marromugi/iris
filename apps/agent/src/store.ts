@@ -1095,7 +1095,8 @@ export interface SaidLine {
 }
 
 /**
- * What was said in the thread from `startsAt` until `endsAt`, in order: each post the user sent
+ * What was said in the thread from `startsAt` until `endsAt`, in order, for a thread that isn't a
+ * consult (where agents post): each post the user sent
  * then, followed by the replies to it that ended with one, and each run a task started then, as
  * its prompt followed by its reply. Tool calls, their results, and the model's reasoning are left
  * out.
@@ -1140,7 +1141,7 @@ export function saidBetween(
       lines: [
         {
           at: post.createdAt,
-          speaker: post.agentId === null ? "User" : (names.get(post.agentId) ?? ""),
+          speaker: "User",
           text: post.text,
         },
         ...replies,

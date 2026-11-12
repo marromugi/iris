@@ -41,7 +41,8 @@ const clock = () => new Date();
 /**
  * Builds the Durable Object class for one user. One object per user holds that user's agents and
  * threads (each agent's own one-to-one thread, and groups), the posts sent in them, and the tasks
- * and runs that happen in them; `agentFor` gives the model and tools every run uses, and `toolsFor`
+ * and runs that happen in them, with the user's time zone and each thread's summary of each day;
+ * `agentFor` gives the model and tools every run uses, and `toolsFor`
  * the tools a run gets for its own agent, such as its sandbox, its browser, and web search. Its `fetch`
  * opens a WebSocket on which a thread's runs and posts are sent as they happen (`RunBroadcast`).
  *
@@ -284,13 +285,23 @@ export function createUserAgent(
       try {
         const agent = agentFor(this.env);
         const stopAt = clock().getTime() + WAKE_UP_BUDGET_MS;
-        await Promise.all([
-          runDue(this.ctx.storage, agent, clock, this.broadcast, this.waker, (run) =>
-            toolsFor(this.env, run, this.ctx.storage),
-          ),
-          summarizeDue(this.ctx.storage, agent.model, clock, () => clock().getTime() >= stopAt),
-        ]);
-        await this.wakeAt(nextWakeAt(this.ctx.storage));
+        const summarizing = summarizeDue(
+          this.ctx.storage,
+          agent.model,
+          clock,
+          () => clock().getTime() >= stopAt,
+        );
+        const wakeAt = await runDue(
+          this.ctx.storage,
+          agent,
+          clock,
+          this.broadcast,
+          this.waker,
+          (run) => toolsFor(this.env, run, this.ctx.storage),
+          summarizing,
+        );
+        await summarizing;
+        await this.wakeAt(wakeAt);
       } finally {
         this.broadcast.idle();
       }
