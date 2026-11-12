@@ -1,5 +1,5 @@
-import type { AssistantMessage, Model, ModelRequest, Tool } from "@iris/agent";
-import type { RunOf } from "../src/runner";
+import type { AssistantMessage, Model, ModelRequest } from "@iris/agent";
+import type { RunOf, RunTools } from "../src/runner";
 import { createUserAgent } from "../src/user-agent";
 
 /**
@@ -33,7 +33,7 @@ export const testAgent = { model, tools: [] };
  * The tools each run gets for its own agent, made by `ownTools` with the run's agent's ID. None
  * unless a test sets it.
  */
-export const ownTools: { make: (run: RunOf) => Tool[] } = { make: () => [] };
+export const ownTools: { make: (run: RunOf) => RunTools } = { make: () => ({ tools: [] }) };
 
 export const UserAgent = createUserAgent(
   () => testAgent,

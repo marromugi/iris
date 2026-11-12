@@ -25,6 +25,8 @@
     },
   ],
   "ai": { "binding": "AI" },
+  // Browser Run: each run's browser for the browser tools.
+  "browser": { "binding": "BROWSER" },
   "durable_objects": {
     "bindings": [
       { "name": "USER_AGENT", "class_name": "UserAgent" },

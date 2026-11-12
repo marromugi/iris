@@ -86,3 +86,9 @@ export const messages = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.runId, table.seq] })],
 );
+
+/** How many web searches the user's agents made in each month ("2026-11"). */
+export const searchCounts = sqliteTable("search_counts", {
+  month: text("month").primaryKey(),
+  count: integer("count").notNull(),
+});

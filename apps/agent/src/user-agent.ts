@@ -1,4 +1,4 @@
-import type { Agent, Tool } from "@iris/agent";
+import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { type NewAgent, newAgentSchema, randomLook } from "./agent";
@@ -6,7 +6,7 @@ import { type NewGroup, newGroupSchema } from "./group";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
-import { nextWakeAt, type RunOf, runDue, Waker } from "./runner";
+import { nextWakeAt, type RunOf, type RunTools, runDue, Waker } from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
@@ -38,7 +38,7 @@ export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
  * Builds the Durable Object class for one user. One object per user holds that user's agents and
  * threads (each agent's own one-to-one thread, and groups), the posts sent in them, and the tasks
  * and runs that happen in them; `agentFor` gives the model and tools every run uses, and `toolsFor`
- * the tools a run gets for its own agent, such as its sandbox. Its `fetch`
+ * the tools a run gets for its own agent, such as its sandbox, its browser, and web search. Its `fetch`
  * opens a WebSocket on which a thread's runs and posts are sent as they happen (`RunBroadcast`).
  *
  * The methods that take an agent's or a thread's ID answer undefined when the user has none with
@@ -46,7 +46,9 @@ export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
  */
 export function createUserAgent(
   agentFor: (env: Env) => Agent,
-  toolsFor: (env: Env, run: RunOf) => Tool[] = () => [],
+  toolsFor: (env: Env, run: RunOf, storage: DurableObjectStorage) => RunTools = () => ({
+    tools: [],
+  }),
 ) {
   return class UserAgent extends DurableObject<Env> {
     private readonly broadcast: RunBroadcast;
@@ -267,7 +269,7 @@ export function createUserAgent(
           () => new Date(),
           this.broadcast,
           this.waker,
-          (run) => toolsFor(this.env, run),
+          (run) => toolsFor(this.env, run, this.ctx.storage),
         );
         await this.wakeAt(wakeAt);
       } finally {

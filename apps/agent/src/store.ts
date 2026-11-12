@@ -18,7 +18,16 @@ import {
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { alias } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
-import { agents, messages, posts, runs, tasks, threadMembers, threads } from "./db/schema";
+import {
+  agents,
+  messages,
+  posts,
+  runs,
+  searchCounts,
+  tasks,
+  threadMembers,
+  threads,
+} from "./db/schema";
 import type { Look } from "./agent";
 import type { Schedule } from "./schedule";
 
@@ -885,4 +894,18 @@ export function earliestTaskRunAt(storage: DurableObjectStorage): Date | undefin
     .from(tasks)
     .get();
   return row?.next ?? undefined;
+}
+
+/** Counts one web search in `month` ("2026-11") and gives the month's count with it. */
+export function countSearch(storage: DurableObjectStorage, month: string): number {
+  const row = database(storage)
+    .insert(searchCounts)
+    .values({ month, count: 1 })
+    .onConflictDoUpdate({
+      target: searchCounts.month,
+      set: { count: sql`${searchCounts.count} + 1` },
+    })
+    .returning({ count: searchCounts.count })
+    .get();
+  return row?.count ?? 1;
 }
