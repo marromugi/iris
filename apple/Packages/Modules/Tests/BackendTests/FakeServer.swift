@@ -31,6 +31,8 @@ actor FakeServer {
     private var namesNoUser = false
     private var missesRevocations = false
     private var holdsRefreshAnswers = false
+    /// The time zone the app last set, nil until it sets one.
+    private(set) var timeZone: String?
     /// Whether the agent is active, as deactivating and activating left it.
     private var agentActive = true
     private var heldRefreshAnswers: [CheckedContinuation<Void, Never>] = []
@@ -178,6 +180,17 @@ actor FakeServer {
             return Self.answer(
                 request, 200,
                 #"[{"id":"\#(Self.agentID)","name":"エージェント","look":{"palette":3,"seed":42},"lastRanAt":"2026-11-09T22:00:00Z","active":\#(agentActive)}]"#)
+        }
+        if request.httpMethod == "PUT", path == "/api/me/time-zone" {
+            struct Sent: Decodable { let timeZone: String }
+            guard request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/json") == true,
+                let body = request.httpBody, let sent = try? JSONDecoder().decode(Sent.self, from: body)
+            else { return Self.answer(request, 415, #"{"message":"Unsupported Media Type"}"#) }
+            guard TimeZone(identifier: sent.timeZone) != nil else {
+                return Self.answer(request, 400, #"{"message":"✖ Not a known IANA time zone.\n  → at timeZone"}"#)
+            }
+            timeZone = sent.timeZone
+            return Self.answer(request, 204, "")
         }
         // The agent's ID also names its one-to-one thread here.
         let threadPath = "/api/threads/\(Self.agentID)"

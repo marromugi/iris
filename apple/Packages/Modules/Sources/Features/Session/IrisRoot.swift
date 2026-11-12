@@ -24,6 +24,13 @@ public struct IrisRoot: View {
         content
             .environment(session)
             .task { await session.start() }
+            .task(id: session.state == .signedIn) {
+                guard session.state == .signedIn else { return }
+                await session.keepTimeZoneSent(
+                    current: { TimeZone.autoupdatingCurrent.identifier },
+                    changes: NotificationCenter.default.notifications(named: .NSSystemTimeZoneDidChange).map { _ in }
+                )
+            }
     }
 
     @ViewBuilder private var content: some View {

@@ -1,11 +1,15 @@
 import Backend
 import Observation
+import os
+
+private let log = Logger(subsystem: "dev.marromugi.iris", category: "time-zone")
 
 /// What the session needs from the server, so it can be shown and tested with a fake.
 nonisolated protocol SessionBackend: Sendable {
     var isSignedIn: Bool { get async }
     func signIn(authenticate: @escaping Authenticate) async throws(AppError)
     func signOut() async
+    func setTimeZone(_ identifier: String) async throws(AppError)
 }
 
 extension IrisBackend: SessionBackend {}
@@ -62,5 +66,23 @@ final class Session {
         problem = nil
         state = .signedOut
         await backend.signOut()
+    }
+
+    /// Tells the server the device's time zone now, and again each time `changes` says it changed, until the task is
+    /// cancelled. A send that fails is logged, not shown; the next change or launch sends again.
+    func keepTimeZoneSent(current: () -> String, changes: some AsyncSequence<Void, Never>) async {
+        await sendTimeZone(current())
+        for await _ in changes {
+            await sendTimeZone(current())
+        }
+    }
+
+    private func sendTimeZone(_ identifier: String) async {
+        do throws(AppError) {
+            try await backend.setTimeZone(identifier)
+        } catch .cancelled {
+        } catch {
+            log.error("Could not set the time zone \(identifier, privacy: .public): \(String(describing: error))")
+        }
     }
 }
