@@ -21,9 +21,9 @@ export type RunPlace =
 
 /**
  * The system prompt for a run of the agent `name` in `place` that started at `startedAt`, thinking
- * with the model `modelName`. It says
- * only the day the run started, so it stays the same however long the run goes on and whenever
- * it is carried on, and the model's service can keep reusing what it read before.
+ * with the model `modelName`. It says only the day the run started, so it stays the same however
+ * long the run goes on and whenever it is carried on, and the model's service can keep reusing what
+ * it read before.
  */
 export function systemPrompt(
   name: string,
