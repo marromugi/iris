@@ -188,6 +188,8 @@ private struct InlineText: View {
     let fadingTail: [FadingText]
     let size: CGFloat
 
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         var rest = text
         var pieces: [(String, Double)] = []
@@ -204,7 +206,8 @@ private struct InlineText: View {
         .textRenderer(
             InlineCodeRenderer(
                 verticalPadding: MarkdownStyle.inlineCodePadding.vertical,
-                cornerRadius: MarkdownStyle.inlineCodeCornerRadius))
+                cornerRadius: MarkdownStyle.inlineCodeCornerRadius,
+                fill: MarkdownStyle.inlineCodeFill(in: colorScheme)))
     }
 
     /// The text with its inline Markdown read, each stretch of inline code marked for `InlineCodeRenderer` and given

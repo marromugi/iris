@@ -8,6 +8,7 @@ struct InlineCodeMark: TextAttribute {}
 struct InlineCodeRenderer: TextRenderer {
     let verticalPadding: CGFloat
     let cornerRadius: CGFloat
+    let fill: Color
 
     /// Room for a fill reaching past the first or last line.
     var displayPadding: EdgeInsets {
@@ -37,6 +38,6 @@ struct InlineCodeRenderer: TextRenderer {
     private func fill(_ rect: CGRect, in context: inout GraphicsContext) {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
             .path(in: rect.insetBy(dx: 0, dy: -verticalPadding))
-        context.fill(shape, with: .style(.fill.tertiary))
+        context.fill(shape, with: .color(fill))
     }
 }

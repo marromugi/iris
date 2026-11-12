@@ -38,6 +38,10 @@ nonisolated enum MarkdownStyle {
     static let inlineCodeWeight: Font.Weight = .semibold
     static let inlineCodePadding = (horizontal: CGFloat(5.5), vertical: CGFloat(2))
     static let inlineCodeCornerRadius: CGFloat = 7
+    /// Inline code's fill: the system's gray, stronger than its lightest fill so it shows behind a few characters.
+    static func inlineCodeFill(in scheme: ColorScheme) -> Color {
+        Color(red: 118 / 255, green: 118 / 255, blue: 128 / 255).opacity(scheme == .dark ? 0.36 : 0.2)
+    }
 
     static let tableCellPadding = (horizontal: CGFloat(8), vertical: CGFloat(10))
     static let tableCellWidth: CGFloat = 220
