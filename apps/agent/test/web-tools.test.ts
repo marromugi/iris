@@ -7,11 +7,12 @@ import * as store from "../src/store";
 import { isBlocked } from "../src/web/blocked-hosts";
 import { browserTools, type PageView, type WebBrowser } from "../src/web/browser";
 import {
+  cleanDescription,
   MAX_DESCRIPTION,
   MAX_SEARCHES_PER_MONTH,
   SearchRefused,
+  searchReport,
   searchTool,
-  shortened,
   untrusted,
 } from "../src/web/search";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
@@ -78,7 +79,7 @@ test("a search gives back its results, counted for the month", async () => {
 
   expect(outcome).toEqual({
     ok: true,
-    content: untrusted("1. Workers\nhttps://example.com/workers\nAbout Cloudflare"),
+    content: untrusted("1. Workers\n   https://example.com/workers\n   About Cloudflare"),
   });
   expect(counted).toEqual(["2026-11"]);
 });
@@ -303,7 +304,51 @@ test("the tools refuse a blocked URL, opened or followed, without reaching it", 
   expect(opened).toEqual(["https://example.com/"]);
 });
 
-test("a long description is cut to its start", () => {
-  expect(shortened("a".repeat(MAX_DESCRIPTION + 10))).toBe(`${"a".repeat(MAX_DESCRIPTION)}…`);
-  expect(shortened("short")).toBe("short");
+test("a description becomes one plain paragraph, cut at a sentence's end", () => {
+  const description = [
+    "# Pricing",
+    "",
+    "Last updated Apr 21, 2026| Copy as Markdown | View as Markdown| Agent setup",
+    "",
+    "Billing depends on how you use **Browser Run**:",
+    "",
+    "- Quick Actions: Charged for browser hours only.",
+    "- [Browser Sessions](https://example.com/sessions): charged for hours and browsers.",
+    "",
+    "| | Workers Free | Workers Paid |",
+    "| --- | --- | --- |",
+    "```",
+    "const price = 0.09;",
+    "```",
+    `Browser hours are shared across all methods. ${"More words here. ".repeat(20)}`,
+  ].join("\n");
+
+  const cleaned = cleanDescription(description);
+
+  expect(
+    cleaned.startsWith(
+      "Pricing Billing depends on how you use Browser Run: Quick Actions: Charged for browser hours only. Browser Sessions: charged for hours and browsers. Browser hours are shared across all methods.",
+    ),
+  ).toBe(true);
+  expect(cleaned.endsWith(". …")).toBe(true);
+  expect(cleaned.length).toBeLessThanOrEqual(MAX_DESCRIPTION + 2);
+  expect(cleaned).not.toMatch(/[#|*`]|Copy as Markdown|https:/);
+});
+
+test("a description with no sentence end is cut at the length, and a short one is kept whole", () => {
+  expect(cleanDescription("あ".repeat(MAX_DESCRIPTION + 5))).toBe(
+    `${"あ".repeat(MAX_DESCRIPTION)} …`,
+  );
+  expect(cleanDescription("短い説明。")).toBe("短い説明。");
+});
+
+test("results are numbered with their title, URL, and description, leaving out an empty description", () => {
+  expect(
+    searchReport([
+      { title: "A", url: "https://a.example/", description: "About A." },
+      { title: "b.example", url: "https://b.example/", description: "" },
+    ]),
+  ).toBe(
+    untrusted("1. A\n   https://a.example/\n   About A.\n\n2. b.example\n   https://b.example/"),
+  );
 });

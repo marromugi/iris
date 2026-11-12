@@ -7,8 +7,8 @@ export const MAX_SEARCHES_PER_MONTH = 1000;
 /** How many results one search gives back. */
 export const SEARCH_RESULTS = 5;
 
-/** How much of a result's description the model reads, in characters; Exa's can run to a page. */
-export const MAX_DESCRIPTION = 600;
+/** About how much of a result's description the model reads, in characters; Exa's can run to a page. */
+export const MAX_DESCRIPTION = 300;
 
 /** One result of a search. */
 export interface SearchResult {
@@ -76,7 +76,11 @@ export function searchReport(results: readonly SearchResult[]): string {
   }
   return untrusted(
     results
-      .map((result, index) => `${index + 1}. ${result.title}\n${result.url}\n${result.description}`)
+      .map((result, index) =>
+        [`${index + 1}. ${result.title}`, `   ${result.url}`]
+          .concat(result.description === "" ? [] : [`   ${result.description}`])
+          .join("\n"),
+      )
       .join("\n\n"),
   );
 }
@@ -108,9 +112,9 @@ export function exaSearcher(ai: Ai): Searcher {
       }
       const body = searchResponseSchema.parse(await response.json());
       return body.items.map((item) => ({
-        title: item.title ?? item.url,
+        title: oneLine(item.title ?? "") || hostOf(item.url),
         url: item.url,
-        description: shortened(item.description ?? ""),
+        description: cleanDescription(item.description ?? ""),
       }));
     },
   };
@@ -122,9 +126,58 @@ const searchResponseSchema = z.object({
   ),
 });
 
-/** The description up to `MAX_DESCRIPTION` characters, marked when cut. */
-export function shortened(description: string): string {
-  return description.length > MAX_DESCRIPTION
-    ? `${description.slice(0, MAX_DESCRIPTION)}…`
-    : description;
+/** Lines of a page that are its chrome rather than what it says. */
+const CHROME_LINE =
+  /^(last updated\b|copy as markdown\b|view as markdown\b|skip to (main )?content\b|on this page\b|table of contents\b)/i;
+
+/**
+ * A description as one plain paragraph: code blocks, table rows and page chrome dropped, Markdown
+ * marks taken off with link texts kept, whitespace run together, and cut at the last sentence end
+ * before `MAX_DESCRIPTION` characters (or at that length when no sentence ends before it), marked
+ * with "…" when cut.
+ */
+export function cleanDescription(description: string): string {
+  const lines: string[] = [];
+  let inCode = false;
+  for (const raw of description.replace(/\r\n/g, "\n").split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("```")) {
+      inCode = !inCode;
+      continue;
+    }
+    if (inCode || line.includes("|") || CHROME_LINE.test(line)) {
+      continue;
+    }
+    lines.push(
+      line
+        .replace(/^#{1,6}\s+/, "")
+        .replace(/^([-*+]|\d+\.)\s+/, "")
+        .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/(\*\*|__|\*|_|`)/g, ""),
+    );
+  }
+  const text = oneLine(lines.join(" "));
+  if (text.length <= MAX_DESCRIPTION) {
+    return text;
+  }
+  const head = text.slice(0, MAX_DESCRIPTION);
+  const ends = [...head.matchAll(/[。.!?！？](?=\s|$)|[。！？]/g)];
+  const lastEnd = ends.at(-1);
+  const cut =
+    lastEnd === undefined ? head : head.slice(0, (lastEnd.index ?? 0) + lastEnd[0].length);
+  return `${cut.trimEnd()} …`;
+}
+
+/** Text with its line breaks and runs of whitespace made single spaces. */
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** A URL's host, for a result without a title. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
 }
