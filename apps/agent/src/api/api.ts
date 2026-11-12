@@ -11,14 +11,19 @@ import { listTasks } from "./routes/agents/[agentId]/tasks/get";
 import { addTask } from "./routes/agents/[agentId]/tasks/post";
 import { listAgents } from "./routes/agents/get";
 import { addAgent } from "./routes/agents/post";
+import { openUserEvents, USER_EVENTS_PATH } from "./routes/me/events/get";
 import { me } from "./routes/me/get";
+import { stopMail } from "./routes/me/mail/address/delete";
+import { makeMailAddress } from "./routes/me/mail/address/post";
+import { dismissMailConfirmation } from "./routes/me/mail/confirmation/delete";
+import { mailSetup } from "./routes/me/mail/get";
 import { setTimeZone } from "./routes/me/time-zone/put";
 import { threadEntries } from "./routes/threads/[threadId]/entries/get";
 import { openThreadEvents, THREAD_EVENTS_PATH } from "./routes/threads/[threadId]/events/get";
 import { sendPost } from "./routes/threads/[threadId]/posts/post";
 import { listThreads } from "./routes/threads/get";
 import { addGroup } from "./routes/threads/post";
-import { runEventSchema } from "./schemas";
+import { runEventSchema, userEventSchema } from "./schemas";
 
 export type { UserProps } from "./middlewares/signed-in-user";
 
@@ -46,6 +51,10 @@ agentApi.onError(answerError);
 agentApi.openapiRoutes([
   me,
   setTimeZone,
+  mailSetup,
+  makeMailAddress,
+  stopMail,
+  dismissMailConfirmation,
   listAgents,
   addAgent,
   deactivateAgent,
@@ -62,7 +71,9 @@ agentApi.openapiRoutes([
 ]);
 agentApi.get(EVENTS_PATH, openEvents);
 agentApi.get(THREAD_EVENTS_PATH, openThreadEvents);
+agentApi.get(USER_EVENTS_PATH, openUserEvents);
 agentApi.openAPIRegistry.register("RunEvent", runEventSchema);
+agentApi.openAPIRegistry.register("UserEvent", userEventSchema);
 
 agentApi.openAPIRegistry.registerComponent("securitySchemes", "iris", {
   type: "oauth2",

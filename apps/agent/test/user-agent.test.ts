@@ -671,6 +671,7 @@ function storageMigratedUpTo(storage: DurableObjectStorage, count: number) {
   const sql = storage.sql;
   for (const table of [
     "mails",
+    "mail_setup",
     "messages",
     "runs",
     "tasks",

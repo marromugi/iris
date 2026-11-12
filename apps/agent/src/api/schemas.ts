@@ -9,6 +9,7 @@ import {
   userMessageSchema,
 } from "@iris/agent";
 import { lookSchema } from "../agent";
+import type { MailState } from "../mail/setup";
 import { scheduleSchema } from "../schedule";
 import type { Agent, Post, Run, Task, Thread } from "../store";
 
@@ -251,3 +252,65 @@ export const runEventSchema = z
   });
 
 export type RunEvent = z.infer<typeof runEventSchema>;
+
+export const userEventSchema = z
+  .discriminatedUnion("type", [
+    z.object({ type: z.literal("mail") }).meta({
+      description:
+        "The user's mail setup changed: an address was made or let go, Gmail's forwarding confirmation arrived or was let go, or mail arrived. Read /api/me/mail again",
+    }),
+  ])
+  .meta({
+    id: "UserEvent",
+    description:
+      "One event on the WebSocket at /api/me/events, which the app opens with the same token as /api while it is in the foreground. The server sends these as JSON text; the app sends nothing. Nothing is sent about what happened before the socket opened: open the socket, then read what it is about.",
+  });
+
+export type UserEvent = z.infer<typeof userEventSchema>;
+
+export const mailSetupSchema = z
+  .object({
+    address: z.email().nullable().meta({
+      description: "Where the user forwards mail for their agents to read; null until one is made",
+    }),
+    confirmation: z
+      .object({
+        url: z.url().meta({
+          description:
+            "The link that confirms the address to Gmail. Forwarding is then turned on in Gmail's settings",
+        }),
+        code: z
+          .string()
+          .nullable()
+          .meta({ description: "The code that confirms it in Gmail's settings instead, if any" }),
+        receivedAt: timeSchema,
+      })
+      .nullable()
+      .meta({
+        description:
+          "Gmail's forwarding confirmation for the address, from when it arrives until mail arrives after it or the app lets it go; null otherwise",
+      }),
+    lastMailAt: timeSchema.nullable().meta({
+      description:
+        "When mail other than Gmail's confirmation last arrived at the address; null until the first does",
+    }),
+  })
+  .meta({ id: "MailSetup", description: "Where the user's mail setup stands" });
+
+export type MailSetupJson = z.infer<typeof mailSetupSchema>;
+
+/** The mail setup as `/api` sends it: the user's address, and where its setup stands. */
+export function mailSetupJson(address: string | null, state: MailState): MailSetupJson {
+  return {
+    address,
+    confirmation:
+      state.confirmation === null
+        ? null
+        : {
+            url: state.confirmation.url,
+            code: state.confirmation.code,
+            receivedAt: timeJson(state.confirmation.receivedAt),
+          },
+    lastMailAt: state.lastMailAt === null ? null : timeJson(state.lastMailAt),
+  };
+}

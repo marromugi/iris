@@ -57,13 +57,17 @@ export function mailTagOf(address: string): string | undefined {
 /**
  * Reads a raw MIME message. The text is the plain text part, or the HTML part made into text when
  * the plain one is missing or blank. Images shown in the body without a name aren't listed as
- * attachments. Throws on a message too malformed to read.
+ * attachments. `to` is the addresses its To header names, in lowercase. Throws on a message too
+ * malformed to read.
  */
-export async function parseMail(raw: RawEmail, receivedAt: Date): Promise<NewMail> {
+export async function parseMail(
+  raw: RawEmail,
+  receivedAt: Date,
+): Promise<{ mail: NewMail; to: string[] }> {
   const email = await PostalMime.parse(raw);
   const plain = email.text?.trim() ?? "";
   const text = plain === "" ? htmlText(email.html ?? "").trim() : plain;
-  return {
+  const mail: NewMail = {
     from: mailboxOf(email.from),
     subject: email.subject ?? "",
     text:
@@ -76,6 +80,10 @@ export async function parseMail(raw: RawEmail, receivedAt: Date): Promise<NewMai
       .map((attachment) => attachment.filename ?? "(no name)"),
     receivedAt,
   };
+  const to = (email.to ?? [])
+    .flatMap((address) => (address.group === undefined ? [address] : address.group))
+    .map((mailbox) => mailbox.address.toLowerCase());
+  return { mail, to };
 }
 
 /** An image or the like shown in the body, such as a logo, rather than a file sent along. */

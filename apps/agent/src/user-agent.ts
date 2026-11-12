@@ -4,6 +4,7 @@ import { type NewAgent, newAgentSchema, randomLook } from "./agent";
 import { type NewGroup, newGroupSchema } from "./group";
 import type { NewMail } from "./mail/mail";
 import { keptSince } from "./mail/mail-tools";
+import type { MailConfirmation, MailState } from "./mail/setup";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
@@ -20,6 +21,7 @@ import {
 import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt, timeZoneSchema } from "./schedule";
 import * as store from "./store";
+import { acceptUserSocket, sendUserEvent } from "./user-events";
 import { type NewTask, newTaskSchema } from "./task";
 
 export type AddAgentResult =
@@ -81,22 +83,29 @@ export function createUserAgent(
     }
 
     /**
-     * Opens the WebSocket for the events of the thread named by the `threadId` search parameter,
-     * which hears runs and posts, or of the one-to-one thread of the agent named by `agentId`,
-     * which hears runs only: 101 with the socket, 404 when the user has no such thread or agent,
-     * 426 for a request that isn't a WebSocket upgrade.
+     * Opens a WebSocket: for the user's own events with the `user` search parameter, for the
+     * events of the thread named by `threadId`, which hears runs and posts, or of the one-to-one
+     * thread of the agent named by `agentId`, which hears runs only. 101 with the socket, 404 when
+     * the user has no such thread or agent, 426 for a request that isn't a WebSocket upgrade.
      */
     override async fetch(request: Request): Promise<Response> {
       const params = new URL(request.url).searchParams;
-      const opened = this.socketThread(params.get("threadId"), params.get("agentId"));
-      if (opened === undefined) {
+      const forUser = params.has("user");
+      const opened = forUser
+        ? undefined
+        : this.socketThread(params.get("threadId"), params.get("agentId"));
+      if (!forUser && opened === undefined) {
         return new Response(null, { status: 404 });
       }
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return new Response(null, { status: 426 });
       }
       const { 0: client, 1: server } = new WebSocketPair();
-      this.broadcast.accept(opened.threadId, server, opened.hears);
+      if (opened === undefined) {
+        acceptUserSocket(this.ctx, server);
+      } else {
+        this.broadcast.accept(opened.threadId, server, opened.hears);
+      }
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -327,10 +336,44 @@ export function createUserAgent(
       return store.recentRuns(this.ctx.storage, threadId, limit);
     }
 
-    /** Keeps a mail the user forwarded, and lets go of what is older than mail is kept. */
+    /**
+     * Keeps a mail the user forwarded, lets go of what is older than mail is kept, and records
+     * that mail arrives.
+     */
     keepMail(mail: NewMail): void {
       store.insertMail(this.ctx.storage, { id: crypto.randomUUID(), ...mail });
       store.deleteMailBefore(this.ctx.storage, keptSince(mail.receivedAt));
+      store.recordMailArrived(this.ctx.storage, mail.receivedAt);
+      sendUserEvent(this.ctx, { type: "mail" });
+    }
+
+    /** Holds Gmail's forwarding confirmation for the user to open. */
+    keepMailConfirmation(confirmation: MailConfirmation): void {
+      store.setMailConfirmation(this.ctx.storage, confirmation);
+      sendUserEvent(this.ctx, { type: "mail" });
+    }
+
+    /** Lets go of Gmail's forwarding confirmation, as once the user has opened it. */
+    dismissMailConfirmation(): void {
+      store.clearMailConfirmation(this.ctx.storage);
+      sendUserEvent(this.ctx, { type: "mail" });
+    }
+
+    /** Where the user's mail setup stands, apart from their address. */
+    mailState(): MailState {
+      return store.mailState(this.ctx.storage);
+    }
+
+    /**
+     * Starts the mail setup over for a new address, or for none when the user stops receiving
+     * mail, in which case the kept mail goes too.
+     */
+    restartMail(stopping: boolean): void {
+      store.resetMailSetup(this.ctx.storage);
+      if (stopping) {
+        store.deleteAllMail(this.ctx.storage);
+      }
+      sendUserEvent(this.ctx, { type: "mail" });
     }
 
     /** Carries on the work that is due and writes the summaries that are, side by side. */

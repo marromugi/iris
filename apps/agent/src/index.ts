@@ -54,7 +54,11 @@ export default {
     receiveMail(
       message,
       env.DB,
-      { keep: (userId, mail) => env.USER_AGENT.getByName(userId).keepMail(mail) },
+      {
+        keep: (userId, mail) => env.USER_AGENT.getByName(userId).keepMail(mail),
+        confirm: (userId, confirmation) =>
+          env.USER_AGENT.getByName(userId).keepMailConfirmation(confirmation),
+      },
       () => new Date(),
     ),
 } satisfies ExportedHandler<Env>;

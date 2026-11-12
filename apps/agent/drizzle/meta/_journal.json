@@ -85,6 +85,13 @@
       "when": 1794477860869,
       "tag": "0011_mails",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794479724182,
+      "tag": "0012_mail_setup",
+      "breakpoints": true
     }
   ]
 }
