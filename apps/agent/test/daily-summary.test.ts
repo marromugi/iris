@@ -542,20 +542,11 @@ test("the alarm starts a run once its own thread's summary is written, while oth
   });
   await exchange("買い物リスト", "牛乳、卵", yesterday);
   await exchange("リストは？", undefined, now);
-  const { promise: runAsked, resolve: runStarted } = Promise.withResolvers<void>();
-  const tooLate = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error("The run didn't start before the next summary.")), 2000),
-  );
+  // The run of the summarized thread starts before the next summary is asked for.
   scriptedModel.push(
     reply("一つ目のまとめ"),
-    async () => {
-      await Promise.race([runAsked, tooLate]);
-      return reply("二つ目のまとめ");
-    },
-    () => {
-      runStarted();
-      return reply("はい。");
-    },
+    reply("はい。"),
+    reply("二つ目のまとめ"),
     reply("はい。"),
   );
 
@@ -563,11 +554,11 @@ test("the alarm starts a run once its own thread's summary is written, while oth
 
   expect(modelRequests.map((request) => request.system === SUMMARY_PROMPT)).toEqual([
     true,
+    false,
     true,
     false,
-    false,
   ]);
-  expect(summariesIn(modelRequests[2]?.system)).toEqual([
+  expect(summariesIn(modelRequests[1]?.system)).toEqual([
     [dayOf(yesterday, "Asia/Tokyo").label, "一つ目のまとめ"],
   ]);
 });

@@ -28,7 +28,8 @@
     },
   ],
   "ai": { "binding": "AI" },
-  // The same bucket as S3_BUCKET, for the Worker to write into agents' /workspace itself.
+  // The Worker writes under agents/<agentId>/ in it, which a sandbox shows at /workspace. Must
+  // name the same bucket as S3_BUCKET, which the sandboxes mount.
   "r2_buckets": [{ "binding": "WORKSPACES", "bucket_name": "iris-workspaces" }],
   // Browser Run: each run's browser for the browser tools.
   "browser": { "binding": "BROWSER" },

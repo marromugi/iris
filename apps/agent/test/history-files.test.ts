@@ -86,6 +86,7 @@ test("the alarm writes the day's summary and what was said into the agent's work
   const summary = await env.WORKSPACES.get(`agents/${agentId}/history/2026-01-05.md`);
   const said = await env.WORKSPACES.get(`agents/${agentId}/history/2026-01-05.log.md`);
   expect(await summary?.text()).toBe(`${heading}\n\n挨拶をした。\n`);
+  expect(summary?.httpMetadata?.contentType).toBe("text/markdown; charset=utf-8");
   expect(await said?.text()).toBe(
     `${heading}\n\n[12:00] User: こんにちは\n[12:01] エージェント: こんにちは！\n`,
   );
@@ -148,7 +149,8 @@ test("a day whose summary is passed over keeps only what was said", async () => 
     kept.push(await summarizeAt(new Date(failAt.getTime() + attempt * SUMMARY_RETRY_DELAY_MS)));
   }
 
-  expect(kept.slice(0, -1)).toEqual(kept.slice(0, -1).map(() => ({})));
+  const [first, second] = kept;
+  expect([first, second]).toEqual([{}, {}]);
   expect(Object.keys(kept.at(-1) ?? {})).toEqual([`agents/${agentId}/history/2026-11-12.log.md`]);
 });
 
@@ -188,4 +190,25 @@ test("a file that can't be written leaves the summary stored and the other files
       store.dailySummariesOf(state.storage, threadId).map((summary) => summary.text),
     ),
   ).toEqual(["挨拶をした。"]);
+});
+
+test("a day whose date an earlier summary already has, after a time zone change, gets its own files", async () => {
+  const agentId = await firstAgentId();
+  const threadId = await runInDurableObject(userAgent(), (_, state) =>
+    agentThread(state.storage, agentId),
+  );
+  await exchange(threadId, "朝", [[agentId, "おはよう"]], new Date("2026-11-12T10:00:00+09:00"));
+  scriptedModel.push(reply("東京の12日"));
+  const tokyo = await summarizeAt(new Date("2026-11-13T04:00:00+09:00"));
+  await userAgent().setTimeZone("America/Los_Angeles");
+  await exchange(threadId, "Lunch", [[agentId, "Soup"]], new Date("2026-11-12T12:00:00-08:00"));
+  scriptedModel.push(reply("LA の12日"));
+
+  const losAngeles = await summarizeAt(new Date("2026-11-13T04:00:00-08:00"));
+
+  expect(Object.keys(tokyo)).toContain(`agents/${agentId}/history/2026-11-12.md`);
+  expect(Object.keys(losAngeles).toSorted()).toEqual([
+    `agents/${agentId}/history/2026-11-12-2.log.md`,
+    `agents/${agentId}/history/2026-11-12-2.md`,
+  ]);
 });
