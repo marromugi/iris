@@ -6,7 +6,14 @@ import { runDue } from "../src/runner";
 import * as store from "../src/store";
 import { isBlocked } from "../src/web/blocked-hosts";
 import { browserTools, type PageView, type WebBrowser } from "../src/web/browser";
-import { MAX_SEARCHES_PER_MONTH, SearchRefused, searchTool, untrusted } from "../src/web/search";
+import {
+  MAX_DESCRIPTION,
+  MAX_SEARCHES_PER_MONTH,
+  SearchRefused,
+  searchTool,
+  shortened,
+  untrusted,
+} from "../src/web/search";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
@@ -294,4 +301,9 @@ test("the tools refuse a blocked URL, opened or followed, without reaching it", 
   expect(direct.ok).toBe(false);
   expect(followed.ok).toBe(false);
   expect(opened).toEqual(["https://example.com/"]);
+});
+
+test("a long description is cut to its start", () => {
+  expect(shortened("a".repeat(MAX_DESCRIPTION + 10))).toBe(`${"a".repeat(MAX_DESCRIPTION)}…`);
+  expect(shortened("short")).toBe("short");
 });

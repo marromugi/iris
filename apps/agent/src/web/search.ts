@@ -7,6 +7,9 @@ export const MAX_SEARCHES_PER_MONTH = 1000;
 /** How many results one search gives back. */
 export const SEARCH_RESULTS = 5;
 
+/** How much of a result's description the model reads, in characters; Exa's can run to a page. */
+export const MAX_DESCRIPTION = 600;
+
 /** One result of a search. */
 export interface SearchResult {
   readonly title: string;
@@ -107,7 +110,7 @@ export function exaSearcher(ai: Ai): Searcher {
       return body.items.map((item) => ({
         title: item.title ?? item.url,
         url: item.url,
-        description: item.description ?? "",
+        description: shortened(item.description ?? ""),
       }));
     },
   };
@@ -118,3 +121,10 @@ const searchResponseSchema = z.object({
     z.object({ url: z.string(), title: z.string().nullish(), description: z.string().nullish() }),
   ),
 });
+
+/** The description up to `MAX_DESCRIPTION` characters, marked when cut. */
+export function shortened(description: string): string {
+  return description.length > MAX_DESCRIPTION
+    ? `${description.slice(0, MAX_DESCRIPTION)}…`
+    : description;
+}
