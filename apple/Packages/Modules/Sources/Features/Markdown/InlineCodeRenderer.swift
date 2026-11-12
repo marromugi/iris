@@ -9,6 +9,11 @@ struct InlineCodeRenderer: TextRenderer {
     let verticalPadding: CGFloat
     let cornerRadius: CGFloat
 
+    /// Room for a fill reaching past the first or last line.
+    var displayPadding: EdgeInsets {
+        EdgeInsets(top: verticalPadding, leading: 0, bottom: verticalPadding, trailing: 0)
+    }
+
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
         // All fills first, so a fill reaching into the line above stays behind that line's text.
         for line in layout {

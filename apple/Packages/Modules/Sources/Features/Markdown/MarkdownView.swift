@@ -105,7 +105,7 @@ private struct ListMarker: View {
                 .stroke(.tertiary, style: StrokeStyle(lineWidth: bulletWidth * 2 / 13, lineCap: .round))
                 .frame(width: bulletWidth, height: bulletWidth / BulletShape.aspectRatio)
                 .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + textSize * 0.35 }
-                .accessibilityLabel("•")
+                .accessibilityRepresentation { Text("•") }
         } else {
             Text(marker).bold()
         }
@@ -208,8 +208,9 @@ private struct InlineText: View {
     /// room at its sides.
     private static func text(_ markdown: String, codeSize: CGFloat) -> Text {
         let attributed = attributed(markdown)
-        // A no-break space keeps the room with the code; kerning widens it to the padding.
-        let side = Text("\u{202F}").kerning(MarkdownStyle.inlineCodePadding.horizontal - codeSize * 0.2)
+        // A no-break space keeps the room with the code; its own tracking, which overrides the text's, widens it to the
+        // padding.
+        let side = Text("\u{202F}").tracking(MarkdownStyle.inlineCodePadding.horizontal - codeSize * 0.2)
         return attributed.runs.reduce(Text("")) { shown, run in
             let piece = Text(AttributedString(attributed[run.range]))
             guard run.inlinePresentationIntent?.contains(.code) == true else { return Text("\(shown)\(piece)") }
