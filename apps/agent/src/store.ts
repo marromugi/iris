@@ -931,6 +931,7 @@ export function runSetting(
 ):
   | {
       agentName: string | null;
+      startedAt: Date;
       thread: { agentId: string | null; name: string | null; askerName: string | null };
     }
   | undefined {
@@ -939,6 +940,7 @@ export function runSetting(
   const row = database(storage)
     .select({
       agentName: agents.name,
+      startedAt: runs.startedAt,
       threadAgentId: threads.agentId,
       threadName: threads.name,
       consultRunId: threads.consultRunId,
@@ -956,6 +958,7 @@ export function runSetting(
   }
   return {
     agentName: row.agentName,
+    startedAt: row.startedAt,
     thread: {
       agentId: row.threadAgentId,
       name: row.threadName,

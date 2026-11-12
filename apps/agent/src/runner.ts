@@ -164,7 +164,7 @@ export async function runDue(
         const own = toolsFor({ runId, agentId: store.agentOfRun(storage, runId) ?? "" });
         const withTools = {
           ...agent,
-          system: systemPromptOfRun(storage, runId, now()) ?? agent.system,
+          system: systemPromptOfRun(storage, runId) ?? agent.system,
           tools: [...agent.tools, ...own.tools, ...tools],
         };
         going.set(
