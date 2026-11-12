@@ -19,9 +19,14 @@ export type RunPlace =
   | { readonly kind: "group"; readonly name: string }
   | { readonly kind: "consult"; readonly asker: string };
 
-/** The system prompt for a run of the agent `name` in `place`, at `now`. */
-export function systemPrompt(name: string, place: RunPlace, now: Date): string {
-  return `${SHARED_PROMPT.replace("{name}", name)}\n\nCurrent time: ${now.toISOString()}. Thread: ${placeLine(place)}.`;
+/**
+ * The system prompt for a run of the agent `name` in `place` that started at `startedAt`. It says
+ * only the day the run started, so it stays the same however long the run goes on and whenever
+ * it is carried on, and the model's service can keep reusing what it read before.
+ */
+export function systemPrompt(name: string, place: RunPlace, startedAt: Date): string {
+  const day = startedAt.toISOString().slice(0, "YYYY-MM-DD".length);
+  return `${SHARED_PROMPT.replace("{name}", name)}\n\nThis run started on ${day} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: ${placeLine(place)}.`;
 }
 
 function placeLine(place: RunPlace): string {
@@ -34,11 +39,10 @@ function placeLine(place: RunPlace): string {
   return "one-to-one with the user";
 }
 
-/** The system prompt for the run `runId` as it is now; undefined when there is no such run. */
+/** The system prompt for the run `runId`; undefined when there is no such run. */
 export function systemPromptOfRun(
   storage: DurableObjectStorage,
   runId: string,
-  now: Date,
 ): string | undefined {
   const setting = store.runSetting(storage, runId);
   if (setting === undefined) {
@@ -51,5 +55,5 @@ export function systemPromptOfRun(
       : thread.agentId === null
         ? { kind: "group", name: thread.name ?? "" }
         : { kind: "one-to-one" };
-  return systemPrompt(setting.agentName ?? "an agent", place, now);
+  return systemPrompt(setting.agentName ?? "an agent", place, setting.startedAt);
 }

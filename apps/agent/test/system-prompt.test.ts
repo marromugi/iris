@@ -1,8 +1,11 @@
 import type { AssistantMessage, ModelRequest } from "@iris/agent";
-import { reset, runDurableObjectAlarm } from "cloudflare:test";
+import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
-import { modelRequests, scriptedModel } from "./worker";
+import { RETRY_DELAY_MS, runDue } from "../src/runner";
+import * as store from "../src/store";
+import { agentThread } from "./agent-thread";
+import { modelRequests, scriptedModel, testAgent } from "./worker";
 
 afterEach(async () => {
   scriptedModel.length = 0;
@@ -52,8 +55,9 @@ test("each run is told who it is and where, the shared prompt first", async () =
 
   const [asking, answering] = modelRequests;
   expect(asking?.system).toMatch(/^You are エージェント, one of the user's agents in iris\./);
-  expect(placeOf(asking)).toMatch(
-    /^Current time: \d{4}-\d\d-\d\dT[\d:.]+Z\. Thread: one-to-one with the user\.$/,
+  const today = new Date().toISOString().slice(0, "YYYY-MM-DD".length);
+  expect(placeOf(asking)).toBe(
+    `This run started on ${today} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: one-to-one with the user.`,
   );
   expect(answering?.system).toMatch(/^You are 株価,/);
   expect(placeOf(answering)).toMatch(/Thread: consult, where エージェント is asking you\.$/);
@@ -68,4 +72,36 @@ test("each run is told who it is and where, the shared prompt first", async () =
   await runDurableObjectAlarm(userAgent());
 
   expect(modelRequests.map(placeOf)).toEqual([expect.stringMatching(/Thread: group "チーム"\.$/)]);
+});
+
+test("a run carried on the next day is told the same day it started, so its prompt doesn't change", async () => {
+  const [first] = await userAgent().listAgents();
+  const agentId = first?.id ?? "";
+  const startedAt = new Date("2026-11-13T23:59:00Z");
+  await runInDurableObject(userAgent(), (_, state) => {
+    store.insertTask(state.storage, {
+      id: "task-1",
+      agentId,
+      threadId: agentThread(state.storage, agentId),
+      prompt: "Summarize today's email",
+      schedule: { cron: "59 23 * * *", timeZone: "UTC" },
+      nextRunAt: startedAt,
+    });
+  });
+  scriptedModel.push(new Error("The model service is unreachable."), reply("3 new emails."));
+
+  await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => startedAt),
+  );
+  const retryAt = new Date(startedAt.getTime() + RETRY_DELAY_MS);
+  await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => retryAt),
+  );
+
+  expect(retryAt.toISOString().startsWith("2026-11-14")).toBe(true);
+  expect(modelRequests.map(placeOf)).toEqual([
+    expect.stringMatching(/^This run started on 2026-11-13 \(UTC\);/),
+    expect.stringMatching(/^This run started on 2026-11-13 \(UTC\);/),
+  ]);
+  expect(modelRequests[1]?.system).toBe(modelRequests[0]?.system);
 });
