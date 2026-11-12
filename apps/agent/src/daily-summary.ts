@@ -105,6 +105,7 @@ export async function summarizeDue(
   now: () => Date,
   outOfTime: () => boolean,
   tried: () => void = () => {},
+  keep: KeepFile = async () => {},
 ): Promise<void> {
   for (;;) {
     if (outOfTime()) {
@@ -116,19 +117,24 @@ export async function summarizeDue(
     if (due === undefined) {
       return;
     }
-    await summarize(storage, model, due, now);
+    await summarize(storage, model, due, now, keep);
     tried();
   }
 }
+
+/** Writes `text` to `key` in the bucket agents' workspaces live in. */
+export type KeepFile = (key: string, text: string) => Promise<void>;
 
 async function summarize(
   storage: DurableObjectStorage,
   model: Model,
   due: DueSummary,
   now: () => Date,
+  keep: KeepFile,
 ): Promise<void> {
   const { threadId, day } = due;
   const row = { threadId, day: day.label, startsAt: day.startsAt, endsAt: day.endsAt };
+  let written: string | undefined;
   try {
     const reply = await model({
       system: SUMMARY_PROMPT,
@@ -143,6 +149,7 @@ async function summarize(
       throw new Error("The model wrote an empty summary.");
     }
     store.saveDailySummary(storage, { ...row, text });
+    written = text;
   } catch (error) {
     const failed = store.recordDailySummaryFailure(storage, row, {
       error: error instanceof Error ? error.message : String(error),
@@ -152,7 +159,59 @@ async function summarize(
       `The summary of thread ${threadId} for ${day.label} failed (attempt ${failed}).`,
       error,
     );
+    if (failed < MAX_SUMMARY_ATTEMPTS) {
+      return;
+    }
   }
+  await keepHistory(storage, due, written, keep);
+}
+
+/**
+ * Where a day of a thread is kept in each member's workspace, under `/workspace/history/`: an
+ * agent's one-to-one thread at the top, a group under `groups/<thread ID>/`.
+ */
+export function historyDirectory(storage: DurableObjectStorage, threadId: string): string {
+  return store.findThread(storage, threadId)?.agentId == null
+    ? `history/groups/${threadId}`
+    : "history";
+}
+
+/**
+ * Writes the day into the workspace of each agent of the thread: what was said as
+ * `<day>.log.md`, and the summary, when there is one, as `<day>.md`, both under the day's and the
+ * thread's lines. The files are copies of what storage holds; one that can't be written is
+ * logged and left out.
+ */
+async function keepHistory(
+  storage: DurableObjectStorage,
+  due: DueSummary,
+  summary: string | undefined,
+  keep: KeepFile,
+): Promise<void> {
+  const thread = store.findThread(storage, due.threadId);
+  if (thread === undefined) {
+    return;
+  }
+  const said = dayAsRead(storage, due);
+  const [heading = ""] = said.split("\n\n");
+  const files = [
+    { name: `${due.day.label}.log.md`, text: `${said}\n` },
+    ...(summary === undefined
+      ? []
+      : [{ name: `${due.day.label}.md`, text: `${heading}\n\n${summary}\n` }]),
+  ];
+  const directory = historyDirectory(storage, due.threadId);
+  const writes = thread.agentIds.flatMap((agentId) =>
+    files.map(async (file) => {
+      const key = `agents/${agentId}/${directory}/${file.name}`;
+      try {
+        await keep(key, file.text);
+      } catch (error) {
+        console.error(`Writing ${key} failed.`, error);
+      }
+    }),
+  );
+  await Promise.all(writes);
 }
 
 /** The day of the thread as the model reads it to summarize: which day, which thread, and what was said, by time of day. */
