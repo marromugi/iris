@@ -426,6 +426,13 @@
           "text": {
             "type": "string"
           },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            },
+            "description": "The images it was sent with, in the order they were sent"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -435,9 +442,33 @@
           "id",
           "agentId",
           "text",
+          "attachments",
           "createdAt"
         ],
         "description": "What was said in a thread: by the user, or in a consult by the agent that asked"
+      },
+      "Attachment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mediaType": {
+            "type": "string",
+            "description": "Such as image/jpeg"
+          },
+          "size": {
+            "type": "integer",
+            "description": "In bytes"
+          }
+        },
+        "required": [
+          "id",
+          "mediaType",
+          "size"
+        ],
+        "description": "An image put up to send with a post; GET /api/attachments/{id} gives its bytes"
       },
       "UserEvent": {
         "oneOf": [
@@ -469,11 +500,16 @@
           "name": {
             "type": "string",
             "description": "The name the user's invite gave them"
+          },
+          "canAttachImages": {
+            "type": "boolean",
+            "description": "Whether posts may carry images: false when the model the agents think with doesn't read them"
           }
         },
         "required": [
           "id",
-          "name"
+          "name",
+          "canAttachImages"
         ]
       },
       "Error": {
@@ -705,8 +741,16 @@
         "type": "object",
         "properties": {
           "text": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
+          },
+          "attachmentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "maxItems": 4,
+            "default": []
           }
         },
         "required": [
@@ -1645,7 +1689,7 @@
             }
           },
           "400": {
-            "description": "The request doesn't fit the API, or every agent that would reply is deactivated; the message says why",
+            "description": "The request doesn't fit the API, every agent that would reply is deactivated, an image isn't there or was already sent, or images are sent while the model doesn't read them; the message says why",
             "content": {
               "application/json": {
                 "schema": {
@@ -1932,7 +1976,7 @@
             }
           },
           "400": {
-            "description": "The request doesn't fit the API, or every agent that would reply is deactivated; the message says why",
+            "description": "The request doesn't fit the API, every agent that would reply is deactivated, an image isn't there or was already sent, or images are sent while the model doesn't read them; the message says why",
             "content": {
               "application/json": {
                 "schema": {
@@ -1966,6 +2010,186 @@
           },
           "415": {
             "description": "The body isn't sent as application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/attachments": {
+      "post": {
+        "operationId": "putUpAttachment",
+        "requestBody": {
+          "required": true,
+          "description": "The image's bytes, at most 5242880 of them",
+          "content": {
+            "image/jpeg": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/png": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/gif": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            },
+            "image/webp": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The image as kept. Send its ID in a post's attachmentIds within a day; one no post takes by then is removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Attachment"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body isn't an image of its Content-Type, or the model doesn't read images; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The image is larger than the API takes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The Content-Type isn't one of the image types the API takes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/attachments/{attachmentId}": {
+      "get": {
+        "operationId": "attachment",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "attachmentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The image's bytes, with the Content-Type it was put up with",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No image of this user has this ID",
             "content": {
               "application/json": {
                 "schema": {

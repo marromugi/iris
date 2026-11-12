@@ -62,7 +62,7 @@ describe("a new user", () => {
     expect(registered.status).toBe(200);
     expect(await me(sheet.call, tokens.access_token)).toEqual({
       status: 200,
-      body: { id: expect.stringMatching(/^[0-9a-f-]{36}$/), name: "花子" },
+      body: { id: expect.stringMatching(/^[0-9a-f-]{36}$/), name: "花子", canAttachImages: true },
     });
     expect(added.status).toBe(201);
     expect(await listed.json()).toEqual([await added.json()]);

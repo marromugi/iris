@@ -41,7 +41,7 @@ export type AddGroupResult =
   | { readonly ok: false; readonly error: string };
 
 export type PostResult =
-  | { readonly ok: true; readonly post: store.Post; readonly runs: store.Run[] }
+  | { readonly ok: true; readonly post: store.PostWithAttachments; readonly runs: store.Run[] }
   | { readonly ok: false; readonly error: string };
 
 export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
@@ -51,6 +51,12 @@ const clock = () => new Date();
 
 /** Why a post is refused when every agent that would reply to it is deactivated. */
 export const NO_ACTIVE_REPLIER = "Every agent that would reply to this is deactivated.";
+
+/** Why a post is refused when one of its images isn't kept or another post already took it. */
+export const NO_SUCH_ATTACHMENT = "An image isn't there, or was already sent.";
+
+/** How long an image put up waits for a post to take it before it may be removed. */
+const UNUSED_ATTACHMENT_KEPT_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Builds the Durable Object class for one user. One object per user holds that user's agents and
@@ -183,7 +189,14 @@ export function createUserAgent(
       if (active.length === 0) {
         return { ok: false, error: NO_ACTIVE_REPLIER };
       }
-      return { ok: true, ...(await this.startPost(threadId, parsed.data.text, active)) };
+      const attachments = store.unusedAttachments(this.ctx.storage, parsed.data.attachmentIds);
+      if (attachments.length !== parsed.data.attachmentIds.length) {
+        return { ok: false, error: NO_SUCH_ATTACHMENT };
+      }
+      return {
+        ok: true,
+        ...(await this.startPost(threadId, parsed.data.text, active, attachments)),
+      };
     }
 
     /** The thread's latest posts and runs together, the latest first, at most `limit` of them. */
@@ -294,7 +307,11 @@ export function createUserAgent(
       if (!store.listAgents(this.ctx.storage).find((agent) => agent.id === agentId)?.active) {
         return { ok: false, error: NO_ACTIVE_REPLIER };
       }
-      const { runs } = await this.startPost(threadId, parsed.data.text, [agentId]);
+      const attachments = store.unusedAttachments(this.ctx.storage, parsed.data.attachmentIds);
+      if (attachments.length !== parsed.data.attachmentIds.length) {
+        return { ok: false, error: NO_SUCH_ATTACHMENT };
+      }
+      const { runs } = await this.startPost(threadId, parsed.data.text, [agentId], attachments);
       const [run] = runs;
       if (run === undefined) {
         throw new Error(`The post to agent ${agentId} started no run.`);
@@ -424,21 +441,48 @@ export function createUserAgent(
       return agentThreadId === undefined ? undefined : { threadId: agentThreadId, hears: "runs" };
     }
 
+    /**
+     * Keeps an image the user put up, whose bytes the Worker has stored, until a post takes it.
+     * Removes the images put up more than a day ago that no post took, and returns their IDs so
+     * the Worker can remove their bytes.
+     */
+    addAttachment(attachment: store.Attachment): string[] {
+      const now = new Date();
+      const removed = store.removeUnusedAttachments(
+        this.ctx.storage,
+        new Date(now.getTime() - UNUSED_ATTACHMENT_KEPT_MS),
+      );
+      store.insertAttachment(this.ctx.storage, { ...attachment, createdAt: now });
+      return removed;
+    }
+
+    /** An image the user put up, whether or not a post has taken it. */
+    attachment(id: string): store.Attachment | undefined {
+      return store.findAttachment(this.ctx.storage, id);
+    }
+
     /** Adds the post with a run of each of `agentIds` replying to it, tells the sockets, and sets the alarm. */
     private async startPost(
       threadId: string,
       text: string,
       agentIds: readonly string[],
-    ): Promise<{ post: store.Post; runs: store.Run[] }> {
-      const post: store.Post = {
+      attachments: readonly store.Attachment[],
+    ): Promise<{ post: store.PostWithAttachments; runs: store.Run[] }> {
+      const post: store.PostWithAttachments = {
         id: crypto.randomUUID(),
         threadId,
         agentId: null,
         callId: null,
         text,
         createdAt: new Date(),
+        attachments,
       };
-      const runIds = store.insertPost(this.ctx.storage, post, agentIds);
+      const runIds = store.insertPost(
+        this.ctx.storage,
+        post,
+        agentIds,
+        attachments.map((attachment) => attachment.id),
+      );
       this.broadcast.posted(post);
       const runs = runIds.map((id) => {
         const run = store.findRun(this.ctx.storage, id);

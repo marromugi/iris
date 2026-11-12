@@ -11,7 +11,7 @@ import {
 import { lookSchema } from "../agent";
 import type { MailState } from "../mail/setup";
 import { scheduleSchema } from "../schedule";
-import type { Agent, Post, Run, Task, Thread } from "../store";
+import type { Agent, PostWithAttachments, Run, Task, Thread } from "../store";
 
 /** A response body in JSON with the given schema. */
 export function json<S extends z.ZodType>(schema: S, description: string) {
@@ -84,6 +84,17 @@ export function threadJson(thread: Thread): z.infer<typeof threadSchema> {
   };
 }
 
+export const attachmentSchema = z
+  .object({
+    id: z.uuid(),
+    mediaType: z.string().meta({ description: "Such as image/jpeg" }),
+    size: z.int().meta({ description: "In bytes" }),
+  })
+  .meta({
+    id: "Attachment",
+    description: "An image put up to send with a post; GET /api/attachments/{id} gives its bytes",
+  });
+
 export const postSchema = z
   .object({
     id: z.uuid(),
@@ -92,6 +103,9 @@ export const postSchema = z
       .nullable()
       .meta({ description: "The agent that asked it in a consult; null when the user said it" }),
     text: z.string(),
+    attachments: z
+      .array(attachmentSchema)
+      .meta({ description: "The images it was sent with, in the order they were sent" }),
     createdAt: timeSchema,
   })
   .meta({
@@ -99,11 +113,12 @@ export const postSchema = z
     description: "What was said in a thread: by the user, or in a consult by the agent that asked",
   });
 
-export function postJson(post: Post): z.infer<typeof postSchema> {
+export function postJson(post: PostWithAttachments): z.infer<typeof postSchema> {
   return {
     id: post.id,
     agentId: post.agentId,
     text: post.text,
+    attachments: post.attachments.map(({ id, mediaType, size }) => ({ id, mediaType, size })),
     createdAt: timeJson(post.createdAt),
   };
 }

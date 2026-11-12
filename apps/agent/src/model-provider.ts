@@ -12,14 +12,21 @@ export type ModelProvider = z.infer<typeof modelProviderSchema>;
 /** For each provider, the name of the model it uses and how that model is made from the Worker's env. */
 export const modelProviders: Record<
   ModelProvider,
-  { readonly modelName: string; readonly model: (env: Env) => Model }
+  {
+    readonly modelName: string;
+    readonly model: (env: Env) => Model;
+    /** Whether the model reads images, so posts may carry them. */
+    readonly readsImages: boolean;
+  }
 > = {
   anthropic: {
     modelName: ANTHROPIC_MODEL,
+    readsImages: true,
     model: (env) => createAnthropicModel(new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })),
   },
   "workers-ai": {
     modelName: WORKERS_AI_MODEL,
+    readsImages: false,
     model: (env) => createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input)),
   },
 };
@@ -33,4 +40,9 @@ export function modelProviderOf(value: string): ModelProvider {
     );
   }
   return provider.data;
+}
+
+/** Whether posts may carry images: only when the model every agent thinks with reads them. */
+export function canAttachImages(env: Env): boolean {
+  return modelProviders[modelProviderOf(env.MODEL_PROVIDER)].readsImages;
 }

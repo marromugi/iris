@@ -36,7 +36,7 @@ export interface RunWatcher {
   /** A run stopped for this wake-up without ending; it is no longer being carried on. */
   stopped(runId: string): void;
   /** A post was sent, such as an agent's question in a consult. */
-  posted(post: store.Post): void;
+  posted(post: store.PostWithAttachments): void;
 }
 
 const nobodyWatching: RunWatcher = { changed() {}, progress() {}, stopped() {}, posted() {} };

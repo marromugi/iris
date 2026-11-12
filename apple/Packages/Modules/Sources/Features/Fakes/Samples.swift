@@ -147,7 +147,7 @@
             guard let postID = run.postId, case .case1(let first)? = run.messages.first else {
                 preconditionFailure("Sample run \(run.id) doesn't reply to a post.")
             }
-            return Post(id: postID, agentId: nil, text: first.text, createdAt: run.startedAt)
+            return Post(id: postID, agentId: nil, text: first.text, attachments: [], createdAt: run.startedAt)
         }
 
         /// What the events socket says when a post was sent.
@@ -212,7 +212,8 @@
             lastActivityAt: moment("2026-11-10T00:10:00Z"))
 
         static let consultQuestion = Post(
-            id: "question", agentId: "mail", text: "今日の株価はどう？", createdAt: moment("2026-11-10T00:09:00Z"))
+            id: "question", agentId: "mail", text: "今日の株価はどう？", attachments: [],
+            createdAt: moment("2026-11-10T00:09:00Z"))
 
         static let consultAnswer = run(
             """

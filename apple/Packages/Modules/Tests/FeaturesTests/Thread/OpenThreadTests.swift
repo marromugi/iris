@@ -33,7 +33,8 @@ struct OpenThreadTests {
             thread.entries.value?.dropFirst().first
                 == .post(
                     .init(
-                        id: "post-3", agentId: nil, text: "請求書の件、返信の下書きを作って。", createdAt: Samples.moment("2026-11-10T09:00:00Z")))
+                        id: "post-3", agentId: nil, text: "請求書の件、返信の下書きを作って。", attachments: [],
+                        createdAt: Samples.moment("2026-11-10T09:00:00Z")))
         )
         #expect(thread.runs?.count == 5)
         #expect(thread.draft.isEmpty)
@@ -179,7 +180,10 @@ struct OpenThreadTests {
         #expect(thread.runs?.map(\.agentId).sorted() == ["mail", "stocks"])
         #expect(
             thread.entries.value?.last
-                == .post(.init(id: "post-1", agentId: nil, text: "今日の予定は？", createdAt: Samples.moment("2026-11-10T09:00:00Z"))))
+                == .post(
+                    .init(
+                        id: "post-1", agentId: nil, text: "今日の予定は？", attachments: [],
+                        createdAt: Samples.moment("2026-11-10T09:00:00Z"))))
     }
 
     @Test func theAnswerToASendKeepsWhatTheSocketSaidFirst() async {
