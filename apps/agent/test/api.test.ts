@@ -389,6 +389,28 @@ test("a thread's event socket hears a post, then the runs that reply to it", asy
   expect(events[1]).toMatchObject({ type: "run", run: { agentId: first } });
 });
 
+test("sets the user's time zone, and says why one can't be set", async () => {
+  const userId = await addUser("花子");
+  const put = (body: unknown) =>
+    call(userId, "/api/me/time-zone", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const set = await put({ timeZone: "Europe/London" });
+  const unknown = await put({ timeZone: "Mars/Olympus" });
+
+  expect(set.status).toBe(204);
+  expect(unknown.status).toBe(400);
+  expect(await unknown.json()).toEqual({ message: expect.stringContaining("time zone") });
+  expect(
+    await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) =>
+      store.userTimeZone(state.storage),
+    ),
+  ).toBe("Europe/London");
+});
+
 test("refuses a request that reaches it without a signed-in user", async () => {
   const response = await agentApi.request("/api/agents", undefined, env, context());
 

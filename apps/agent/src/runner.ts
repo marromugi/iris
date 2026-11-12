@@ -7,6 +7,7 @@ import {
   type Tool,
 } from "@iris/agent";
 import { type ConsultContext, consultTool, RunCut } from "./consult";
+import { nextSummaryDueAt } from "./daily-summary";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 import { systemPromptOfRun } from "./system-prompt";
@@ -118,6 +119,9 @@ export class Waker {
  * A run waits while a run of the same thread that started before it hasn't ended, the task's new
  * run included; runs that started together, such as the replies to one post, go side by side.
  *
+ * While `alongside`, other work of the same wake-up, goes on, it keeps starting work that
+ * becomes due, and returns only once that work is done too.
+ *
  * Once `WAKE_UP_BUDGET_MS` has passed since it began, nothing new starts, and each run going on
  * stops after its current message and is due again at once, so the next wake-up carries it on.
  */
@@ -128,7 +132,15 @@ export async function runDue(
   watching: RunWatcher = nobodyWatching,
   waker: Waker = new Waker(),
   toolsFor: (run: RunOf) => RunTools = () => ({ tools: [] }),
+  alongside: Promise<void> = Promise.resolve(),
 ): Promise<Date | undefined> {
+  let alongsideDone = false;
+  // Its failure is the caller's to hear; here it only ends the wait.
+  const alongsideEnded = alongside
+    .catch(() => undefined)
+    .finally(() => {
+      alongsideDone = true;
+    });
   const watcher = safely(watching);
   const stopAt = now().getTime() + WAKE_UP_BUDGET_MS;
   const outOfTime = () => now().getTime() >= stopAt;
@@ -181,10 +193,14 @@ export async function runDue(
         );
       }
     }
-    if (going.size === 0) {
+    if (going.size === 0 && alongsideDone) {
       return nextWakeAt(storage);
     }
-    await Promise.race([...going.values(), waker.next()]);
+    await Promise.race([
+      ...going.values(),
+      waker.next(),
+      ...(alongsideDone ? [] : [alongsideEnded]),
+    ]);
   }
 }
 
@@ -215,11 +231,13 @@ function startDueTasks(storage: DurableObjectStorage, now: () => Date, watcher: 
   }
 }
 
-/** The earliest of the next task time and the due times of runs next in line. */
+/** The earliest of the next task time, the due times of runs next in line, and the next summary's. */
 export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
-  const times = [store.earliestTaskRunAt(storage), store.earliestRunDueAt(storage)].filter(
-    (time) => time !== undefined,
-  );
+  const times = [
+    store.earliestTaskRunAt(storage),
+    store.earliestRunDueAt(storage),
+    nextSummaryDueAt(storage),
+  ].filter((time) => time !== undefined);
   return times.length === 0
     ? undefined
     : new Date(Math.min(...times.map((time) => time.getTime())));

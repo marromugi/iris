@@ -5,9 +5,18 @@ import { type NewGroup, newGroupSchema } from "./group";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
-import { nextWakeAt, type RunAgent, type RunOf, type RunTools, runDue, Waker } from "./runner";
+import { summarizeDue } from "./daily-summary";
+import {
+  nextWakeAt,
+  type RunAgent,
+  type RunOf,
+  type RunTools,
+  runDue,
+  WAKE_UP_BUDGET_MS,
+  Waker,
+} from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
-import { nextRunAt } from "./schedule";
+import { nextRunAt, timeZoneSchema } from "./schedule";
 import * as store from "./store";
 import { type NewTask, newTaskSchema } from "./task";
 
@@ -33,13 +42,17 @@ export type PostResult =
 
 export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
 
+/** The real time, for the alarm's work. */
+const clock = () => new Date();
+
 /** Why a post is refused when every agent that would reply to it is deactivated. */
 export const NO_ACTIVE_REPLIER = "Every agent that would reply to this is deactivated.";
 
 /**
  * Builds the Durable Object class for one user. One object per user holds that user's agents and
  * threads (each agent's own one-to-one thread, and groups), the posts sent in them, and the tasks
- * and runs that happen in them; `agentFor` gives the model and tools every run uses, and `toolsFor`
+ * and runs that happen in them, with the user's time zone and each thread's summary of each day;
+ * `agentFor` gives the model and tools every run uses, and `toolsFor`
  * the tools a run gets for its own agent, such as its sandbox, its browser, and web search. Its `fetch`
  * opens a WebSocket on which a thread's runs and posts are sent as they happen (`RunBroadcast`).
  *
@@ -278,6 +291,20 @@ export function createUserAgent(
       return { ok: true, run };
     }
 
+    /**
+     * Sets the time zone the user's days are read in, from their device, and when the next
+     * summary is due with it. An unknown time zone comes back as `ok: false`.
+     */
+    async setTimeZone(timeZone: string): Promise<{ ok: true } | { ok: false; error: string }> {
+      const parsed = timeZoneSchema.safeParse(timeZone);
+      if (!parsed.success) {
+        return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      store.setTimeZone(this.ctx.storage, parsed.data);
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return { ok: true };
+    }
+
     /** The agent's tasks, the next to run first. */
     listTasks(agentId: string): store.Task[] | undefined {
       if (!store.hasAgent(this.ctx.storage, agentId)) {
@@ -298,16 +325,27 @@ export function createUserAgent(
       return store.recentRuns(this.ctx.storage, threadId, limit);
     }
 
+    /** Carries on the work that is due and writes the summaries that are, side by side. */
     override async alarm(): Promise<void> {
       try {
+        const agent = agentFor(this.env);
+        const stopAt = clock().getTime() + WAKE_UP_BUDGET_MS;
+        const summarizing = summarizeDue(
+          this.ctx.storage,
+          agent.model,
+          clock,
+          () => clock().getTime() >= stopAt,
+        );
         const wakeAt = await runDue(
           this.ctx.storage,
-          agentFor(this.env),
-          () => new Date(),
+          agent,
+          clock,
           this.broadcast,
           this.waker,
           (run) => toolsFor(this.env, run, this.ctx.storage),
+          summarizing,
         );
+        await summarizing;
         await this.wakeAt(wakeAt);
       } finally {
         this.broadcast.idle();

@@ -71,6 +71,13 @@
       "when": 1794473921735,
       "tag": "0009_agent_deactivated",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794476413318,
+      "tag": "0010_daily_summaries",
+      "breakpoints": true
     }
   ]
 }
