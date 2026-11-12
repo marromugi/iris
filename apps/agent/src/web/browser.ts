@@ -1,6 +1,7 @@
 import { type Browser, type BrowserWorker, launch, type Page } from "@cloudflare/puppeteer";
 import { defineTool, type Tool } from "@iris/agent";
 import { z } from "zod";
+import { isBlocked } from "./blocked-hosts";
 import { untrusted } from "./search";
 
 /** How much of a page's text the model reads, in characters. */
@@ -40,7 +41,8 @@ export interface WebBrowser {
 /**
  * The tools with which a run browses the web in one browser of its own: open a URL, follow one of
  * the page's numbered links in the same browser, and read the page again. The browser keeps its
- * cookies and page between calls while the run goes on.
+ * cookies and page between calls while the run goes on. It never reaches a host on
+ * `BLOCKED_HOSTS`: the tools refuse such a URL, and the browser drops any request to one.
  */
 export function browserTools(browser: WebBrowser): Tool[] {
   let links: PageView["links"] | undefined;
@@ -56,6 +58,9 @@ export function browserTools(browser: WebBrowser): Tool[] {
         url: z.url({ protocol: /^https?$/ }).describe("The page's http or https URL"),
       }),
       async run({ url }) {
+        if (isBlocked(url)) {
+          return blockedAnswer(url);
+        }
         try {
           return { ok: true, content: show(await browser.open(url)) };
         } catch (error) {
@@ -81,6 +86,9 @@ export function browserTools(browser: WebBrowser): Tool[] {
                   : `There is no link ${link}; the page has links 1 to ${links.length}.`,
           };
         }
+        if (isBlocked(target.url)) {
+          return blockedAnswer(target.url);
+        }
         try {
           return { ok: true, content: show(await browser.open(target.url)) };
         } catch (error) {
@@ -104,6 +112,14 @@ export function browserTools(browser: WebBrowser): Tool[] {
       },
     }),
   ];
+}
+
+/** The tool's answer for a URL the browser may not reach. */
+function blockedAnswer(url: string) {
+  return {
+    ok: false as const,
+    error: `${url} is on a host the browser may not reach (a request catcher, tunnel, paste site, or a bare IP address).`,
+  };
 }
 
 /** The tool's answer when a page couldn't be had. */
@@ -167,7 +183,18 @@ export function browserRun(binding: BrowserWorker): WebBrowser {
         browser = await launch(binding, { keep_alive: BROWSER_IDLE_MS });
         page = undefined;
       }
-      page ??= await browser.newPage();
+      if (page === undefined) {
+        page = await browser.newPage();
+        // Redirects and what a page loads go through the same list as what the tools open.
+        await page.setRequestInterception(true);
+        page.on("request", (request) => {
+          if (isBlocked(request.url())) {
+            void request.abort("blockedbyclient");
+          } else {
+            void request.continue();
+          }
+        });
+      }
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: PAGE_TIMEOUT_MS });
       return readPage(page);
     },

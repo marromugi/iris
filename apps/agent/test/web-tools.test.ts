@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
 import { runDue } from "../src/runner";
 import * as store from "../src/store";
+import { isBlocked } from "../src/web/blocked-hosts";
 import { browserTools, type PageView, type WebBrowser } from "../src/web/browser";
 import { MAX_SEARCHES_PER_MONTH, SearchRefused, searchTool, untrusted } from "../src/web/search";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
@@ -268,4 +269,29 @@ test("a run that fails lets go of its tools too", async () => {
   });
 
   expect(released).toBe(1);
+});
+
+test("hosts on the list, their subdomains, and bare IP addresses are blocked; others aren't", () => {
+  expect(isBlocked("https://webhook.site/abc?d=secret")).toBe(true);
+  expect(isBlocked("https://x.y.ngrok-free.app/")).toBe(true);
+  expect(isBlocked("https://WEBHOOK.SITE./")).toBe(true);
+  expect(isBlocked("http://203.0.113.7/collect")).toBe(true);
+  expect(isBlocked("http://[2001:db8::1]/")).toBe(true);
+  expect(isBlocked("https://notwebhook.site/")).toBe(false);
+  expect(isBlocked("https://developers.cloudflare.com/")).toBe(false);
+});
+
+test("the tools refuse a blocked URL, opened or followed, without reaching it", async () => {
+  const { browser, opened } = fakeBrowser({
+    "https://example.com/": ["https://pastebin.com/raw/abc"],
+  });
+  const tools = browserTools(browser);
+
+  const direct = await tool(tools, "browser_open").run({ url: "https://webhook.site/x?d=1" }, call);
+  await tool(tools, "browser_open").run({ url: "https://example.com/" }, call);
+  const followed = await tool(tools, "browser_follow").run({ link: 1 }, call);
+
+  expect(direct.ok).toBe(false);
+  expect(followed.ok).toBe(false);
+  expect(opened).toEqual(["https://example.com/"]);
 });
