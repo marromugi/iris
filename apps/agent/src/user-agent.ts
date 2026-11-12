@@ -6,9 +6,10 @@ import { type NewGroup, newGroupSchema } from "./group";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
-import { nextWakeAt, type RunOf, type RunTools, runDue, Waker } from "./runner";
+import { summarizeDue } from "./daily-summary";
+import { nextWakeAt, type RunOf, type RunTools, runDue, WAKE_UP_BUDGET_MS, Waker } from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
-import { nextRunAt } from "./schedule";
+import { nextRunAt, timeZoneSchema } from "./schedule";
 import * as store from "./store";
 import { type NewTask, newTaskSchema } from "./task";
 
@@ -33,6 +34,9 @@ export type PostResult =
   | { readonly ok: false; readonly error: string };
 
 export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
+
+/** The real time, for the alarm's work. */
+const clock = () => new Date();
 
 /**
  * Builds the Durable Object class for one user. One object per user holds that user's agents and
@@ -241,6 +245,20 @@ export function createUserAgent(
       return { ok: true, run };
     }
 
+    /**
+     * Sets the time zone the user's days are read in, from their device, and when the next
+     * summary is due with it. An unknown time zone comes back as `ok: false`.
+     */
+    async setTimeZone(timeZone: string): Promise<{ ok: true } | { ok: false; error: string }> {
+      const parsed = timeZoneSchema.safeParse(timeZone);
+      if (!parsed.success) {
+        return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      store.setTimeZone(this.ctx.storage, parsed.data);
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return { ok: true };
+    }
+
     /** The agent's tasks, the next to run first. */
     listTasks(agentId: string): store.Task[] | undefined {
       if (!store.hasAgent(this.ctx.storage, agentId)) {
@@ -261,17 +279,18 @@ export function createUserAgent(
       return store.recentRuns(this.ctx.storage, threadId, limit);
     }
 
+    /** Carries on the work that is due and writes the summaries that are, side by side. */
     override async alarm(): Promise<void> {
       try {
-        const wakeAt = await runDue(
-          this.ctx.storage,
-          agentFor(this.env),
-          () => new Date(),
-          this.broadcast,
-          this.waker,
-          (run) => toolsFor(this.env, run, this.ctx.storage),
-        );
-        await this.wakeAt(wakeAt);
+        const agent = agentFor(this.env);
+        const stopAt = clock().getTime() + WAKE_UP_BUDGET_MS;
+        await Promise.all([
+          runDue(this.ctx.storage, agent, clock, this.broadcast, this.waker, (run) =>
+            toolsFor(this.env, run, this.ctx.storage),
+          ),
+          summarizeDue(this.ctx.storage, agent.model, clock, () => clock().getTime() >= stopAt),
+        ]);
+        await this.wakeAt(nextWakeAt(this.ctx.storage));
       } finally {
         this.broadcast.idle();
       }

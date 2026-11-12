@@ -64,6 +64,13 @@
       "when": 1794415013222,
       "tag": "0008_search_counts",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794473701120,
+      "tag": "0009_daily_summaries",
+      "breakpoints": true
     }
   ]
 }

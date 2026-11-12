@@ -22,11 +22,14 @@ function hasNextRun(schedule: { cron: string; timeZone: string }): boolean {
   }
 }
 
+/** An IANA time zone such as "Asia/Tokyo". */
+export const timeZoneSchema = z.string().refine(isTimeZone, "Not a known IANA time zone.");
+
 /** A repeating time: a five-field cron expression read in an IANA time zone such as "Asia/Tokyo". */
 export const scheduleSchema = z
   .object({
     cron: z.string().trim().min(1),
-    timeZone: z.string().refine(isTimeZone, "Not a known IANA time zone."),
+    timeZone: timeZoneSchema,
   })
   .refine(hasNextRun, {
     message: "Not a five-field cron expression that ever comes round.",

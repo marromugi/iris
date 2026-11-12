@@ -10,6 +10,7 @@ import { addTask } from "./routes/agents/[agentId]/tasks/post";
 import { listAgents } from "./routes/agents/get";
 import { addAgent } from "./routes/agents/post";
 import { me } from "./routes/me/get";
+import { setTimeZone } from "./routes/me/time-zone/put";
 import { threadEntries } from "./routes/threads/[threadId]/entries/get";
 import { openThreadEvents, THREAD_EVENTS_PATH } from "./routes/threads/[threadId]/events/get";
 import { sendPost } from "./routes/threads/[threadId]/posts/post";
@@ -42,6 +43,7 @@ agentApi.notFound((c) => c.json({ message: "Not found" }, 404));
 agentApi.onError(answerError);
 agentApi.openapiRoutes([
   me,
+  setTimeZone,
   listAgents,
   addAgent,
   listTasks,

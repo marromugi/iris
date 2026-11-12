@@ -7,6 +7,7 @@ import {
   type Tool,
 } from "@iris/agent";
 import { type ConsultContext, consultTool, RunCut } from "./consult";
+import { nextSummaryDueAt } from "./daily-summary";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 import { systemPromptOfRun } from "./system-prompt";
@@ -215,11 +216,13 @@ function startDueTasks(storage: DurableObjectStorage, now: () => Date, watcher: 
   }
 }
 
-/** The earliest of the next task time and the due times of runs next in line. */
+/** The earliest of the next task time, the due times of runs next in line, and the next summary's. */
 export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
-  const times = [store.earliestTaskRunAt(storage), store.earliestRunDueAt(storage)].filter(
-    (time) => time !== undefined,
-  );
+  const times = [
+    store.earliestTaskRunAt(storage),
+    store.earliestRunDueAt(storage),
+    nextSummaryDueAt(storage),
+  ].filter((time) => time !== undefined);
   return times.length === 0
     ? undefined
     : new Date(Math.min(...times.map((time) => time.getTime())));
