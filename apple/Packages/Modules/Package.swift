@@ -28,7 +28,9 @@ let package = Package(
             swiftSettings: concurrency,
             plugins: [.plugin(name: "OpenAPIGenerator", package: "swift-openapi-generator")]
         ),
-        .target(name: "Features", dependencies: ["Backend"], swiftSettings: mainActor),
+        .target(
+            name: "Features", dependencies: ["Backend"], resources: [.process("Resources/Fonts")],
+            swiftSettings: mainActor),
         .testTarget(name: "BackendTests", dependencies: ["Backend"], swiftSettings: concurrency),
         .testTarget(name: "FeaturesTests", dependencies: ["Features", "Backend"], swiftSettings: mainActor),
     ]

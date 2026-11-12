@@ -42,6 +42,7 @@ private struct MarkdownBlockView: View {
     @ScaledMetric(relativeTo: .headline) private var title2Size: CGFloat = 17
     @ScaledMetric(relativeTo: .subheadline) private var title3Size: CGFloat = 15
     @ScaledMetric(relativeTo: .footnote) private var tableSize: CGFloat = 13
+    private let codeBlockSize: CGFloat = 13
 
     var body: some View {
         switch block {
@@ -78,7 +79,7 @@ private struct MarkdownBlockView: View {
         case .code(_, let text):
             ScrollView(.horizontal) {
                 Text(text)
-                    .font(.system(.footnote, design: .monospaced))
+                    .font(CodeFont.block(size: codeBlockSize))
                     .padding(MarkdownStyle.codePadding)
             }
             .background(.fill.tertiary, in: .rect(cornerRadius: MarkdownStyle.codeCornerRadius))
@@ -181,7 +182,7 @@ private struct TableView: View {
 }
 
 /// A block's text with its inline Markdown, in `style`, the fading tail drawn with its own opacities. Inline code is
-/// in a monospaced font a little larger than `size`, the text's size, on a rounded fill.
+/// in the code font a little smaller than `size`, the text's size, on a rounded fill.
 private struct InlineText: View {
     let text: String
     let style: HierarchicalShapeStyle
@@ -205,26 +206,28 @@ private struct InlineText: View {
         }
         .textRenderer(
             InlineCodeRenderer(
-                verticalPadding: MarkdownStyle.inlineCodePadding.vertical,
+                padding: MarkdownStyle.inlineCodePadding,
                 cornerRadius: MarkdownStyle.inlineCodeCornerRadius,
                 fill: MarkdownStyle.inlineCodeFill(in: colorScheme)))
     }
 
-    /// The text with its inline Markdown read, each stretch of inline code marked for `InlineCodeRenderer` and given
-    /// room at its sides.
+    /// The text with its inline Markdown read, each stretch of inline code in the code font and marked for
+    /// `InlineCodeRenderer`. The room at both of the code's sides is tracking on its own last character, which the
+    /// renderer splits by drawing the code that much to the right, so copying the text adds nothing to it.
     private static func text(_ markdown: String, codeSize: CGFloat) -> Text {
         let attributed = attributed(markdown)
-        // A no-break space keeps the room with the code; its own tracking, which overrides the text's, widens it to the
-        // padding.
-        let side = Text("\u{202F}").tracking(MarkdownStyle.inlineCodePadding.horizontal - codeSize * 0.2)
+        let room = MarkdownStyle.inlineCodePadding.horizontal * 2
         return attributed.runs.reduce(Text("")) { shown, run in
-            let piece = Text(AttributedString(attributed[run.range]))
-            guard run.inlinePresentationIntent?.contains(.code) == true else { return Text("\(shown)\(piece)") }
-            let code = Text(
-                "\(side)\(piece.font(.system(size: codeSize, weight: MarkdownStyle.inlineCodeWeight, design: .monospaced)))\(side)"
-            )
-            .customAttribute(InlineCodeMark())
-            return Text("\(shown)\(code)")
+            let text = AttributedString(attributed[run.range])
+            guard run.inlinePresentationIntent?.contains(.code) == true, let last = text.characters.indices.last else {
+                return Text("\(shown)\(Text(text))")
+            }
+            let font = CodeFont.inline(size: codeSize)
+            let body = Text(AttributedString(text[..<last])).font(font).customAttribute(InlineCodeMark())
+            // Tracking set here overrides the text's own.
+            let end = Text(AttributedString(text[last...])).font(font).tracking(room)
+                .customAttribute(InlineCodeMark(endAdvance: CodeFont.inlineAdvance(of: text.characters[last], size: codeSize)))
+            return Text("\(shown)\(body)\(end)")
         }
     }
 
