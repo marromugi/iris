@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Model } from "@iris/agent";
 import { env as workerEnv } from "cloudflare:workers";
 import { z } from "zod";
-import { createAnthropicModel } from "./anthropic-model";
+import { ANTHROPIC_MODEL, createAnthropicModel } from "./anthropic-model";
 import { createApp } from "./app";
 import { bashTool } from "./sandbox/bash-tool";
 import { countSearch } from "./store";
@@ -21,7 +21,7 @@ const modelProviderSchema = z.enum(["anthropic", "workers-ai"]);
 const modelProvider = modelProviderOf(workerEnv.MODEL_PROVIDER);
 
 export const UserAgent = createUserAgent(
-  (env) => ({ model: modelOf(env), tools: [] }),
+  (env) => ({ ...modelOf(env), tools: [] }),
   (env, { agentId }, storage) => {
     const browser = browserRun(env.BROWSER);
     return {
@@ -55,9 +55,15 @@ function modelProviderOf(value: string): z.infer<typeof modelProviderSchema> {
   return provider.data;
 }
 
-/** The model of the provider `MODEL_PROVIDER` names. */
-function modelOf(env: Env): Model {
+/** The model of the provider `MODEL_PROVIDER` names, and that model's name. */
+function modelOf(env: Env): { model: Model; modelName: string } {
   return modelProvider === "anthropic"
-    ? createAnthropicModel(new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }))
-    : createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input));
+    ? {
+        model: createAnthropicModel(new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })),
+        modelName: ANTHROPIC_MODEL,
+      }
+    : {
+        model: createWorkersAiModel((input) => env.AI.run(WORKERS_AI_MODEL, input)),
+        modelName: WORKERS_AI_MODEL,
+      };
 }

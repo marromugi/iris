@@ -1,4 +1,3 @@
-import type { Agent } from "@iris/agent";
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { type NewAgent, newAgentSchema, randomLook } from "./agent";
@@ -6,7 +5,7 @@ import { type NewGroup, newGroupSchema } from "./group";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
-import { nextWakeAt, type RunOf, type RunTools, runDue, Waker } from "./runner";
+import { nextWakeAt, type RunAgent, type RunOf, type RunTools, runDue, Waker } from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
@@ -45,7 +44,7 @@ export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
  * it. A method on an agent works on the agent's own one-to-one thread.
  */
 export function createUserAgent(
-  agentFor: (env: Env) => Agent,
+  agentFor: (env: Env) => RunAgent,
   toolsFor: (env: Env, run: RunOf, storage: DurableObjectStorage) => RunTools = () => ({
     tools: [],
   }),
