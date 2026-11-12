@@ -175,7 +175,7 @@ test("the real API takes a conversation another service's model wrote, with tool
   expect(JSON.stringify(reply)).toContain("42");
 });
 
-/** A system prompt as the shared one is made: the same text with the time it was made at. */
+/** A system prompt that says a different time each time it is made, as the shared one once did. */
 const systemAt = (time: string) =>
   `You are an agent in iris. Use tools when they help.\n\nCurrent time: ${time}.`;
 

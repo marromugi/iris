@@ -55,8 +55,9 @@ test("each run is told who it is and where, the shared prompt first", async () =
 
   const [asking, answering] = modelRequests;
   expect(asking?.system).toMatch(/^You are エージェント, one of the user's agents in iris\./);
-  expect(placeOf(asking)).toMatch(
-    /^This run started on \d{4}-\d\d-\d\d \(UTC\); it may be later now, so check with `date` when the time matters\. Thread: one-to-one with the user\.$/,
+  const today = new Date().toISOString().slice(0, "YYYY-MM-DD".length);
+  expect(placeOf(asking)).toBe(
+    `This run started on ${today} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: one-to-one with the user.`,
   );
   expect(answering?.system).toMatch(/^You are 株価,/);
   expect(placeOf(answering)).toMatch(/Thread: consult, where エージェント is asking you\.$/);
