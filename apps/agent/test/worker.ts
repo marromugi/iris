@@ -27,7 +27,7 @@ const model: Model = async (request) => {
   return typeof next === "function" ? next(request) : next;
 };
 
-export const testAgent = { model, tools: [] };
+export const testAgent = { model, tools: [], modelName: "test-model" };
 
 /**
  * The tools each run gets for its own agent, made by `ownTools` with the run's agent's ID. None

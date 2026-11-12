@@ -123,7 +123,7 @@ export class Waker {
  */
 export async function runDue(
   storage: DurableObjectStorage,
-  agent: Agent,
+  agent: RunAgent,
   now: () => Date,
   watching: RunWatcher = nobodyWatching,
   waker: Waker = new Waker(),
@@ -164,7 +164,7 @@ export async function runDue(
         const own = toolsFor({ runId, agentId: store.agentOfRun(storage, runId) ?? "" });
         const withTools = {
           ...agent,
-          system: systemPromptOfRun(storage, runId) ?? agent.system,
+          system: systemPromptOfRun(storage, runId, agent.modelName) ?? agent.system,
           tools: [...agent.tools, ...own.tools, ...tools],
         };
         going.set(
@@ -255,6 +255,11 @@ export interface RunOf {
 export interface RunTools {
   readonly tools: Tool[];
   readonly release?: () => Promise<void>;
+}
+
+/** The agent every run uses, with the name of the model it thinks with, which each run is told. */
+export interface RunAgent extends Agent {
+  readonly modelName: string;
 }
 
 /** A run with no steps left: it ends where it is. */
