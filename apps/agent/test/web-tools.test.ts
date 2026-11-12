@@ -13,9 +13,12 @@ import {
   SearchRefused,
   searchReport,
   searchTool,
-  untrusted,
+  WEB_CONTENT,
 } from "../src/web/search";
+import { untrusted } from "../src/untrusted";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
+
+const webContent = (text: string) => untrusted(WEB_CONTENT, text);
 
 afterEach(async () => {
   scriptedModel.length = 0;
@@ -79,7 +82,7 @@ test("a search gives back its results, counted for the month", async () => {
 
   expect(outcome).toEqual({
     ok: true,
-    content: untrusted("1. Workers\n   https://example.com/workers\n   About Cloudflare"),
+    content: webContent("1. Workers\n   https://example.com/workers\n   About Cloudflare"),
   });
   expect(counted).toEqual(["2026-11"]);
 });
@@ -168,7 +171,7 @@ test("a page opened shows its text and numbered links, and following one stays i
 
   expect(first).toEqual({
     ok: true,
-    content: untrusted(
+    content: webContent(
       "Title of https://example.com/\nhttps://example.com/\n\nText of https://example.com/\n\nLinks:\n[1] Link 1 — https://example.com/a\n[2] Link 2 — https://example.com/b",
     ),
   });
@@ -349,6 +352,6 @@ test("results are numbered with their title, URL, and description, leaving out a
       { title: "b.example", url: "https://b.example/", description: "" },
     ]),
   ).toBe(
-    untrusted("1. A\n   https://a.example/\n   About A.\n\n2. b.example\n   https://b.example/"),
+    webContent("1. A\n   https://a.example/\n   About A.\n\n2. b.example\n   https://b.example/"),
   );
 });
