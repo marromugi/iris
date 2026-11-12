@@ -130,3 +130,9 @@ export async function recordPasskeyUse(
 export async function userWithId(db: Database, id: string): Promise<User | undefined> {
   return db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, id)).get();
 }
+
+/** The ID of the user whose mail address has `tag`, if there is one. */
+export async function userIdForMailTag(db: Database, tag: string): Promise<string | undefined> {
+  const row = await db.select({ id: users.id }).from(users).where(eq(users.mailTag, tag)).get();
+  return row?.id;
+}

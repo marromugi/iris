@@ -8,6 +8,18 @@
 
 アプリは `/api` で読み書きする。`/api` の定義は `openapi.json` に書き出してあり、アプリのクライアントはここから作る。`GET /api/agents/{agentId}/events` を WebSocket で開くと、そのエージェントの実行が変わるたびにその実行が、実行のあいだは「起動中」「考え中」「書いている途中の文字」が届く（`RunEvent`、`src/run-broadcast.ts`）。途中の文字を送る間隔は `WRITING_EVERY_MS`（`src/api/schemas.ts`）まで。保存するのは返事ができてから。アプリは、ソケットを開いてから実行を読む（開く前に起きたことは届かない）。ソケットは Durable Object の休止を妨げない。
 
+## メール
+
+ユーザーは Gmail などから、自分のアドレス `iris+<タグ>@marromugi.me` にメールを転送できる。タグは 24 桁の16進数で、ユーザーごとに D1 の `users.mail_tag` にある。Email Routing のルール（`wrangler.jsonc` の `addresses`）が `iris@marromugi.me` 宛てを Worker の `email` ハンドラに渡し、ハンドラはタグからユーザーを引いて、そのユーザーの Durable Object にメールを置く（`src/mail/`）。持っているユーザーのいないアドレス宛てと、読めないメールは送り主に返す。置くのは送り主、件名、本文のテキスト（プレーンテキストがなければ HTML から作る。5 万字まで）、添付の名前だけ。メールは届いてから 7 日（`MAIL_KEPT_DAYS`）で消える。消すのは次のメールが届いたときで、それまでもツールには 7 日より前のものは見えない。
+
+エージェントはどれも `mail_list`（届いた時刻の範囲で、新しい順に 100 通まで）と `mail_read`（1 通の本文）でメールを読む。中身は送り主が書いたものとして、指示ではなく材料としてモデルに渡す。
+
+```sh
+pnpm --filter @iris/agent-worker mail-address <名前> [--remote]   # その人にアドレスを出して表示する。前のアドレスは使えなくなる
+```
+
+Gmail の転送先に登録すると、確認のメールがそのアドレスに届く。エージェントに「確認コードを教えて」と頼めば `mail_read` で読める。
+
 ## サインイン
 
 Worker は OAuth の認可サーバーでもある（`@cloudflare/workers-oauth-provider`）。トークンの宛先は `<ORIGIN>/api` だけ。
@@ -71,6 +83,7 @@ bash ツールのために、デプロイの前に次が要る（一度だけ）
 - R2 バケット `iris-workspaces`（`pnpm exec wrangler r2 bucket create iris-workspaces`）。
 - そのバケットだけに「Object Read & Write」の R2 API トークン。ダッシュボードで作り、`pnpm exec wrangler secret put S3_ACCESS_KEY_ID` と `S3_SECRET_ACCESS_KEY` に入れる。コンテナには渡らず、Worker が保存先への要求に署名するのに使う。
 - `wrangler deploy` と `pnpm dev`、`test:live` のときに Docker が動いていること（サンドボックスのイメージを作る）。
+- メールのために、ダッシュボードの Email Service → Email Routing → Settings で `marromugi.me` の subaddressing を有効にする。これがないと `iris+<タグ>@` 宛てが `iris@` のルールに当たらない。ルール自体は `wrangler deploy` が `addresses` から作る。
 - Web 検索のために、Exa の API キー（カードを登録しないアカウント。無料枠を使い切ると Exa が止める）を、ダッシュボードの AI Gateway → `default` → Provider Keys に、別名 `default` で登録する。キーは Worker には入らない。
 
 `ORIGIN` は Worker が配られる URL と同じにする（`src/api/api.ts` の `PRODUCTION_ORIGIN` とも同じで、`openapi.json` のテストがそれを確かめる）。

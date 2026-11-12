@@ -59,6 +59,9 @@
       "simple": { "limit": 10, "period": 60 },
     },
   ],
+  // Email Routing sends mail for this address to the Worker; it is MAIL_ADDRESS in src/mail/mail.ts.
+  // Each user's address adds a tag, `iris+<tag>@`, which needs subaddressing turned on for the zone.
+  "addresses": ["iris@marromugi.me"],
   "dev": { "port": 8787 },
   // Drizzle migrations import their .sql files as text.
   "rules": [{ "type": "Text", "globs": ["**/*.sql"], "fallthrough": true }],

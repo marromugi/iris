@@ -92,3 +92,20 @@ export const searchCounts = sqliteTable("search_counts", {
   month: text("month").primaryKey(),
   count: integer("count").notNull(),
 });
+
+/** Mail the user forwarded to their iris address. Kept for `MAIL_KEPT_DAYS` after it arrived. */
+export const mails = sqliteTable(
+  "mails",
+  {
+    id: text("id").primaryKey(),
+    fromAddress: text("from_address").notNull(),
+    fromName: text("from_name").notNull(),
+    subject: text("subject").notNull(),
+    /** The text of the body, from its HTML when it has no plain text, cut at `MAX_MAIL_TEXT`. */
+    text: text("text").notNull(),
+    /** The names of its attachments; their content isn't kept. */
+    attachmentNames: text("attachment_names", { mode: "json" }).$type<string[]>().notNull(),
+    receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("mails_received_at").on(table.receivedAt)],
+);

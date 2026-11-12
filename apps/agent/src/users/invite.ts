@@ -72,7 +72,7 @@ export async function newInvite(
   };
 }
 
-function sqlText(value: string): string {
+export function sqlText(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
