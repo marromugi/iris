@@ -50,6 +50,8 @@ struct HeldTaskReads: AgentBackend {
 
     func addTask(_ task: NewTask) async throws(AppError) -> ScheduledTask { try await backend.addTask(task) }
     func removeTask(id: String) async throws(AppError) { try await backend.removeTask(id: id) }
+    func deactivate() async throws(AppError) { try await backend.deactivate() }
+    func activate() async throws(AppError) { try await backend.activate() }
 }
 
 /// A thread whose reads of its entries are held until released.

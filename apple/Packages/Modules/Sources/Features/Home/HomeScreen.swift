@@ -23,6 +23,12 @@ struct HomeScreen: View {
             let byID = agentsByID
             return thread.agentIds.compactMap { byID[$0]?.look }
         }
+
+        /// Whether the thread is a one-to-one thread whose agent is deactivated.
+        func isDeactivated(_ thread: ChatThread) -> Bool {
+            guard let agentID = thread.agentId else { return false }
+            return agentsByID[agentID]?.active == false
+        }
     }
 
     /// Which sheet for adding is open.
@@ -42,13 +48,15 @@ struct HomeScreen: View {
         ) { home in
             List(home.threads) { thread in
                 NavigationLink(value: thread) {
-                    ThreadRow(thread: thread, looks: home.looks(of: thread))
+                    ThreadRow(thread: thread, looks: home.looks(of: thread), isDeactivated: home.isDeactivated(thread))
                 }
             }
             .listStyle(.plain)
             .refreshable { await load() }
             .navigationDestination(for: ChatThread.self) { thread in
-                ThreadScreen(thread: thread, agents: home.agentsByID, directory: directory)
+                ThreadScreen(thread: thread, agents: home.agentsByID, directory: directory) {
+                    Task { await load() }
+                }
             }
         }
         .navigationTitle("Iris")
@@ -96,18 +104,28 @@ struct HomeScreen: View {
     }
 }
 
-/// One thread: its members' orbs, its name, and when something last happened in it.
+/// One thread: its members' orbs, its name, and when something last happened in it. A deactivated agent's thread has
+/// its orb faded and says it is stopped.
 private struct ThreadRow: View {
     let thread: ChatThread
     /// The members' looks, in the thread's order.
     let looks: [AgentLook]
+    let isDeactivated: Bool
 
     var body: some View {
         HStack {
             ThreadPicture(looks: looks)
-            Text(thread.name)
-                .font(.headline)
-                .lineLimit(1)
+                .opacity(isDeactivated ? 0.35 : 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(thread.name)
+                    .font(.headline)
+                    .lineLimit(1)
+                if isDeactivated {
+                    Text("停止中")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
             Spacer()
             AgoText(date: thread.lastActivityAt)
                 .font(.subheadline)
@@ -161,6 +179,19 @@ private struct AccountMenu: View {
                 directory: FakeAgentDirectory(
                     listed: Array(Samples.agents.prefix(1)), threadsListed: Array(Samples.threads.dropFirst().prefix(1))
                 )
+            ) {}
+        }
+    }
+
+    #Preview("停止中のエージェント") {
+        NavigationStack {
+            HomeScreen(
+                directory: FakeAgentDirectory(
+                    listed: Samples.agents.map { agent in
+                        var agent = agent
+                        agent.active = agent.id != Samples.threads[1].agentId
+                        return agent
+                    })
             ) {}
         }
     }

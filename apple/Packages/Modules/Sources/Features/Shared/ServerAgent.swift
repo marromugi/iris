@@ -16,4 +16,12 @@ nonisolated struct ServerAgent: AgentBackend {
     func removeTask(id taskID: String) async throws(AppError) {
         try await backend.removeTask(id: taskID, of: id)
     }
+
+    func deactivate() async throws(AppError) {
+        try await backend.deactivate(id)
+    }
+
+    func activate() async throws(AppError) {
+        try await backend.activate(id)
+    }
 }

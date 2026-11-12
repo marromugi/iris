@@ -5,19 +5,33 @@ import SwiftUI
 /// started; in a group, each run with its agent's name and orb. A field at the bottom sends a post. While
 /// it is shown, the thread's events keep it current: each post and run as it changes, and while a run is carried on,
 /// whether it is starting or thinking, and its reply as it is written. An agent's one-to-one thread has its tasks a step
-/// away.
+/// away, and is where the agent is deactivated and activated again; while it is deactivated, the field gives way to
+/// the way to activate it.
 struct ThreadScreen: View {
     let thread: ChatThread
     /// The user's agents by ID, for showing whose run each is.
     let agents: [Agent.ID: Agent]
     let directory: any AgentDirectory
     @State private var open: OpenThread
+    /// The one-to-one thread's agent being active; nil for a group or a consult.
+    @State private var activity: AgentActivity?
+    @State private var isConfirmingDeactivation = false
 
-    init(thread: ChatThread, agents: [Agent.ID: Agent], directory: any AgentDirectory) {
+    /// `onAgentSwitched` is called once the one-to-one thread's agent was deactivated or activated.
+    init(
+        thread: ChatThread, agents: [Agent.ID: Agent], directory: any AgentDirectory,
+        onAgentSwitched: @escaping () -> Void = {}
+    ) {
         self.thread = thread
         self.agents = agents
         self.directory = directory
         _open = State(initialValue: OpenThread(backend: directory.thread(id: thread.id)))
+        _activity = State(
+            initialValue: thread.agentId.map { agentID in
+                AgentActivity(
+                    backend: directory.agent(id: agentID), isActive: agents[agentID]?.active ?? true,
+                    onSwitched: onAgentSwitched)
+            })
     }
 
     var body: some View {
@@ -58,7 +72,9 @@ struct ThreadScreen: View {
             .refreshable { await open.load() }
             .safeAreaInset(edge: .bottom) {
                 // A consult is only for reading: the agents ask and answer in it.
-                if thread.consultRunId == nil {
+                if let activity, !activity.isActive {
+                    DeactivatedBar(isSwitching: activity.isSwitching) { activity.activate() }
+                } else if thread.consultRunId == nil {
                     MessageBar(text: $open.draft, canSend: open.canSend) { open.send() }
                 }
             }
@@ -75,6 +91,34 @@ struct ThreadScreen: View {
                     }
                 }
             }
+            if let activity {
+                ToolbarItem(placement: .secondaryAction) {
+                    if activity.isActive {
+                        Button("停止", systemImage: "pause.circle") { isConfirmingDeactivation = true }
+                            .disabled(activity.isSwitching)
+                    } else {
+                        Button("再開", systemImage: "play.circle") { activity.activate() }
+                            .disabled(activity.isSwitching)
+                    }
+                }
+            }
+        }
+        .confirmationDialog(
+            "\(thread.name)を停止しますか？", isPresented: $isConfirmingDeactivation, titleVisibility: .visible
+        ) {
+            Button("停止", role: .destructive) { activity?.deactivate() }
+        } message: {
+            Text("停止しているあいだは返事をせず、タスクも動きません。会話やタスクは消えず、いつでも再開できます。")
+        }
+        .alert(
+            "切り替えられませんでした",
+            isPresented: Binding(
+                get: { activity?.isShowingProblem ?? false }, set: { activity?.isShowingProblem = $0 }),
+            presenting: activity?.problem
+        ) { _ in
+            Button("OK") {}
+        } message: { problem in
+            Text(problem.message ?? "")
         }
         .alert("送れませんでした", isPresented: $open.isShowingSendProblem, presenting: open.sendProblem) { _ in
             Button("OK") {}
@@ -111,6 +155,18 @@ struct ThreadScreen: View {
             ThreadScreen(
                 thread: Samples.threads[1], agents: agents,
                 directory: FakeAgentDirectory(thread: FakeThreadBackend(.init(runs: [], posts: []))))
+        }
+    }
+
+    #Preview("停止中") {
+        let thread = Samples.threads[1]
+        let stopped = agents.mapValues { agent in
+            var agent = agent
+            agent.active = agent.id != thread.agentId
+            return agent
+        }
+        NavigationStack {
+            ThreadScreen(thread: thread, agents: stopped, directory: FakeAgentDirectory())
         }
     }
 

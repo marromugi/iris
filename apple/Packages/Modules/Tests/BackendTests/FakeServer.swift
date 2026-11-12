@@ -31,6 +31,8 @@ actor FakeServer {
     private var namesNoUser = false
     private var missesRevocations = false
     private var holdsRefreshAnswers = false
+    /// Whether the agent is active, as deactivating and activating left it.
+    private var agentActive = true
     private var heldRefreshAnswers: [CheckedContinuation<Void, Never>] = []
     private var waitingForHeldRefresh: [CheckedContinuation<Void, Never>] = []
     private var tasks: [String] = [
@@ -175,7 +177,7 @@ actor FakeServer {
         if request.httpMethod == "GET", path == "/api/agents" {
             return Self.answer(
                 request, 200,
-                #"[{"id":"\#(Self.agentID)","name":"エージェント","look":{"palette":3,"seed":42},"lastRanAt":"2026-11-09T22:00:00Z"}]"#)
+                #"[{"id":"\#(Self.agentID)","name":"エージェント","look":{"palette":3,"seed":42},"lastRanAt":"2026-11-09T22:00:00Z","active":\#(agentActive)}]"#)
         }
         // The agent's ID also names its one-to-one thread here.
         let threadPath = "/api/threads/\(Self.agentID)"
@@ -208,6 +210,12 @@ actor FakeServer {
                 #"{"id":"3c9d1e7a-5b2f-4e8c-9a1d-7f6e5d4c3b2a","prompt":"\#(sent.prompt)","schedule":{"cron":"\#(sent.schedule.cron)","timeZone":"\#(sent.schedule.timeZone)"},"nextRunAt":"2026-11-10T21:30:00Z"}"#
             tasks.append(task)
             return Self.answer(request, 201, task)
+        case ("POST", "/deactivate"):
+            agentActive = false
+            return Self.answer(request, 204, "")
+        case ("POST", "/activate"):
+            agentActive = true
+            return Self.answer(request, 204, "")
         case ("DELETE", _) where rest.hasPrefix("/tasks/"):
             let id = String(rest.dropFirst("/tasks/".count))
             guard let index = tasks.firstIndex(where: { $0.contains(#""id":"\#(id)""#) }) else {
