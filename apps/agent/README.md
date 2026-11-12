@@ -51,7 +51,7 @@ pnpm --filter @iris/agent-worker dev
 
 `pnpm dev` は `ORIGIN` を `https://localhost:8787` にして動かす。サーバーは、トークンの宛先とパスキーの RP ID（`localhost`）をここから決める。アプリは Debug ビルドで、スキームの環境変数 `IRIS_SERVER_ORIGIN=https://localhost:8787` を渡して動かす。手元の D1 と KV は `.wrangler/state` にあり、再起動しても残る。
 
-`pnpm dev` は `--local` で動くので、リモートのバインディングを使わず、Workers AI も呼ばない。`MODEL_PROVIDER` が `anthropic` なら、`apps/agent/.dev.vars` に `ANTHROPIC_API_KEY=<鍵>` を書くと Claude を呼ぶ（その鍵の料金がかかる）。書かなければ、タスクの登録や一覧は確かめられるが、モデルを呼ぶ実行は確かめられない。モデルとのやりとりは `pnpm --filter @iris/agent-worker test:live` で見る。Workers AI と Claude の両方を呼ぶので、両方の料金がかかり、Claude には同じ鍵が要る。`MODEL_PROVIDER=workers-ai ANTHROPIC_API_KEY=invalid pnpm --filter @iris/agent-worker test:live` とすると、Worker の組み立てを通るチェックが Workers AI で動き、Claude に届かないことも確かめられる（環境変数が `wrangler.jsonc` と `.dev.vars` より優先される）。
+`pnpm dev` は `--local` で動くので、リモートのバインディングを使わず、Workers AI も呼ばない。`MODEL_PROVIDER` が `anthropic` なら、`apps/agent/.dev.vars` に `ANTHROPIC_API_KEY=<鍵>` を書くと Claude を呼ぶ（その鍵の料金がかかる）。書かなければ、タスクの登録や一覧は確かめられるが、モデルを呼ぶ実行は確かめられない。モデルとのやりとりは `pnpm --filter @iris/agent-worker test:live` で見る。Workers AI と Claude の両方を呼ぶので、両方の料金がかかり、Claude には同じ鍵が要る。`MODEL_PROVIDER=workers-ai ANTHROPIC_API_KEY=invalid pnpm --filter @iris/agent-worker test:live user-agent` とすると、Worker の組み立てを通るチェックが Workers AI で動き、Claude に届かないことも確かめられる（環境変数が `wrangler.jsonc` と `.dev.vars` より優先される）。
 
 ## デプロイ
 

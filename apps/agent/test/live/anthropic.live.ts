@@ -106,7 +106,7 @@ test("when a run's tools change between steps, the real API leaves out the earli
   const conversation: Message[] = [
     {
       role: "user",
-      text: "A box held 17 apples and 25 more were put in. Use the add tool to work out how many it holds now, then tell me.",
+      text: "A shop sold 17 apples in the morning and 25 in the afternoon, then got 8 back as returns. Work out how many apples were sold in the end, using the add tool for each step (a negative number subtracts). Tell me the final number.",
     },
   ];
   // The first steps: Claude's call and the tool's result, stored.
