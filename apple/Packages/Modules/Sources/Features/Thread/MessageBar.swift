@@ -15,7 +15,7 @@ struct MessageBar: View {
             // Attaching is not built yet; the button holds its place in the box.
             Button("追加", systemImage: "plus") {}
                 .labelStyle(.iconOnly)
-                .font(.title3)
+                .font(.system(size: 20))
                 .frame(width: 32, height: 32)
                 .disabled(true)
             TextField("メッセージ", text: $text, axis: .vertical)
