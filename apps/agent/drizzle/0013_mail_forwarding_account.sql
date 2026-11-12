@@ -1,0 +1,1 @@
+ALTER TABLE `mail_setup` ADD `forwarding_account` text;

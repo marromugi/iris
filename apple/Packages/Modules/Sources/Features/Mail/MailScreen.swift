@@ -54,11 +54,11 @@ struct MailSetupList: View {
                 AddressSection(address: address)
                 StatusSection(status: MailStatus(setup), onShowConfirmation: onShowConfirmation)
                 Section {
-                    Link(destination: Gmail.forwardingSettings) {
+                    Link(destination: Gmail.forwardingSettings(account: setup.forwardingAccount)) {
                         Label("Gmail の転送の設定を開く", systemImage: "arrow.up.forward.app")
                     }
                 } footer: {
-                    Text("Gmail の設定 → 転送と POP/IMAP で「転送先アドレスを追加」に上のアドレスを入れます。確認メールが届くと、ここに次の手順が出ます。")
+                    Text("Gmail の設定 → メール転送と POP/IMAP で「転送先アドレスを追加」に上のアドレスを入れます。確認メールが届くと、ここに次の手順が出ます。")
                 }
                 Section {
                     Button("アドレスを作り直す") { asking = .remake }

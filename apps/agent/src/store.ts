@@ -38,7 +38,7 @@ import {
 import type { Look } from "./agent";
 import { DEFAULT_TIME_ZONE } from "./day";
 import type { Mail } from "./mail/mail";
-import type { MailConfirmation, MailState } from "./mail/setup";
+import type { GmailForwardingRequest, MailState } from "./mail/setup";
 import type { Schedule } from "./schedule";
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
@@ -1443,20 +1443,29 @@ export function mailState(storage: DurableObjectStorage): MailState {
     confirmation:
       row?.confirmationUrl == null || row.confirmationAt === null
         ? null
-        : { url: row.confirmationUrl, code: row.confirmationCode, receivedAt: row.confirmationAt },
+        : {
+            url: row.confirmationUrl,
+            code: row.confirmationCode,
+            receivedAt: row.confirmationAt,
+          },
+    forwardingAccount: row?.forwardingAccount ?? null,
     lastMailAt: row?.lastMailAt ?? null,
   };
 }
 
-/** Keeps the Gmail forwarding confirmation that arrived, in place of any before it. */
+/**
+ * Keeps the Gmail forwarding confirmation that arrived, in place of any before it, and the account
+ * that asked, which stays until the setup starts over.
+ */
 export function setMailConfirmation(
   storage: DurableObjectStorage,
-  confirmation: MailConfirmation,
+  { confirmation, account }: GmailForwardingRequest,
 ): void {
   const values = {
     confirmationUrl: confirmation.url,
     confirmationCode: confirmation.code,
     confirmationAt: confirmation.receivedAt,
+    forwardingAccount: account,
   };
   database(storage)
     .insert(mailSetup)

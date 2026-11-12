@@ -62,6 +62,7 @@ public struct IrisRoot: View {
                 MailConfirmationSheet(
                     offer: offer,
                     address: mail.setup.value?.address,
+                    account: mail.setup.value?.forwardingAccount,
                     onOpened: { mail.openedConfirmation() },
                     onClose: { mail.closeOffer() }
                 )

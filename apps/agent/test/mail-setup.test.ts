@@ -90,9 +90,8 @@ test("Gmail's forwarding confirmation to the address gives its link and code, an
     gmailForwardingConfirmation(mail, to, ADDRESS);
 
   expect(confirmation(gmail("(#123456789) Gmail Forwarding Confirmation", text))).toEqual({
-    url: confirmationUrl,
-    code: "123456789",
-    receivedAt: now,
+    confirmation: { url: confirmationUrl, code: "123456789", receivedAt: now },
+    account: null,
   });
   expect(
     confirmation(
@@ -103,8 +102,44 @@ test("Gmail's forwarding confirmation to the address gives its link and code, an
       ),
       [ADDRESS.toUpperCase().toLowerCase()],
     ),
-  ).toEqual({ url: "https://mail.google.com/mail/u/0/vf-abc", code: null, receivedAt: now });
+  ).toEqual({
+    confirmation: { url: "https://mail.google.com/mail/u/0/vf-abc", code: null, receivedAt: now },
+    account: null,
+  });
   expect(confirmation(newMail("someone@example.com", "(#1) x", text))).toBeUndefined();
+  expect(
+    confirmation(
+      gmail("(#1) Gmail Forwarding Confirmation - Receive Mail from Hanako@Gmail.com", text),
+    )?.account,
+  ).toBe("hanako@gmail.com");
+  expect(
+    confirmation(gmail("(#1) Gmail の転送の確認 - taro.y+x@example.co.jp からメールを受信", text))
+      ?.account,
+  ).toBe("taro.y+x@example.co.jp");
+  expect(
+    confirmation(
+      gmail(
+        "(#1) Gmail Forwarding Confirmation",
+        `Forward to ${ADDRESS} from forwarding-noreply@google.com? hanako@gmail.com asked.\n${confirmationUrl}`,
+      ),
+    )?.account,
+  ).toBe("hanako@gmail.com");
+  expect(
+    confirmation(
+      gmail(
+        "(#1) Gmail Forwarding Confirmation",
+        `Sent by no-reply@accounts.google.com for hanako@gmail.com\n${confirmationUrl}`,
+      ),
+    )?.account,
+  ).toBe("hanako@gmail.com");
+  expect(
+    confirmation(
+      gmail(
+        "(#1) Gmail Forwarding Confirmation - Receive Mail from taro@gmail.com",
+        `hanako@gmail.com\n${confirmationUrl}`,
+      ),
+    )?.account,
+  ).toBe("taro@gmail.com");
   expect(confirmation(gmail("(#1) x", text), ["hanako@gmail.com"])).toBeUndefined();
   for (const other of [
     "https://mail.google.com/mail/",
@@ -124,7 +159,12 @@ test("a user has no mail setup until they make an address", async () => {
   const response = await call(userId, "/api/me/mail");
 
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ address: null, confirmation: null, lastMailAt: null });
+  expect(await response.json()).toEqual({
+    address: null,
+    confirmation: null,
+    forwardingAccount: null,
+    lastMailAt: null,
+  });
 });
 
 test("making an address gives the user one that takes mail, and making another retires it", async () => {
@@ -138,13 +178,19 @@ test("making an address gives the user one that takes mail, and making another r
   ).json();
 
   expect(mailTagOf(first.address)).toBeDefined();
-  expect(second).toEqual({ address: expect.any(String), confirmation: null, lastMailAt: null });
+  expect(second).toEqual({
+    address: expect.any(String),
+    confirmation: null,
+    forwardingAccount: null,
+    lastMailAt: null,
+  });
   expect(second.address).not.toBe(first.address);
   await expect(deliver(first.address, ordinaryMail)).rejects.toThrow("Rejected: No such address.");
   await deliver(second.address, ordinaryMail);
   expect(await (await call(userId, "/api/me/mail")).json()).toEqual({
     address: second.address,
     confirmation: null,
+    forwardingAccount: null,
     lastMailAt: expect.any(String),
   });
 });
@@ -165,11 +211,21 @@ test("Gmail's confirmation waits for the user, kept from agents, until mail arri
 
   expect(waiting).toEqual({
     address,
-    confirmation: { url: confirmationUrl, code: "123456789", receivedAt: expect.any(String) },
+    confirmation: {
+      url: confirmationUrl,
+      code: "123456789",
+      receivedAt: expect.any(String),
+    },
+    forwardingAccount: "hanako@gmail.com",
     lastMailAt: null,
   });
   expect(keptBefore.mail).toEqual([]);
-  expect(receiving).toEqual({ address, confirmation: null, lastMailAt: expect.any(String) });
+  expect(receiving).toEqual({
+    address,
+    confirmation: null,
+    forwardingAccount: "hanako@gmail.com",
+    lastMailAt: expect.any(String),
+  });
 });
 
 test("Gmail's confirmation sent to someone else and forwarded on is kept as mail, not offered", async () => {
@@ -183,6 +239,7 @@ test("Gmail's confirmation sent to someone else and forwarded on is kept as mail
   expect(await (await call(userId, "/api/me/mail")).json()).toEqual({
     address,
     confirmation: null,
+    forwardingAccount: null,
     lastMailAt: expect.any(String),
   });
   const kept = await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) =>
@@ -210,11 +267,12 @@ test("a second confirmation takes the place of the first", async () => {
       code: "987654321",
       receivedAt: expect.any(String),
     },
+    forwardingAccount: "hanako@gmail.com",
     lastMailAt: null,
   });
 });
 
-test("the app can let go of the confirmation once the user opened it", async () => {
+test("the app can let go of the confirmation once the user opened it, and the account stays", async () => {
   const userId = await addUser();
   const { address }: { address: string } = await (
     await call(userId, "/api/me/mail/address", { method: "POST" })
@@ -227,6 +285,7 @@ test("the app can let go of the confirmation once the user opened it", async () 
   expect(await (await call(userId, "/api/me/mail")).json()).toEqual({
     address,
     confirmation: null,
+    forwardingAccount: "hanako@gmail.com",
     lastMailAt: null,
   });
 });
@@ -241,7 +300,12 @@ test("a new address starts the setup over and keeps the mail kept so far", async
 
   const remade = await (await call(userId, "/api/me/mail/address", { method: "POST" })).json();
 
-  expect(remade).toEqual({ address: expect.any(String), confirmation: null, lastMailAt: null });
+  expect(remade).toEqual({
+    address: expect.any(String),
+    confirmation: null,
+    forwardingAccount: null,
+    lastMailAt: null,
+  });
   const kept = await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) =>
     store.listMail(state.storage, { after: new Date(0), before: undefined }, 10),
   );
@@ -261,6 +325,7 @@ test("stopping mail takes the address and the kept mail away", async () => {
   expect(await (await call(userId, "/api/me/mail")).json()).toEqual({
     address: null,
     confirmation: null,
+    forwardingAccount: null,
     lastMailAt: null,
   });
   await expect(deliver(address, ordinaryMail)).rejects.toThrow("Rejected: No such address.");

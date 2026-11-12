@@ -540,6 +540,13 @@
             ],
             "description": "Gmail's forwarding confirmation for the address, from when it arrives until mail arrives after it or the app lets it go; null otherwise"
           },
+          "forwardingAccount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Gmail account that last asked to forward to the address, whose settings turn forwarding on; null until a confirmation names one"
+          },
           "lastMailAt": {
             "type": [
               "string",
@@ -552,6 +559,7 @@
         "required": [
           "address",
           "confirmation",
+          "forwardingAccount",
           "lastMailAt"
         ],
         "description": "Where the user's mail setup stands"

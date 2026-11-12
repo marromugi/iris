@@ -1,14 +1,14 @@
 import { openDatabase } from "../users/database";
 import { userIdForMailTag } from "../users/user-store";
 import { mailTagOf, type NewMail, parseMail } from "./mail";
-import { gmailForwardingConfirmation, type MailConfirmation } from "./setup";
+import { type GmailForwardingRequest, gmailForwardingConfirmation } from "./setup";
 
 /** Where a received mail goes: the Durable Object of the user it was sent to. */
 export interface MailKeeper {
   /** Keeps a mail for the user's agents to read. */
   keep(userId: string, mail: NewMail): Promise<void>;
   /** Holds Gmail's forwarding confirmation for the user to open; agents never see it. */
-  confirm(userId: string, confirmation: MailConfirmation): Promise<void>;
+  confirm(userId: string, request: GmailForwardingRequest): Promise<void>;
 }
 
 /**
@@ -36,8 +36,6 @@ export async function receiveMail(
     return;
   }
   const { mail, to } = parsed;
-  const confirmation = gmailForwardingConfirmation(mail, to, message.to);
-  await (confirmation === undefined
-    ? keeper.keep(userId, mail)
-    : keeper.confirm(userId, confirmation));
+  const request = gmailForwardingConfirmation(mail, to, message.to);
+  await (request === undefined ? keeper.keep(userId, mail) : keeper.confirm(userId, request));
 }

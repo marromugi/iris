@@ -149,6 +149,7 @@ export const mailSetup = sqliteTable("mail_setup", {
   id: integer("id").primaryKey(),
   confirmationUrl: text("confirmation_url"),
   confirmationCode: text("confirmation_code"),
+  forwardingAccount: text("forwarding_account"),
   confirmationAt: integer("confirmation_at", { mode: "timestamp_ms" }),
   lastMailAt: integer("last_mail_at", { mode: "timestamp_ms" }),
 });
