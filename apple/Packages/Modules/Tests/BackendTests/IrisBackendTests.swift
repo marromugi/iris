@@ -186,6 +186,21 @@ struct IrisBackendTests {
         }
     }
 
+    @Test func makesStopsAndReadsTheMailSetup() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        let none = try await backend.mailSetup()
+        let made = try await backend.makeMailAddress()
+        try await backend.dismissMailConfirmation()
+        try await backend.stopMail()
+
+        #expect(none == MailSetup())
+        #expect(made == MailSetup(address: "iris+0123456789abcdef01234567@marromugi.me"))
+        #expect(await server.confirmationsDismissed == 1)
+        #expect(await server.mailAddress == nil)
+    }
+
     @Test func listsTheAgentsAndRefusesOneTheUserDoesNotHave() async throws {
         let backend = backend()
         try await signIn(backend)
@@ -289,6 +304,28 @@ struct IrisBackendTests {
             heard.withLock { $0 } == ["open", "run 6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f", "writing こん"])
         let opened = try #require(await server.requests.last)
         #expect(opened.url?.absoluteString == "wss://iris.test/api/threads/\(agent)/events")
+        #expect(opened.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+    }
+
+    @Test func followsTheUsersOwnEventsOnTheirSocket() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.sendOnEvents([#"{"type":"mail"}"#])
+        let heard = Mutex<[String]>([])
+
+        try await backend.followUserEvents {
+            heard.withLock { $0.append("open") }
+        } onEvent: { event in
+            heard.withLock {
+                switch event {
+                case .case1(let changed): $0.append(changed._type.rawValue)
+                }
+            }
+        }
+
+        #expect(heard.withLock { $0 } == ["open", "mail"])
+        let opened = try #require(await server.requests.last)
+        #expect(opened.url?.absoluteString == "wss://iris.test/api/me/events")
         #expect(opened.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
     }
 

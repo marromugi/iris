@@ -86,7 +86,11 @@ struct HomeScreen: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                AccountMenu(onSignOut: onSignOut)
+                NavigationLink {
+                    AccountScreen(onSignOut: onSignOut)
+                } label: {
+                    Label("アカウント", systemImage: "person.crop.circle")
+                }
             }
         }
         .sheet(item: $adding) { adding in
@@ -174,24 +178,12 @@ private struct ThreadPicture: View {
     }
 }
 
-/// Signing out.
-private struct AccountMenu: View {
-    let onSignOut: () -> Void
-
-    var body: some View {
-        Menu {
-            Button("サインアウト", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive, action: onSignOut)
-        } label: {
-            Label("アカウント", systemImage: "person.crop.circle")
-        }
-    }
-}
-
 #if DEBUG
     #Preview("スレッドがたくさん") {
         NavigationStack {
             HomeScreen(directory: FakeAgentDirectory()) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 
     #Preview("エージェント 1 つ") {
@@ -202,6 +194,7 @@ private struct AccountMenu: View {
                 )
             ) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 
     #Preview("停止中のエージェント") {
@@ -215,11 +208,13 @@ private struct AccountMenu: View {
                     })
             ) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 
     #Preview("読み込めない") {
         NavigationStack {
             HomeScreen(directory: FakeAgentDirectory(failure: .offline)) {}
         }
+        .environment(MailSetupModel(backend: FakeMailBackend()))
     }
 #endif

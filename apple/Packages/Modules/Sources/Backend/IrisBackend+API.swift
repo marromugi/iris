@@ -99,6 +99,47 @@ extension IrisBackend {
         }
     }
 
+    /// Where the user's mail setup stands.
+    public func mailSetup() async throws(AppError) -> MailSetup {
+        switch try await call({ try await client.mailSetup() }) {
+        case .ok(let ok): return try decoded { try ok.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// Makes the user a new mail address, and gives back the setup with it. The address they had before stops taking
+    /// mail.
+    public func makeMailAddress() async throws(AppError) -> MailSetup {
+        switch try await call({ try await client.makeMailAddress() }) {
+        case .ok(let ok): return try decoded { try ok.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// Stops the user receiving mail: their address stops taking it, and the mail kept for their agents is removed.
+    public func stopMail() async throws(AppError) {
+        switch try await call({ try await client.stopMail() }) {
+        case .noContent: return
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// Lets go of Gmail's forwarding confirmation, once the user has opened it.
+    public func dismissMailConfirmation() async throws(AppError) {
+        switch try await call({ try await client.dismissMailConfirmation() }) {
+        case .noContent: return
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
     /// The user's threads, each agent's one-to-one thread and the groups together, the latest activity first.
     public func threads() async throws(AppError) -> [ChatThread] {
         switch try await call({ try await client.listThreads() }) {
