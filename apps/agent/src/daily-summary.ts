@@ -105,6 +105,7 @@ export async function summarizeDue(
   now: () => Date,
   outOfTime: () => boolean,
   tried: () => void = () => {},
+  keep: KeepFile = async () => {},
 ): Promise<void> {
   for (;;) {
     if (outOfTime()) {
@@ -116,19 +117,31 @@ export async function summarizeDue(
     if (due === undefined) {
       return;
     }
-    await summarize(storage, model, due, now);
+    const kept = await summarize(storage, model, due, now);
     tried();
+    if (kept !== undefined) {
+      await keepHistory(storage, due, kept.summary, keep);
+    }
   }
 }
 
+/** Writes `text` to `key` in the bucket agents' workspaces live in. */
+export type KeepFile = (key: string, text: string) => Promise<void>;
+
+/**
+ * Has the model write the day's summary and stores it, or records the failure. Returns what the
+ * day's files are to hold once it is settled: written, or passed over (no summary); undefined
+ * while it is to be tried again.
+ */
 async function summarize(
   storage: DurableObjectStorage,
   model: Model,
   due: DueSummary,
   now: () => Date,
-): Promise<void> {
+): Promise<{ summary: string | undefined } | undefined> {
   const { threadId, day } = due;
   const row = { threadId, day: day.label, startsAt: day.startsAt, endsAt: day.endsAt };
+  let written: string | undefined;
   try {
     const reply = await model({
       system: SUMMARY_PROMPT,
@@ -143,6 +156,7 @@ async function summarize(
       throw new Error("The model wrote an empty summary.");
     }
     store.saveDailySummary(storage, { ...row, text });
+    written = text;
   } catch (error) {
     const failed = store.recordDailySummaryFailure(storage, row, {
       error: error instanceof Error ? error.message : String(error),
@@ -152,27 +166,93 @@ async function summarize(
       `The summary of thread ${threadId} for ${day.label} failed (attempt ${failed}).`,
       error,
     );
+    if (failed < MAX_SUMMARY_ATTEMPTS) {
+      return undefined;
+    }
   }
+  return { summary: written };
+}
+
+/**
+ * Where a day of a thread is kept in each member's workspace, under `/workspace/history/`: an
+ * agent's one-to-one thread at the top, a group under `groups/<thread ID>/`.
+ */
+function historyDirectory(storage: DurableObjectStorage, threadId: string): string {
+  return store.findThread(storage, threadId)?.agentId == null
+    ? `history/groups/${threadId}`
+    : "history";
+}
+
+/**
+ * Writes the day into the workspace of each agent of the thread: what was said as
+ * `<day>.log.md`, and the summary, when there is one, as `<day>.md`, each starting with which day
+ * and which thread it is. The files are copies of what storage holds; one that can't be written is
+ * logged and left out.
+ */
+async function keepHistory(
+  storage: DurableObjectStorage,
+  due: DueSummary,
+  summary: string | undefined,
+  keep: KeepFile,
+): Promise<void> {
+  const thread = store.findThread(storage, due.threadId);
+  if (thread === undefined) {
+    return;
+  }
+  const heading = dayHeading(storage, due);
+  const name = historyName(storage, due);
+  const files = [
+    { name: `${name}.log.md`, text: `${heading}\n\n${saidLines(storage, due)}\n` },
+    ...(summary === undefined ? [] : [{ name: `${name}.md`, text: `${heading}\n\n${summary}\n` }]),
+  ];
+  const directory = historyDirectory(storage, due.threadId);
+  const writes = thread.agentIds.flatMap((agentId) =>
+    files.map(async (file) => {
+      const key = `agents/${agentId}/${directory}/${file.name}`;
+      try {
+        await keep(key, file.text);
+      } catch (error) {
+        console.error(`Writing ${key} failed.`, error);
+      }
+    }),
+  );
+  await Promise.all(writes);
+}
+
+/**
+ * The name the day's files take: its date, and after a time zone change gave an earlier summary of
+ * the thread the same date, the date with how many of them there are ("2026-11-12-2").
+ */
+function historyName(storage: DurableObjectStorage, { threadId, day }: DueSummary): string {
+  const same = store
+    .dailySummariesOf(storage, threadId)
+    .filter((summary) => summary.day === day.label && summary.endsAt < day.endsAt).length;
+  return same === 0 ? day.label : `${day.label}-${same + 1}`;
 }
 
 /** The day of the thread as the model reads it to summarize: which day, which thread, and what was said, by time of day. */
-function dayAsRead(storage: DurableObjectStorage, { threadId, day }: DueSummary): string {
+function dayAsRead(storage: DurableObjectStorage, due: DueSummary): string {
+  return `${dayHeading(storage, due)}\n\n${saidLines(storage, due)}`;
+}
+
+/** Which day, in which time zone, and which thread. */
+function dayHeading(storage: DurableObjectStorage, { threadId, day }: DueSummary): string {
   const timeZone = store.userTimeZone(storage);
+  return `Day: ${day.label} (${timeZone})\nThread: ${threadLine(storage, threadId)}`;
+}
+
+/** What was said in the thread that day, one line each, by time of day. */
+function saidLines(storage: DurableObjectStorage, { threadId, day }: DueSummary): string {
   const time = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
+    timeZone: store.userTimeZone(storage),
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
   });
-  const lines = store
+  return store
     .saidBetween(storage, threadId, day.startsAt, day.endsAt)
-    .map((line) => `[${time.format(line.at)}] ${line.speaker}: ${line.text}`);
-  return [
-    `Day: ${day.label} (${timeZone})`,
-    `Thread: ${threadLine(storage, threadId)}`,
-    "",
-    ...lines,
-  ].join("\n");
+    .map((line) => `[${time.format(line.at)}] ${line.speaker}: ${line.text}`)
+    .join("\n");
 }
 
 function threadLine(storage: DurableObjectStorage, threadId: string): string {

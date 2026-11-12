@@ -344,6 +344,11 @@ export function createUserAgent(
           clock,
           () => clock().getTime() >= stopAt,
           () => this.waker.wake(),
+          async (key, text) => {
+            await this.env.WORKSPACES.put(key, text, {
+              httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+            });
+          },
         );
         const wakeAt = await runDue(
           this.ctx.storage,
