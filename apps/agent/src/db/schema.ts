@@ -140,3 +140,15 @@ export const mails = sqliteTable(
   },
   (table) => [index("mails_received_at").on(table.receivedAt)],
 );
+
+/**
+ * Where the user's mail setup stands, in the one row there is: the Gmail forwarding confirmation
+ * waiting for them to open, and when mail last arrived. Both start over when the address does.
+ */
+export const mailSetup = sqliteTable("mail_setup", {
+  id: integer("id").primaryKey(),
+  confirmationUrl: text("confirmation_url"),
+  confirmationCode: text("confirmation_code"),
+  confirmationAt: integer("confirmation_at", { mode: "timestamp_ms" }),
+  lastMailAt: integer("last_mail_at", { mode: "timestamp_ms" }),
+});

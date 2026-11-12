@@ -155,3 +155,14 @@ export async function giveMailTag(db: Database, name: string, tag: string): Prom
     .returning({ id: users.id });
   return changed.length === 1;
 }
+
+/** The tag of the user's mail address; null when they have none. */
+export async function mailTagOf(db: Database, userId: string): Promise<string | null> {
+  const row = await db.select({ tag: users.mailTag }).from(users).where(eq(users.id, userId)).get();
+  return row?.tag ?? null;
+}
+
+/** Gives the user the mail tag `tag`, or takes theirs away with null. */
+export async function setMailTag(db: Database, userId: string, tag: string | null): Promise<void> {
+  await db.update(users).set({ mailTag: tag }).where(eq(users.id, userId));
+}

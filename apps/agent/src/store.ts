@@ -25,6 +25,7 @@ import {
   agents,
   dailySummaries,
   mails,
+  mailSetup,
   messages,
   posts,
   runs,
@@ -37,6 +38,7 @@ import {
 import type { Look } from "./agent";
 import { DEFAULT_TIME_ZONE } from "./day";
 import type { Mail } from "./mail/mail";
+import type { MailConfirmation, MailState } from "./mail/setup";
 import type { Schedule } from "./schedule";
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
@@ -1432,4 +1434,58 @@ function toMail(row: typeof mails.$inferSelect): Mail {
     attachmentNames: row.attachmentNames,
     receivedAt: row.receivedAt,
   };
+}
+
+/** Where the user's mail setup stands. */
+export function mailState(storage: DurableObjectStorage): MailState {
+  const row = database(storage).select().from(mailSetup).get();
+  return {
+    confirmation:
+      row?.confirmationUrl == null || row.confirmationAt === null
+        ? null
+        : { url: row.confirmationUrl, code: row.confirmationCode, receivedAt: row.confirmationAt },
+    lastMailAt: row?.lastMailAt ?? null,
+  };
+}
+
+/** Keeps the Gmail forwarding confirmation that arrived, in place of any before it. */
+export function setMailConfirmation(
+  storage: DurableObjectStorage,
+  confirmation: MailConfirmation,
+): void {
+  const values = {
+    confirmationUrl: confirmation.url,
+    confirmationCode: confirmation.code,
+    confirmationAt: confirmation.receivedAt,
+  };
+  database(storage)
+    .insert(mailSetup)
+    .values({ id: 1, ...values })
+    .onConflictDoUpdate({ target: mailSetup.id, set: values })
+    .run();
+}
+
+/** Records that mail arrived at `at`: forwarding works, so the confirmation is done with. */
+export function recordMailArrived(storage: DurableObjectStorage, at: Date): void {
+  const values = {
+    confirmationUrl: null,
+    confirmationCode: null,
+    confirmationAt: null,
+    lastMailAt: at,
+  };
+  database(storage)
+    .insert(mailSetup)
+    .values({ id: 1, ...values })
+    .onConflictDoUpdate({ target: mailSetup.id, set: values })
+    .run();
+}
+
+/** Starts the mail setup over, as for a new address or none. */
+export function resetMailSetup(storage: DurableObjectStorage): void {
+  database(storage).delete(mailSetup).run();
+}
+
+/** Removes all kept mail. */
+export function deleteAllMail(storage: DurableObjectStorage): void {
+  database(storage).delete(mails).run();
 }

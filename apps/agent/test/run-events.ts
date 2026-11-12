@@ -1,11 +1,11 @@
 import type { RunEvent } from "../src/api/schemas";
 
 /** Takes in the client end of an events socket and keeps what it hears. */
-export function listen(socket: WebSocket | null) {
+export function listen<Event = RunEvent>(socket: WebSocket | null) {
   if (socket === null) {
     throw new Error("The response carries no WebSocket.");
   }
-  const events: RunEvent[] = [];
+  const events: Event[] = [];
   socket.addEventListener("message", (event) => {
     events.push(JSON.parse(String(event.data)));
   });
@@ -13,7 +13,7 @@ export function listen(socket: WebSocket | null) {
   return {
     events,
     /** Waits until the socket has heard `count` events, failing after two seconds. */
-    async heard(count: number): Promise<RunEvent[]> {
+    async heard(count: number): Promise<Event[]> {
       for (let waited = 0; events.length < count; waited += 10) {
         if (waited >= 2000) {
           throw new Error(`Heard ${events.length} events, not ${count}: ${JSON.stringify(events)}`);
