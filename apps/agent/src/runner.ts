@@ -267,7 +267,8 @@ async function* noSteps(): AsyncGenerator<Message, void, undefined> {}
 
 /**
  * Carries the run on from its saved messages until it ends, it has taken `DEFAULT_MAX_STEPS`
- * steps in all, or `outOfTime` says so after a message, when it is due again at once.
+ * steps in all, or `outOfTime` says so after a message, when it is due again at once. A run ended
+ * meanwhile by deactivating its agent stops there and saves nothing more.
  */
 async function carryOn(
   storage: DurableObjectStorage,
@@ -286,12 +287,21 @@ async function carryOn(
     // Steps count across attempts and wake-ups: the run's own messages after its first are the
     // steps it has taken.
     const stepsLeft = DEFAULT_MAX_STEPS - (conversation.length - 1);
-    const onProgress = (progress: ModelProgress) => watcher.progress(runId, progress);
+    // A run ended meanwhile, by deactivating its agent, tells no more of how it is getting on.
+    const onProgress = (progress: ModelProgress) => {
+      if (!store.hasRunEnded(storage, runId)) {
+        watcher.progress(runId, progress);
+      }
+    };
     const steps =
       stepsLeft > 0
         ? run(agent, [...earlier, ...conversation], { onProgress, maxSteps: stepsLeft })
         : noSteps();
     for await (const message of steps) {
+      if (store.hasRunEnded(storage, runId)) {
+        watcher.stopped(runId);
+        return;
+      }
       store.appendMessage(storage, runId, seq, message);
       seq += 1;
       // Still being carried on: not due again until an attempt cut off here would be.
@@ -303,9 +313,17 @@ async function carryOn(
         return;
       }
     }
+    if (store.hasRunEnded(storage, runId)) {
+      watcher.stopped(runId);
+      return;
+    }
     store.endRun(storage, runId, now());
     watcher.changed(runId);
   } catch (error) {
+    if (store.hasRunEnded(storage, runId)) {
+      watcher.stopped(runId);
+      return;
+    }
     if (error instanceof RunCut) {
       store.postponeRun(storage, runId, now());
       watcher.stopped(runId);

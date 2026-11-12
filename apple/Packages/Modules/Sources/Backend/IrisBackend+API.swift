@@ -61,6 +61,31 @@ extension IrisBackend {
         }
     }
 
+    /// Deactivates the agent: it replies to nothing and its tasks don't run until it is activated, and nothing it has
+    /// is removed.
+    public func deactivate(_ agentID: Agent.ID) async throws(AppError) {
+        switch try await call({ try await client.deactivateAgent(path: .init(agentId: agentID)) }) {
+        case .noContent: return
+        case .notFound(let missing): throw try refusal { try missing.body.json }
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// Activates the agent again. Its tasks next run at their first time after now.
+    public func activate(_ agentID: Agent.ID) async throws(AppError) {
+        switch try await call({ try await client.activateAgent(path: .init(agentId: agentID)) }) {
+        case .noContent: return
+        case .notFound(let missing): throw try refusal { try missing.body.json }
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
     /// The user's threads, each agent's one-to-one thread and the groups together, the latest activity first.
     public func threads() async throws(AppError) -> [ChatThread] {
         switch try await call({ try await client.listThreads() }) {

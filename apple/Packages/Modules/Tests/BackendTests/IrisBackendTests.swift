@@ -187,6 +187,21 @@ struct IrisBackendTests {
         }
     }
 
+    @Test func deactivatesAndActivatesTheAgentAndSaysWhenItHasNone() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        try await backend.deactivate(agent)
+        let deactivated = try await backend.agents().first?.active
+        try await backend.activate(agent)
+
+        #expect(deactivated == false)
+        #expect(try await backend.agents().first?.active == true)
+        await #expect(throws: AppError.refused(message: "No agent of this user has this ID")) {
+            try await backend.deactivate("0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e")
+        }
+    }
+
     @Test func removesATaskAndCountsOneAlreadyGoneAsRemoved() async throws {
         let backend = backend()
         try await signIn(backend)

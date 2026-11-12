@@ -1,7 +1,8 @@
 // The server's types as the app reads them, under names that say what they are in the app. They are the generated
 // ones, since openapi.json is the server's contract.
 
-/// One of the user's agents: what it is called, and when its latest run started (nil until it first runs).
+/// One of the user's agents: what it is called, when its latest run started (nil until it first runs), and whether it
+/// is active or deactivated.
 public typealias Agent = Components.Schemas.Agent
 /// One of the user's threads as the home lists it: an agent's one-to-one thread, or a group of agents. Not `Thread`,
 /// which is Foundation's own.

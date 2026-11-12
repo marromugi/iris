@@ -33,6 +33,9 @@ export type PostResult =
 
 export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
 
+/** Why a post is refused when every agent that would reply to it is deactivated. */
+export const NO_ACTIVE_REPLIER = "Every agent that would reply to this is deactivated.";
+
 /**
  * Builds the Durable Object class for one user. One object per user holds that user's agents and
  * threads (each agent's own one-to-one thread, and groups), the posts sent in them, and the tasks
@@ -41,7 +44,9 @@ export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
  * opens a WebSocket on which a thread's runs and posts are sent as they happen (`RunBroadcast`).
  *
  * The methods that take an agent's or a thread's ID answer undefined when the user has none with
- * it. A method on an agent works on the agent's own one-to-one thread.
+ * it. A method on an agent works on the agent's own one-to-one thread. A deactivated agent starts
+ * no run: its tasks wait, and a post it would reply to goes without its reply, or is refused when
+ * no other agent would reply.
  */
 export function createUserAgent(
   agentFor: (env: Env) => RunAgent,
@@ -132,8 +137,9 @@ export function createUserAgent(
 
     /**
      * Sends a post in the thread, and starts a run of each member that replies to it: those
-     * named with @, or every member when none is. Returns the post and its runs as they start.
-     * Empty text comes back as `ok: false`.
+     * named with @, or every member when none is, leaving out deactivated agents. Returns the
+     * post and its runs as they start. Empty text, or a post no active agent would reply to,
+     * comes back as `ok: false`.
      */
     async post(threadId: string, input: NewMessage): Promise<PostResult | undefined> {
       const thread = store.findThread(this.ctx.storage, threadId);
@@ -147,14 +153,13 @@ export function createUserAgent(
       if (!parsed.success) {
         return { ok: false, error: z.prettifyError(parsed.error) };
       }
-      const names = new Map(
-        store.listAgents(this.ctx.storage).map((agent) => [agent.id, agent.name]),
-      );
-      const members = thread.agentIds.map((id) => ({ id, name: names.get(id) ?? "" }));
-      return {
-        ok: true,
-        ...(await this.startPost(threadId, parsed.data.text, repliers(parsed.data.text, members))),
-      };
+      const byId = new Map(store.listAgents(this.ctx.storage).map((agent) => [agent.id, agent]));
+      const members = thread.agentIds.map((id) => ({ id, name: byId.get(id)?.name ?? "" }));
+      const active = repliers(parsed.data.text, members).filter((id) => byId.get(id)?.active);
+      if (active.length === 0) {
+        return { ok: false, error: NO_ACTIVE_REPLIER };
+      }
+      return { ok: true, ...(await this.startPost(threadId, parsed.data.text, active)) };
     }
 
     /** The thread's latest posts and runs together, the latest first, at most `limit` of them. */
@@ -180,7 +185,7 @@ export function createUserAgent(
       store.insertAgent(this.ctx.storage, agent);
       return {
         ok: true,
-        agent: { id: agent.id, name: agent.name, look: agent.look, lastRanAt: null },
+        agent: { id: agent.id, name: agent.name, look: agent.look, lastRanAt: null, active: true },
       };
     }
 
@@ -208,6 +213,36 @@ export function createUserAgent(
       return { ok: true, task };
     }
 
+    /**
+     * Deactivates the agent: it replies to nothing and its tasks don't run until it is activated
+     * again, and its runs that haven't ended end now without a reply. Says whether the user has
+     * the agent.
+     */
+    async deactivateAgent(agentId: string): Promise<boolean> {
+      const ended = store.deactivateAgent(this.ctx.storage, agentId, new Date());
+      if (ended === undefined) {
+        return false;
+      }
+      for (const runId of ended) {
+        this.broadcast.changed(runId);
+      }
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return true;
+    }
+
+    /**
+     * Activates the agent again. Its tasks next run at their first time after now: the times they
+     * missed while it was deactivated don't run. Says whether the user has the agent.
+     */
+    async activateAgent(agentId: string): Promise<boolean> {
+      const now = new Date();
+      const found = store.activateAgent(this.ctx.storage, agentId, (task) =>
+        nextRunAt(task.schedule, now),
+      );
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return found;
+    }
+
     /** Removes one of the agent's tasks and says whether it had one. Runs it already started carry on. */
     async removeTask(agentId: string, taskId: string): Promise<boolean | undefined> {
       if (!store.hasAgent(this.ctx.storage, agentId)) {
@@ -231,6 +266,9 @@ export function createUserAgent(
       const parsed = newMessageSchema.safeParse(input);
       if (!parsed.success) {
         return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      if (!store.listAgents(this.ctx.storage).find((agent) => agent.id === agentId)?.active) {
+        return { ok: false, error: NO_ACTIVE_REPLIER };
       }
       const { runs } = await this.startPost(threadId, parsed.data.text, [agentId]);
       const [run] = runs;
