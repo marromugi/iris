@@ -35,7 +35,7 @@ nonisolated enum MarkdownStyle {
 
     /// Inline code's size against the text around it.
     static let inlineCodeScale: CGFloat = 0.9
-    static let inlineCodeWeight: Font.Weight = .medium
+    static let inlineCodeWeight: Font.Weight = .semibold
     static let inlineCodePadding = (horizontal: CGFloat(5.5), vertical: CGFloat(2))
     static let inlineCodeCornerRadius: CGFloat = 7
 
