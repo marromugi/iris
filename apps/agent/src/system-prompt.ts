@@ -31,28 +31,36 @@ export type RunPlace =
   | { readonly kind: "group"; readonly name: string }
   | { readonly kind: "consult"; readonly asker: string };
 
+/** The thread's earlier days as a run reads them: the user's day the run is on, and the summaries of the days before it, oldest first. */
+export interface EarlierDays {
+  readonly today: string;
+  readonly summaries: readonly SummaryRead[];
+}
+
 /**
  * The system prompt for a run of the agent `name` in `place` that started at `startedAt`, thinking
- * with the model `modelName`, followed by `summaries`, the thread's earlier days, oldest first. It
- * says only the day the run started, so it stays the same however long the run goes on and
- * whenever it is carried on, and the model's service can keep reusing what it read before.
+ * with the model `modelName`, followed by `earlier`, the thread's earlier days, when there are
+ * any. It says only the day the run started, so it stays the same however long the run goes on
+ * and whenever it is carried on, and the model's service can keep reusing what it read before.
  */
 export function systemPrompt(
   name: string,
   place: RunPlace,
   startedAt: Date,
   modelName: string,
-  summaries: readonly SummaryRead[] = [],
+  earlier?: EarlierDays,
 ): string {
   const day = startedAt.toISOString().slice(0, "YYYY-MM-DD".length);
   const prompt = `${SHARED_PROMPT.replace("{name}", name)}\n\nThis run started on ${day} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: ${placeLine(place)}. Model: ${modelName}.`;
-  if (summaries.length === 0) {
+  if (earlier === undefined) {
     return prompt;
   }
-  const days = summaries.map((summary) => `<day date="${summary.day}">\n${summary.text}\n</day>`);
+  const days = earlier.summaries.map(
+    (summary) => `<day date="${summary.day}">\n${summary.text}\n</day>`,
+  );
   return [
     prompt,
-    `The conversation leaves out this thread's earlier days, each from ${DAY_STARTS_AT_HOUR}:00 to ${DAY_STARTS_AT_HOUR}:00 in the user's time zone. Their summaries, oldest first:`,
+    `In the user's time zone, where a day runs from ${DAY_STARTS_AT_HOUR}:00 to ${DAY_STARTS_AT_HOUR}:00, this run is on ${earlier.today}. The conversation leaves out this thread's earlier days; their summaries, oldest first:`,
     ...days,
   ].join("\n\n");
 }
@@ -89,29 +97,30 @@ export function systemPromptOfRun(
     place,
     setting.startedAt,
     modelName,
-    summariesRead(storage, runId, setting.thread.id),
+    earlierDays(storage, runId, setting.thread.id),
   );
 }
 
 /**
  * The thread's written summaries of the `SUMMARY_DAYS_READ` days before the run's own, oldest
- * first; none for a consult run.
+ * first, with the run's day; undefined when there are none, and for a consult run.
  */
-function summariesRead(
+function earlierDays(
   storage: DurableObjectStorage,
   runId: string,
   threadId: string,
-): SummaryRead[] {
+): EarlierDays | undefined {
   const day = dayOfRun(storage, runId);
   if (day === undefined) {
-    return [];
+    return undefined;
   }
   const from = labelDaysBefore(day.label, SUMMARY_DAYS_READ);
-  return store
+  const summaries = store
     .dailySummariesOf(storage, threadId)
     .flatMap((summary) =>
       summary.text !== null && summary.day >= from && summary.day < day.label
         ? [{ day: summary.day, text: summary.text }]
         : [],
     );
+  return summaries.length === 0 ? undefined : { today: day.label, summaries };
 }

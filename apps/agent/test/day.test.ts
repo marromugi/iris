@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { dayOf } from "../src/day";
+import { dayOf, labelDaysBefore } from "../src/day";
 
 test("a day runs from 4:00 to 4:00 in the time zone, so 3:59 is still the day before", () => {
   const day = {
@@ -25,4 +25,10 @@ test("the day clocks go back on is 25 hours long, and the one they go forward on
     startsAt: new Date("2026-03-07T04:00:00-05:00"),
     endsAt: new Date("2026-03-08T04:00:00-04:00"),
   });
+});
+
+test("a label some days before another crosses months, years, and leap days", () => {
+  expect(labelDaysBefore("2027-01-03", 7)).toBe("2026-12-27");
+  expect(labelDaysBefore("2028-03-01", 1)).toBe("2028-02-29");
+  expect(labelDaysBefore("2026-03-01", 1)).toBe("2026-02-28");
 });
