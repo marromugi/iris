@@ -4,6 +4,8 @@
 
 実行は、タスクの時刻が来るか、エージェントにメッセージが送られると始まる。エージェントの実行はひと続きの会話で、始まった順に 1 つずつ動く。前の実行が終わる（返事が来るか、失敗が続いて諦める）まで、次の実行は待つ。モデルは、そのエージェントの前の実行のうち返事まで終わったものを、新しいほうから丸ごと合わせて 40 メッセージまで読んでから、今の実行を読む（`src/runner.ts` の `MAX_EARLIER_MESSAGES`）。モデルの返事は、流れてくるまま受け取る。
 
+モデルは `wrangler.jsonc` の `MODEL_PROVIDER` で選ぶ。`anthropic`（初期値）なら Claude Haiku 5.5（`src/anthropic-model.ts`、鍵は secret の `ANTHROPIC_API_KEY`）、`workers-ai` なら Workers AI の GLM-4.7-Flash（`src/workers-ai-model.ts`、AI バインディング）。Claude の考えた記録（thinking）は、返事のメッセージに `reasoning` の部分として残り、同じ実行の続きでモデルに送り返す。アプリへの `/api` と、あとの実行が読む前の会話には入れない。記録は、それより前のシステムプロンプト・ツール・会話がそのときと同じときだけ使われる。システムプロンプトは起床のたびに今の時刻で作り直し、ツールの説明はエージェントの名前を並べるので、起床をまたいで続く実行（再試行、時間切れ、相談待ち）では、API が前の起床の記録を捨てて続ける（`thinking-binding-controls` のベータ。捨てた分は `console.warn` に出る）。1 回の起床の中のツールの往復では記録が生きる。Claude が断った返事、途中で切れた返事、文字もツール呼び出しもない返事は、実行の失敗になる。
+
 アプリは `/api` で読み書きする。`/api` の定義は `openapi.json` に書き出してあり、アプリのクライアントはここから作る。`GET /api/agents/{agentId}/events` を WebSocket で開くと、そのエージェントの実行が変わるたびにその実行が、実行のあいだは「起動中」「考え中」「書いている途中の文字」が届く（`RunEvent`、`src/run-broadcast.ts`）。途中の文字を送る間隔は `WRITING_EVERY_MS`（`src/api/schemas.ts`）まで。保存するのは返事ができてから。アプリは、ソケットを開いてから実行を読む（開く前に起きたことは届かない）。ソケットは Durable Object の休止を妨げない。
 
 ## サインイン
@@ -49,7 +51,7 @@ pnpm --filter @iris/agent-worker dev
 
 `pnpm dev` は `ORIGIN` を `https://localhost:8787` にして動かす。サーバーは、トークンの宛先とパスキーの RP ID（`localhost`）をここから決める。アプリは Debug ビルドで、スキームの環境変数 `IRIS_SERVER_ORIGIN=https://localhost:8787` を渡して動かす。手元の D1 と KV は `.wrangler/state` にあり、再起動しても残る。
 
-`pnpm dev` は `--local` で動くので、リモートのバインディングを使わず、Workers AI も呼ばない。タスクの登録や一覧は確かめられるが、モデルを呼ぶ実行は確かめられない。モデルとのやりとりは `pnpm --filter @iris/agent-worker test:live`（Workers AI の料金がかかる）で見る。
+`pnpm dev` は `--local` で動くので、リモートのバインディングを使わず、Workers AI も呼ばない。`MODEL_PROVIDER` が `anthropic` なら、`apps/agent/.dev.vars` に `ANTHROPIC_API_KEY=<鍵>` を書くと Claude を呼ぶ（その鍵の料金がかかる）。書かなければ、タスクの登録や一覧は確かめられるが、モデルを呼ぶ実行は確かめられない。モデルとのやりとりは `pnpm --filter @iris/agent-worker test:live` で見る。Workers AI と Claude の両方を呼ぶので、両方の料金がかかり、Claude には同じ鍵が要る。`MODEL_PROVIDER=workers-ai ANTHROPIC_API_KEY=invalid pnpm --filter @iris/agent-worker test:live user-agent` とすると、Worker の組み立てを通るチェックが Workers AI で動き、Claude に届かないことも確かめられる（環境変数が `wrangler.jsonc` と `.dev.vars` より優先される）。
 
 ## デプロイ
 
@@ -62,6 +64,8 @@ pnpm exec wrangler deploy
 pnpm --filter @iris/agent-worker invite <名前> --remote   # 本番の D1 に招待を出す
 ```
 
+Claude を使うために、デプロイの前に API キーを `pnpm exec wrangler secret put ANTHROPIC_API_KEY` に入れる（一度だけ）。鍵は Claude Console で作る。API はクレジットの前払いで、残高がなくなると呼べなくなる。`MODEL_PROVIDER` が `workers-ai` でも、`wrangler.jsonc` が鍵を必須にしているので入れておく。
+
 bash ツールのために、デプロイの前に次が要る（一度だけ）。
 
 - R2 バケット `iris-workspaces`（`pnpm exec wrangler r2 bucket create iris-workspaces`）。
@@ -72,4 +76,5 @@ bash ツールのために、デプロイの前に次が要る（一度だけ）
 `ORIGIN` は Worker が配られる URL と同じにする（`src/api/api.ts` の `PRODUCTION_ORIGIN` とも同じで、`openapi.json` のテストがそれを確かめる）。
 
 - `/api` のパスや形を変えたものをデプロイするときは、アプリも同じコミットから作り直して入れ替える。前のビルドのアプリは、変わったところを読めなくなる。
+- Claude が動くと、保存されるメッセージに `reasoning` の部分が入る。`reasoning` を知らない前のバージョンの Worker に戻すと、それを含む実行と、それを前の会話として読む実行は読めずに失敗する。
 - Durable Object のマイグレーション（`drizzle/`）は、デプロイのあと各ユーザーの Durable Object が次に開いたときに当たる。当たったあとは、そのマイグレーションを知らない前のバージョンの Worker に戻すと、そのユーザーの Durable Object は開けなくなる（`store.migrate` が新しいストレージを拒む）。

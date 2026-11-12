@@ -26,7 +26,8 @@ export interface ModelRequest {
 
 /**
  * Produces the assistant's next message for a conversation. An adapter for one model service
- * implements this and keeps that service's message format to itself. It rejects when the
- * service fails, and the agent passes that rejection on to its caller.
+ * implements this and keeps that service's message format to itself, except inside the reasoning
+ * parts it writes, which only it reads. It rejects when the service fails, and the agent passes
+ * that rejection on to its caller.
  */
 export type Model = (request: ModelRequest) => Promise<AssistantMessage>;

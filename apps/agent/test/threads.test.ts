@@ -176,7 +176,7 @@ test("a thread's entries are its posts and runs, the latest first, each post aft
 /** A time on one morning, by its minute. */
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 10, 8, minute));
 
-test("a post is read together with its replies, and passed over when none ended with one", async () => {
+test("a post is read together with its replies, without the model's reasoning, and passed over when none ended with one", async () => {
   const [first] = await userAgent().listAgents();
   const agentId = first?.id ?? "";
   const read = await runInDurableObject(userAgent(), (_, state) => {
@@ -188,7 +188,13 @@ test("a post is read together with its replies, and passed over when none ended 
         [agentId],
       );
     const [answered = ""] = send("answered", "X", 0);
-    store.appendMessage(state.storage, answered, 1, reply("Answer to X."));
+    store.appendMessage(state.storage, answered, 1, {
+      role: "assistant",
+      parts: [
+        { type: "reasoning", data: { type: "thinking", thinking: "", signature: "s1" } },
+        { type: "text", text: "Answer to X." },
+      ],
+    });
     store.endRun(state.storage, answered, at(1));
     const [givenUp = ""] = send("given-up", "Y", 2);
     store.giveUpRun(state.storage, givenUp, at(3));

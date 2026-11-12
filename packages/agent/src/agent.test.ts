@@ -89,10 +89,14 @@ test("passes the model's progress on as it writes each message", async () => {
   expect(heard).toEqual([{ type: "thinking" }, { type: "writing", text: "Hel" }]);
 });
 
-test("runs a called tool with its parsed input and sends the result back to the model", async () => {
+test("runs a called tool with its parsed input and sends the result, and the model's reasoning, back to the model", async () => {
   const askForecast: AssistantMessage = {
     role: "assistant",
-    parts: [{ type: "text", text: "Checking." }, call("c1", "forecast", { city: "Tokyo" })],
+    parts: [
+      { type: "reasoning", data: { type: "thinking", thinking: "", signature: "s1" } },
+      { type: "text", text: "Checking." },
+      call("c1", "forecast", { city: "Tokyo" }),
+    ],
   };
   const { model, requests } = scriptedModel([askForecast, reply("Sunny in Tokyo.")]);
 

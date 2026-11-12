@@ -749,8 +749,8 @@ export function recentRuns(storage: DurableObjectStorage, threadId: string, limi
  * What was said in the run's thread before it, as its agent reads it, the latest first, each
  * entry to be kept whole. An entry is a post together with the replies to it that ended with
  * one, or a run a task started that ended with a reply. The agent's own reply is its
- * conversation (without the post, which comes first); another agent's is its reply as a user
- * message after the agent's name. A post without such a reply, and a run without one (given up,
+ * conversation (without the post, which comes first, and without the model's reasoning); another
+ * agent's is its reply as a user message after the agent's name. A post without such a reply, and a run without one (given up,
  * or stopped at its step limit), are passed over. Only what came before the run started counts,
  * so replies to the same post don't read each other. Conversations are read from storage only
  * when the caller asks for their entry.
@@ -808,7 +808,7 @@ export function* earlierInThread(
       const name = agentNames.get(row.agentId) ?? "";
       return [{ role: "user", text: `${name}: ${replyText(conversation)}` }];
     }
-    return row.postId === null ? conversation : conversation.slice(1);
+    return (row.postId === null ? conversation : conversation.slice(1)).map(withoutReasoning);
   };
   for (const entry of entries.toSorted((a, b) => b.at.getTime() - a.at.getTime())) {
     if ("run" in entry) {
@@ -823,6 +823,16 @@ export function* earlierInThread(
       yield [{ role: "user", text: postAsRead(entry.post, agentNames) }, ...replies];
     }
   }
+}
+
+/**
+ * A message of an earlier run as a later run reads it. The model's reasoning stays with the run
+ * that produced it: it was written against that run's view of the thread, not the later one's.
+ */
+function withoutReasoning(message: Message): Message {
+  return message.role === "assistant"
+    ? { ...message, parts: message.parts.filter((part) => part.type !== "reasoning") }
+    : message;
 }
 
 /** The text of a finished conversation's last message. */

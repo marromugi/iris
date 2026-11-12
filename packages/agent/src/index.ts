@@ -16,6 +16,8 @@ export {
   jsonValueSchema,
   type Message,
   messageSchema,
+  type ReasoningPart,
+  reasoningPartSchema,
   type TextPart,
   textPartSchema,
   type ToolCallPart,

@@ -286,6 +286,34 @@ test("a failed run is tried again later and carried on, not started again", asyn
   expect(runs[0]?.endedAt).toEqual(retryAt);
 });
 
+test("a run carried on in a later wake-up gives the model back the reasoning it stored", async () => {
+  const startedAt = new Date("2026-11-10T08:00:00Z");
+  await insertTask(startedAt);
+  const lookUp: AssistantMessage = {
+    role: "assistant",
+    parts: [
+      { type: "reasoning", data: { type: "thinking", thinking: "", signature: "s1" } },
+      { type: "tool-call", id: "c1", name: "mail", input: {} },
+    ],
+  };
+  scriptedModel.push(lookUp, new Error("The model service is unreachable."));
+  await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => startedAt),
+  );
+
+  scriptedModel.push(reply("You have 3 new emails."));
+  const retryAt = new Date(startedAt.getTime() + RETRY_DELAY_MS);
+  await runInDurableObject(userAgent(), (_, state) =>
+    runDue(state.storage, testAgent, () => retryAt),
+  );
+
+  expect(modelRequests.at(-1)?.messages).toEqual([
+    { role: "user", text: "Summarize today's email" },
+    lookUp,
+    { role: "tool", callId: "c1", isError: true, content: 'There is no tool named "mail".' },
+  ]);
+});
+
 test("a run that keeps failing is given up, keeping its error, and stops calling the model", async () => {
   const startedAt = new Date("2026-11-10T08:00:00Z");
   await insertTask(startedAt);

@@ -190,7 +190,7 @@ test("removes a task, and answers 404 for one that isn't there", async () => {
   expect(await again.json()).toEqual({ message: "No task of this agent has this ID" });
 });
 
-test("lists an agent's latest runs with their conversations, and when it last ran", async () => {
+test("lists an agent's latest runs with their conversations, without the model's reasoning, and when it last ran", async () => {
   const userId = await addUser("一郎");
   const agentId = await firstAgentId(userId);
   const agents = env.USER_AGENT.getByName(userId);
@@ -206,7 +206,13 @@ test("lists an agent's latest runs with their conversations, and when it last ra
     });
     await state.storage.setAlarm(dueAt);
   });
-  scriptedModel.push({ role: "assistant", parts: [{ type: "text", text: "3 new emails." }] });
+  scriptedModel.push({
+    role: "assistant",
+    parts: [
+      { type: "reasoning", data: { type: "thinking", thinking: "", signature: "s1" } },
+      { type: "text", text: "3 new emails." },
+    ],
+  });
   await runDurableObjectAlarm(agents);
 
   const runs = await call(userId, `/api/agents/${agentId}/runs?limit=5`);
