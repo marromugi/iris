@@ -3,7 +3,7 @@ import CoreGraphics
 /// The sizes and spacing Markdown is drawn with, in points. Font sizes are at the default Dynamic Type size and scale
 /// with it.
 nonisolated enum MarkdownStyle {
-    static let bodySize: CGFloat = 14.5
+    static let bodySize: CGFloat = 16
     /// Added to each line's natural height.
     static let lineSpacing: CGFloat = 7
     static let tracking: CGFloat = -0.15
