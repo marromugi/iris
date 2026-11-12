@@ -1480,6 +1480,14 @@ export function recordMailArrived(storage: DurableObjectStorage, at: Date): void
     .run();
 }
 
+/** Lets go of the Gmail forwarding confirmation, keeping when mail last arrived. */
+export function clearMailConfirmation(storage: DurableObjectStorage): void {
+  database(storage)
+    .update(mailSetup)
+    .set({ confirmationUrl: null, confirmationCode: null, confirmationAt: null })
+    .run();
+}
+
 /** Starts the mail setup over, as for a new address or none. */
 export function resetMailSetup(storage: DurableObjectStorage): void {
   database(storage).delete(mailSetup).run();

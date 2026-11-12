@@ -28,14 +28,15 @@ export async function receiveMail(
     message.setReject("No such address.");
     return;
   }
-  let mail: NewMail;
+  let parsed: { mail: NewMail; to: string[] };
   try {
-    mail = await parseMail(message.raw, now());
+    parsed = await parseMail(message.raw, now());
   } catch {
     message.setReject("The message could not be read.");
     return;
   }
-  const confirmation = gmailForwardingConfirmation(mail);
+  const { mail, to } = parsed;
+  const confirmation = gmailForwardingConfirmation(mail, to, message.to);
   await (confirmation === undefined
     ? keeper.keep(userId, mail)
     : keeper.confirm(userId, confirmation));

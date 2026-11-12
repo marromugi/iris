@@ -15,6 +15,7 @@ import { openUserEvents, USER_EVENTS_PATH } from "./routes/me/events/get";
 import { me } from "./routes/me/get";
 import { stopMail } from "./routes/me/mail/address/delete";
 import { makeMailAddress } from "./routes/me/mail/address/post";
+import { dismissMailConfirmation } from "./routes/me/mail/confirmation/delete";
 import { mailSetup } from "./routes/me/mail/get";
 import { setTimeZone } from "./routes/me/time-zone/put";
 import { threadEntries } from "./routes/threads/[threadId]/entries/get";
@@ -53,6 +54,7 @@ agentApi.openapiRoutes([
   mailSetup,
   makeMailAddress,
   stopMail,
+  dismissMailConfirmation,
   listAgents,
   addAgent,
   deactivateAgent,

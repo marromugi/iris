@@ -34,20 +34,22 @@ async function addUser(): Promise<string> {
 
 const confirmationUrl = "https://mail-settings.google.com/mail/vf-%5BANGjdJ8abc%5D-xYz12_3?ui=2";
 
-/** Gmail's forwarding confirmation as it arrives, in plain text. */
-const gmailConfirmation = [
-  "Message-ID: <c1@google.com>",
-  "From: Gmail Team <forwarding-noreply@google.com>",
-  "Subject: (#123456789) Gmail Forwarding Confirmation - Receive Mail from hanako@gmail.com",
-  "Content-Type: text/plain; charset=utf-8",
-  "",
-  "hanako@gmail.com has requested to automatically forward mail to your email address.",
-  "To allow hanako@gmail.com to automatically forward mail to your address, please click the link below to confirm the request:",
-  "",
-  confirmationUrl,
-  "",
-  "Confirmation code: 123456789",
-].join("\r\n");
+/** Gmail's forwarding confirmation for forwarding to `to`, as it arrives, in plain text. */
+const gmailConfirmation = (to: string) =>
+  [
+    "Message-ID: <c1@google.com>",
+    "From: Gmail Team <forwarding-noreply@google.com>",
+    `To: ${to}`,
+    "Subject: (#123456789) Gmail Forwarding Confirmation - Receive Mail from hanako@gmail.com",
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    "hanako@gmail.com has requested to automatically forward mail to your email address.",
+    "To allow hanako@gmail.com to automatically forward mail to your address, please click the link below to confirm the request:",
+    "",
+    `${confirmationUrl}.`,
+    "",
+    "Confirmation code: 123456789",
+  ].join("\r\n");
 
 const ordinaryMail = [
   "Message-ID: <m1@example.com>",
@@ -78,35 +80,42 @@ function newMail(from: string, subject: string, text: string): NewMail {
   return { from: { address: from, name: "" }, subject, text, attachmentNames: [], receivedAt: now };
 }
 
-test("Gmail's forwarding confirmation gives its link and code, and no other mail does", () => {
-  const text = `To confirm, click:\n\n${confirmationUrl}\n\nConfirmation code: 123456789`;
+const ADDRESS = "iris+0123456789abcdef01234567@marromugi.me";
 
+test("Gmail's forwarding confirmation to the address gives its link and code, and no other mail does", () => {
+  const text = `To confirm, click:\n\n${confirmationUrl}.\n\nConfirmation code: 123456789`;
+  const gmail = (subject: string, body: string) =>
+    newMail("forwarding-noreply@google.com", subject, body);
+  const confirmation = (mail: NewMail, to = [ADDRESS]) =>
+    gmailForwardingConfirmation(mail, to, ADDRESS);
+
+  expect(confirmation(gmail("(#123456789) Gmail Forwarding Confirmation", text))).toEqual({
+    url: confirmationUrl,
+    code: "123456789",
+    receivedAt: now,
+  });
   expect(
-    gmailForwardingConfirmation(
-      newMail("forwarding-noreply@google.com", "(#123456789) Gmail Forwarding Confirmation", text),
-    ),
-  ).toEqual({ url: confirmationUrl, code: "123456789", receivedAt: now });
-  expect(
-    gmailForwardingConfirmation(
+    confirmation(
       newMail(
         "Forwarding-NoReply@google.com",
         "Gmail の転送の確認",
-        "確認 (https://mail.google.com/mail/vf-abc)",
+        "確認 (https://mail.google.com/mail/u/0/vf-abc)",
       ),
+      [ADDRESS.toUpperCase().toLowerCase()],
     ),
-  ).toEqual({ url: "https://mail.google.com/mail/vf-abc", code: null, receivedAt: now });
-  expect(
-    gmailForwardingConfirmation(newMail("someone@example.com", "(#1) x", text)),
-  ).toBeUndefined();
-  expect(
-    gmailForwardingConfirmation(
-      newMail(
-        "forwarding-noreply@google.com",
-        "Forwarding stopped",
-        "https://mail.google.com/mail/",
-      ),
-    ),
-  ).toBeUndefined();
+  ).toEqual({ url: "https://mail.google.com/mail/u/0/vf-abc", code: null, receivedAt: now });
+  expect(confirmation(newMail("someone@example.com", "(#1) x", text))).toBeUndefined();
+  expect(confirmation(gmail("(#1) x", text), ["hanako@gmail.com"])).toBeUndefined();
+  for (const other of [
+    "https://mail.google.com/mail/",
+    "https://mail.google.com/mail/?view=cm&to=a@evil.example&body=vf-",
+    "https://mail.google.com/mail/u/0/?continue=https://evil.example/vf-1",
+    "https://evil.example/mail/vf-abc",
+    "http://mail-settings.google.com/mail/vf-abc",
+    "https://mail.google.com.evil.example/mail/vf-abc",
+  ]) {
+    expect(confirmation(gmail("(#1) x", `click ${other}`))).toBeUndefined();
+  }
 });
 
 test("a user has no mail setup until they make an address", async () => {
@@ -146,7 +155,7 @@ test("Gmail's confirmation waits for the user, kept from agents, until mail arri
     await call(userId, "/api/me/mail/address", { method: "POST" })
   ).json();
 
-  await deliver(address, gmailConfirmation);
+  await deliver(address, gmailConfirmation(address));
   const waiting = await (await call(userId, "/api/me/mail")).json();
   const keptBefore = await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) =>
     store.listMail(state.storage, { after: new Date(0), before: undefined }, 10),
@@ -161,6 +170,82 @@ test("Gmail's confirmation waits for the user, kept from agents, until mail arri
   });
   expect(keptBefore.mail).toEqual([]);
   expect(receiving).toEqual({ address, confirmation: null, lastMailAt: expect.any(String) });
+});
+
+test("Gmail's confirmation sent to someone else and forwarded on is kept as mail, not offered", async () => {
+  const userId = await addUser();
+  const { address }: { address: string } = await (
+    await call(userId, "/api/me/mail/address", { method: "POST" })
+  ).json();
+
+  await deliver(address, gmailConfirmation("hanako@gmail.com"));
+
+  expect(await (await call(userId, "/api/me/mail")).json()).toEqual({
+    address,
+    confirmation: null,
+    lastMailAt: expect.any(String),
+  });
+  const kept = await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) =>
+    store.listMail(state.storage, { after: new Date(0), before: undefined }, 10),
+  );
+  expect(kept.mail.map((mail) => mail.from.address)).toEqual(["forwarding-noreply@google.com"]);
+});
+
+test("a second confirmation takes the place of the first", async () => {
+  const userId = await addUser();
+  const { address }: { address: string } = await (
+    await call(userId, "/api/me/mail/address", { method: "POST" })
+  ).json();
+  const second = gmailConfirmation(address)
+    .replace("(#123456789)", "(#987654321)")
+    .replace(confirmationUrl, "https://mail-settings.google.com/mail/vf-second");
+
+  await deliver(address, gmailConfirmation(address));
+  await deliver(address, second);
+
+  expect(await (await call(userId, "/api/me/mail")).json()).toEqual({
+    address,
+    confirmation: {
+      url: "https://mail-settings.google.com/mail/vf-second",
+      code: "987654321",
+      receivedAt: expect.any(String),
+    },
+    lastMailAt: null,
+  });
+});
+
+test("the app can let go of the confirmation once the user opened it", async () => {
+  const userId = await addUser();
+  const { address }: { address: string } = await (
+    await call(userId, "/api/me/mail/address", { method: "POST" })
+  ).json();
+  await deliver(address, gmailConfirmation(address));
+
+  const dismissed = await call(userId, "/api/me/mail/confirmation", { method: "DELETE" });
+
+  expect(dismissed.status).toBe(204);
+  expect(await (await call(userId, "/api/me/mail")).json()).toEqual({
+    address,
+    confirmation: null,
+    lastMailAt: null,
+  });
+});
+
+test("a new address starts the setup over and keeps the mail kept so far", async () => {
+  const userId = await addUser();
+  const { address }: { address: string } = await (
+    await call(userId, "/api/me/mail/address", { method: "POST" })
+  ).json();
+  await deliver(address, ordinaryMail);
+  await deliver(address, gmailConfirmation(address));
+
+  const remade = await (await call(userId, "/api/me/mail/address", { method: "POST" })).json();
+
+  expect(remade).toEqual({ address: expect.any(String), confirmation: null, lastMailAt: null });
+  const kept = await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) =>
+    store.listMail(state.storage, { after: new Date(0), before: undefined }, 10),
+  );
+  expect(kept.mail.map((mail) => mail.subject)).toEqual(["Hello"]);
 });
 
 test("stopping mail takes the address and the kept mail away", async () => {
@@ -189,21 +274,27 @@ test("the user's events socket hears each change of the mail setup", async () =>
   const userId = await addUser();
   const opened = await call(userId, "/api/me/events", { headers: { Upgrade: "websocket" } });
   const socket = listen<UserEvent>(opened.webSocket);
+  const [agent]: { id: string }[] = await (await call(userId, "/api/agents")).json();
+  const agentSocket = listen(
+    (
+      await call(userId, `/api/agents/${agent?.id}/events`, {
+        headers: { Upgrade: "websocket" },
+      })
+    ).webSocket,
+  );
 
   const { address }: { address: string } = await (
     await call(userId, "/api/me/mail/address", { method: "POST" })
   ).json();
-  await deliver(address, gmailConfirmation);
+  await deliver(address, gmailConfirmation(address));
   await deliver(address, ordinaryMail);
   await call(userId, "/api/me/mail/address", { method: "DELETE" });
 
   expect(opened.status).toBe(101);
-  expect(await socket.heard(4)).toEqual([
-    { type: "mail" },
-    { type: "mail" },
-    { type: "mail" },
-    { type: "mail" },
-  ]);
+  await call(userId, "/api/me/mail/confirmation", { method: "DELETE" });
+
+  expect(await socket.heard(5)).toEqual(Array.from({ length: 5 }, () => ({ type: "mail" })));
+  expect(agentSocket.events).toEqual([]);
 });
 
 test("the user's events path is only a WebSocket", async () => {

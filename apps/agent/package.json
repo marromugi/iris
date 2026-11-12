@@ -10,7 +10,6 @@
     "d1:migrate:local": "wrangler d1 migrations apply iris --local",
     "dev": "wrangler dev --local --local-protocol https --https-key-path ~/.iris-dev/key.pem --https-cert-path ~/.iris-dev/cert.pem --var ORIGIN:https://localhost:8787",
     "invite": "tsx scripts/issue-invite.ts",
-    "mail-address": "tsx scripts/issue-mail-address.ts",
     "test:live": "vitest run --config vitest.live.config.ts",
     "openapi": "tsx scripts/write-openapi.ts > openapi.json",
     "build:client": "esbuild src/sign-in/client/main.ts --bundle --format=iife --target=es2022 --minify --outfile=build/sign-in-client.txt"

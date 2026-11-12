@@ -353,6 +353,12 @@ export function createUserAgent(
       sendUserEvent(this.ctx, { type: "mail" });
     }
 
+    /** Lets go of Gmail's forwarding confirmation, as once the user has opened it. */
+    dismissMailConfirmation(): void {
+      store.clearMailConfirmation(this.ctx.storage);
+      sendUserEvent(this.ctx, { type: "mail" });
+    }
+
     /** Where the user's mail setup stands, apart from their address. */
     mailState(): MailState {
       return store.mailState(this.ctx.storage);

@@ -24,8 +24,9 @@ const route = createRoute({
 export const makeMailAddress = defineOpenAPIRoute<typeof route, ApiEnv>({
   route,
   handler: async (c): Promise<Answer<typeof route>> => {
-    await setMailTag(openDatabase(c.env.DB), c.var.user.id, newMailTag());
+    // The setup starts over first: should the new address fail to be stored, the old one still works.
     await c.var.agents.restartMail(false);
+    await setMailTag(openDatabase(c.env.DB), c.var.user.id, newMailTag());
     return c.json(await readMailSetup(c), 200);
   },
 });

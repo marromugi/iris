@@ -257,7 +257,7 @@ export const userEventSchema = z
   .discriminatedUnion("type", [
     z.object({ type: z.literal("mail") }).meta({
       description:
-        "The user's mail setup changed: an address was made or let go, Gmail's forwarding confirmation arrived, or mail arrived. Read /api/me/mail again",
+        "The user's mail setup changed: an address was made or let go, Gmail's forwarding confirmation arrived or was let go, or mail arrived. Read /api/me/mail again",
     }),
   ])
   .meta({
@@ -275,17 +275,24 @@ export const mailSetupSchema = z
     }),
     confirmation: z
       .object({
-        url: z.url().meta({ description: "The link that turns Gmail's forwarding on" }),
-        code: z.string().nullable().meta({ description: "The code Gmail sent with it, if any" }),
+        url: z.url().meta({
+          description:
+            "The link that confirms the address to Gmail. Forwarding is then turned on in Gmail's settings",
+        }),
+        code: z
+          .string()
+          .nullable()
+          .meta({ description: "The code that confirms it in Gmail's settings instead, if any" }),
         receivedAt: timeSchema,
       })
       .nullable()
       .meta({
         description:
-          "Gmail's forwarding confirmation, from when it arrives until mail arrives after it; null otherwise",
+          "Gmail's forwarding confirmation for the address, from when it arrives until mail arrives after it or the app lets it go; null otherwise",
       }),
     lastMailAt: timeSchema.nullable().meta({
-      description: "When mail last arrived at the address; null until the first does",
+      description:
+        "When mail other than Gmail's confirmation last arrived at the address; null until the first does",
     }),
   })
   .meta({ id: "MailSetup", description: "Where the user's mail setup stands" });

@@ -21,8 +21,8 @@ const route = createRoute({
 export const stopMail = defineOpenAPIRoute<typeof route, ApiEnv>({
   route,
   handler: async (c): Promise<Answer<typeof route>> => {
-    await setMailTag(openDatabase(c.env.DB), c.var.user.id, null);
     await c.var.agents.restartMail(true);
+    await setMailTag(openDatabase(c.env.DB), c.var.user.id, null);
     return c.body(null, 204);
   },
 });

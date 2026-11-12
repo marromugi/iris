@@ -20,10 +20,6 @@
 
 アプリは `GET /api/me/mail` でメールの状態（アドレス、Gmail の転送の確認、最後にメールが届いた時刻）を読み、`POST /api/me/mail/address` でアドレスを作る（作り直すと前のアドレスは使えなくなり、確認と最後の時刻は消える。置いたメールは残る）。`DELETE /api/me/mail/address` で受け取りをやめる（アドレスと置いたメールが消える）。Gmail の転送の確認メール（送り主 `forwarding-noreply@google.com`）はエージェントに見せず、確認リンクと件名のコードだけを取り出してメールの状態に置く。確認は、そのあとにふつうのメールが届くと消える。`GET /api/me/events` を WebSocket で開くと、メールの状態が変わるたびに `{ "type": "mail" }` が届く（`UserEvent`、`src/user-events.ts`）。アプリはそれを受けて `/api/me/mail` を読み直す。
 
-```sh
-pnpm --filter @iris/agent-worker mail-address <名前> [--remote]   # その人にアドレスを出して表示する。前のアドレスは使えなくなる
-```
-
 メールのために、デプロイの前にダッシュボードの Email Service → Email Routing → Settings で `marromugi.me` の subaddressing を有効にする（一度だけ）。これがないと `iris+<タグ>@` 宛てが `iris@` のルールに当たらない。ルール自体は `wrangler deploy` が `addresses` から作る。
 
 7 日で消えるのは置いたメールだけで、エージェントがツールで読んだ中身は、その実行の会話として残る。
@@ -77,7 +73,7 @@ pnpm --filter @iris/agent-worker dev
 
 ## デプロイ
 
-本番は `https://iris-agent.marrromugi-dev.workers.dev`。D1 データベース `iris` と KV 名前空間 `iris-oauth` は作ってあり、その ID が `wrangler.jsonc` にある。D1 の ID は、スクリプト（`invite` と `mail-address`）が使う `scripts/d1.jsonc` にもある（`--remote` のときだけ本番に届く。`wrangler login` が要り、そのあいだアカウントに一時的なプレビューの Worker が立つ）。D1 のマイグレーションを足したら、デプロイの前に本番にも当てる。
+本番は `https://iris-agent.marrromugi-dev.workers.dev`。D1 データベース `iris` と KV 名前空間 `iris-oauth` は作ってあり、その ID が `wrangler.jsonc` にある。D1 の ID は、招待のスクリプト（`invite`）が使う `scripts/d1.jsonc` にもある（`--remote` のときだけ本番に届く。`wrangler login` が要り、そのあいだアカウントに一時的なプレビューの Worker が立つ）。D1 のマイグレーションを足したら、デプロイの前に本番にも当てる。
 
 ```sh
 cd apps/agent

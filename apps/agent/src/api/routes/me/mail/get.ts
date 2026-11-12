@@ -2,7 +2,7 @@ import { createRoute, defineOpenAPIRoute } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { mailAddressOf } from "../../../../mail/mail";
 import { openDatabase } from "../../../../users/database";
-import { mailTagOf } from "../../../../users/user-store";
+import { userMailTag } from "../../../../users/user-store";
 import type { Answer } from "../../../answer";
 import { signedIn } from "../../../errors";
 import type { ApiEnv } from "../../../middlewares/signed-in-user";
@@ -20,7 +20,7 @@ const route = createRoute({
 
 /** The signed-in user's mail setup: their address, and where its setup stands. */
 export async function readMailSetup(c: Context<ApiEnv>): Promise<MailSetupJson> {
-  const tag = await mailTagOf(openDatabase(c.env.DB), c.var.user.id);
+  const tag = await userMailTag(openDatabase(c.env.DB), c.var.user.id);
   return mailSetupJson(tag === null ? null : mailAddressOf(tag), await c.var.agents.mailState());
 }
 

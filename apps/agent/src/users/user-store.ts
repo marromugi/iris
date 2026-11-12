@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { Database } from "./database";
 import { inviteKeyHash, type NewInvite } from "./invite";
 import { invites, passkeys, users } from "./schema";
@@ -142,22 +142,8 @@ export async function addInvite(db: Database, invite: NewInvite): Promise<void> 
   await db.insert(invites).values(invite);
 }
 
-/**
- * Gives the one user named `name` the mail tag `tag`, replacing the tag they had, and says whether
- * there was one such user. Nothing changes when no user, or more than one, has the name.
- */
-export async function giveMailTag(db: Database, name: string, tag: string): Promise<boolean> {
-  const named = eq(users.name, name);
-  const changed = await db
-    .update(users)
-    .set({ mailTag: tag })
-    .where(and(named, eq(db.$count(users, named), 1)))
-    .returning({ id: users.id });
-  return changed.length === 1;
-}
-
 /** The tag of the user's mail address; null when they have none. */
-export async function mailTagOf(db: Database, userId: string): Promise<string | null> {
+export async function userMailTag(db: Database, userId: string): Promise<string | null> {
   const row = await db.select({ tag: users.mailTag }).from(users).where(eq(users.id, userId)).get();
   return row?.tag ?? null;
 }

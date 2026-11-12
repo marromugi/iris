@@ -1,6 +1,5 @@
 import { reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { eq } from "drizzle-orm";
 import type { Tool } from "@iris/agent";
 import { afterEach, expect, test } from "vitest";
 import scriptsD1Config from "../scripts/d1.jsonc?raw";
@@ -21,7 +20,6 @@ import { MAIL_LIST_LIMIT, mailReport, mailTools } from "../src/mail/mail-tools";
 import * as store from "../src/store";
 import { untrusted } from "../src/untrusted";
 import { openDatabase } from "../src/users/database";
-import { giveMailTag } from "../src/users/user-store";
 import { users } from "../src/users/schema";
 
 afterEach(async () => {
@@ -122,7 +120,7 @@ test("a mail is read for its sender, subject, text, and attachment names", async
     ].join("\r\n"),
   );
 
-  expect(await parseMail(raw, now)).toEqual({
+  expect((await parseMail(raw, now)).mail).toEqual({
     from: { address: "hanako@example.com", name: "Hanako" },
     subject: "明日の予定",
     text: "See the plan.",
@@ -132,14 +130,14 @@ test("a mail is read for its sender, subject, text, and attachment names", async
 });
 
 test("a mail with only HTML is read as its text, and a long text is cut", async () => {
-  const html = await parseMail(
+  const { mail: html } = await parseMail(
     rawMail(
       { From: "news@example.com", "Content-Type": "text/html; charset=utf-8" },
       "<html><body><p>Sale <b>today</b></p></body></html>",
     ),
     now,
   );
-  const long = await parseMail(
+  const { mail: long } = await parseMail(
     rawMail({ From: "a@example.com" }, "x".repeat(MAX_MAIL_TEXT + 10)),
     now,
   );
@@ -180,8 +178,8 @@ test("a mail whose plain text is blank is read from its HTML, and an image in it
     ].join("\r\n"),
   );
 
-  const mail = await parseMail(raw, now);
-  const withPlain = await parseMail(raw.replace("\r\n   \r\n", "\r\nShipped.\r\n"), now);
+  const { mail } = await parseMail(raw, now);
+  const { mail: withPlain } = await parseMail(raw.replace("\r\n   \r\n", "\r\nShipped.\r\n"), now);
 
   expect(mail.text).toBe("Your order shipped");
   expect(mail.attachmentNames).toEqual([]);
@@ -374,24 +372,4 @@ test("mail_read reads one kept mail, and says when there is none", async () => {
     ok: false,
     error: `There is no mail old; it may be older than ${MAIL_KEPT_DAYS} days.`,
   });
-});
-
-test("a new mail tag goes to the one user with the name, and to none when two share it", async () => {
-  await addUser("user-1", "Hanako", "a".repeat(24));
-  await addUser("user-2", "Taro");
-  await addUser("user-3", "Taro");
-  const tag = newMailTag();
-  const db = openDatabase(env.DB);
-  const tagOf = async (id: string) =>
-    (await db.select({ tag: users.mailTag }).from(users).where(eq(users.id, id)).get())?.tag;
-
-  const hanako = await giveMailTag(db, "Hanako", tag);
-  const taro = await giveMailTag(db, "Taro", newMailTag());
-  const nobody = await giveMailTag(db, "Nobody", newMailTag());
-
-  expect(hanako).toBe(true);
-  expect(await tagOf("user-1")).toBe(tag);
-  expect(taro).toBe(false);
-  expect(nobody).toBe(false);
-  expect([await tagOf("user-2"), await tagOf("user-3")]).toEqual([null, null]);
 });
