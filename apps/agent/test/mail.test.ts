@@ -83,6 +83,10 @@ test("a user's address carries their tag, and only such an address gives one bac
   expect(mailTagOf(`iris+${tag}@example.com`)).toBeUndefined();
   expect(mailTagOf(`tomoki+${tag}@marromugi.me`)).toBeUndefined();
   expect(mailTagOf("iris+short@marromugi.me")).toBeUndefined();
+  expect(mailTagOf(`iris+${tag.slice(1)}@marromugi.me`)).toBeUndefined();
+  expect(mailTagOf(`iris+${tag}0@marromugi.me`)).toBeUndefined();
+  expect(mailTagOf(`xiris+${tag}@marromugi.me`)).toBeUndefined();
+  expect(mailTagOf(`iris+${tag}@marromugi.me@marromugi.me`)).toBeUndefined();
 });
 
 test("a mail is read for its sender, subject, text, and attachment names", async () => {
@@ -167,9 +171,11 @@ test("a mail whose plain text is blank is read from its HTML, and an image in it
   );
 
   const mail = await parseMail(raw, now);
+  const withPlain = await parseMail(raw.replace("\r\n   \r\n", "\r\nShipped.\r\n"), now);
 
   expect(mail.text).toBe("Your order shipped");
   expect(mail.attachmentNames).toEqual([]);
+  expect(withPlain.text).toBe("Shipped.");
 });
 
 test("a mail's text is framed as mail, and can't close the frame itself", () => {
@@ -235,11 +241,11 @@ function newMail(subject: string, receivedAt: Date): NewMail {
   };
 }
 
-test(`keeping a mail lets go of what arrived more than ${MAIL_KEPT_DAYS} days before it`, async () => {
+test("keeping a mail lets go of what arrived more than a week before it", async () => {
   const agent = env.USER_AGENT.getByName("user-1");
 
-  await agent.keepMail(newMail("old", new Date(now.getTime() - MAIL_KEPT_DAYS * DAY_MS - 1)));
-  await agent.keepMail(newMail("week", new Date(now.getTime() - MAIL_KEPT_DAYS * DAY_MS)));
+  await agent.keepMail(newMail("old", new Date("2026-11-05T08:59:59.999Z")));
+  await agent.keepMail(newMail("week", new Date("2026-11-05T09:00:00Z")));
   await agent.keepMail(newMail("new", now));
 
   expect((await keptMail("user-1")).map((kept) => kept.subject)).toEqual(["new", "week"]);
@@ -330,12 +336,13 @@ test(`mail_list shows no mail older than ${MAIL_KEPT_DAYS} days, and says how ma
 });
 
 test("mail_read reads one kept mail, and says when there is none", async () => {
-  const [kept, old] = await withTools(
+  const [kept, old, week] = await withTools(
     [
       storedMail("m2", new Date("2026-11-11T08:00:00Z")),
-      storedMail("old", new Date(now.getTime() - MAIL_KEPT_DAYS * DAY_MS - 1)),
+      storedMail("week", new Date("2026-11-05T09:00:00Z")),
+      storedMail("old", new Date("2026-11-05T08:59:59.999Z")),
     ],
-    async (tools) => [await tools.read("m2"), await tools.read("old")],
+    async (tools) => [await tools.read("m2"), await tools.read("old"), await tools.read("week")],
   );
 
   expect(kept).toEqual({
@@ -352,6 +359,7 @@ test("mail_read reads one kept mail, and says when there is none", async () => {
       ].join("\n"),
     ),
   });
+  expect(week.ok).toBe(true);
   expect(old).toEqual({
     ok: false,
     error: `There is no mail old; it may be older than ${MAIL_KEPT_DAYS} days.`,
