@@ -16,6 +16,13 @@ struct ThreadScreen: View {
     /// The one-to-one thread's agent being active; nil for a group or a consult.
     @State private var activity: AgentActivity?
     @State private var isConfirmingDeactivation = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// The screen's background: white, or in dark mode a black a little lifted, which is easier on the eyes than pure
+    /// black behind the text. Views that cut out the background, such as a tool's dot, take it too.
+    private static func background(in scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 22 / 255, green: 22 / 255, blue: 24 / 255) : .white
+    }
 
     /// `onAgentSwitched` is called with the agent and whether it is now active, once the one-to-one thread's agent was
     /// deactivated or activated.
@@ -80,6 +87,8 @@ struct ThreadScreen: View {
                 }
             }
         }
+        .background(Self.background(in: colorScheme), ignoresSafeAreaEdges: .all)
+        .backgroundStyle(Self.background(in: colorScheme))
         .navigationTitle(thread.name)
         .toolbarTitleDisplayMode(.inline)
         .toolbar {
