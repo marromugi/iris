@@ -140,15 +140,23 @@ struct MarkdownTests {
         #expect(later.isEmpty)
     }
 
-    @Test func spacesItemsCloserThanBlocksAndGivesEachHeadingLevelItsOwnSpace() {
+    @Test func takesTheLargerOfTheSpacesThatMeetBetweenTwoBlocks() {
         let paragraph = MarkdownBlock.paragraph("本文")
         let item = MarkdownBlock.item(marker: "•", depth: 0, text: "項目")
+        let title = MarkdownBlock.heading(level: 1, text: "見出し")
+        let subsection = MarkdownBlock.heading(level: 3, text: "見出し")
 
+        #expect(MarkdownStyle.spacing(above: paragraph, after: paragraph) == 14)
         #expect(MarkdownStyle.spacing(above: item, after: item) == 10)
-        #expect(MarkdownStyle.spacing(above: item, after: paragraph) == 14)
-        #expect(MarkdownStyle.spacing(above: .heading(level: 1, text: "見出し"), after: paragraph) == 38)
-        #expect(MarkdownStyle.spacing(above: .heading(level: 2, text: "見出し"), after: paragraph) == 23)
+        // A list gets more space around it than a paragraph does.
+        #expect(MarkdownStyle.spacing(above: item, after: paragraph) == 20)
+        #expect(MarkdownStyle.spacing(above: paragraph, after: item) == 20)
+        // The heading's space above wins over the paragraph's below, instead of adding to it.
+        #expect(MarkdownStyle.spacing(above: title, after: paragraph) == 38)
+        #expect(MarkdownStyle.spacing(above: title, after: item) == 38)
         #expect(MarkdownStyle.spacing(above: .heading(level: 4, text: "見出し"), after: paragraph) == 28)
-        #expect(MarkdownStyle.spacing(above: paragraph, after: .heading(level: 3, text: "見出し")) == 9)
+        // Under a small heading a paragraph sits closer than the usual space between blocks.
+        #expect(MarkdownStyle.spacing(above: paragraph, after: subsection) == 9)
+        #expect(MarkdownStyle.spacing(above: subsection, after: title) == 28)
     }
 }

@@ -8,8 +8,11 @@ nonisolated enum MarkdownStyle {
     static let lineSpacing: CGFloat = 7
     static let tracking: CGFloat = -0.15
 
+    /// Below a paragraph, quote, code block, rule, or table.
     static let blockSpacing: CGFloat = 14
-    /// Between two list items in a row; other blocks are `blockSpacing` apart.
+    /// Above and below a list as a whole.
+    static let listSpacing: CGFloat = 20
+    /// Between two list items in a row.
     static let itemSpacing: CGFloat = 10
 
     static let markerSpacing: CGFloat = 7
@@ -33,26 +36,24 @@ nonisolated enum MarkdownStyle {
     static let tableCellWidth: CGFloat = 220
     static let tableCornerRadius: CGFloat = 10
 
-    /// The space above `block` when `previous` comes right before it: a heading adds its own space above, and
-    /// takes away or adds its own below.
+    /// The space above `block` when `previous` comes right before it. Each block has its own space above and below,
+    /// and where two meet the larger one wins, as CSS margins collapse; list items in a row are `itemSpacing` apart.
     static func spacing(above block: MarkdownBlock, after previous: MarkdownBlock) -> CGFloat {
-        var spacing: CGFloat
-        if case .item = block, case .item = previous {
-            spacing = itemSpacing
-        } else {
-            spacing = blockSpacing
-        }
-        if case .heading(let level, _) = block { spacing += headingSpacing(level).above }
-        if case .heading(let level, _) = previous { spacing += headingSpacing(level).below }
-        return max(spacing, 0)
+        if case .item = block, case .item = previous { return itemSpacing }
+        return max(margins(of: previous).below, margins(of: block).above)
     }
 
-    /// What a heading of `level` adds above and below it; the levels past 3 share level 3's.
-    private static func headingSpacing(_ level: Int) -> (above: CGFloat, below: CGFloat) {
-        switch level {
-        case 1: (24, 0)
-        case 2: (9, 0)
-        default: (14, -5)
+    /// The space a block wants above and below it. Other blocks want none above, so the block before decides.
+    private static func margins(of block: MarkdownBlock) -> (above: CGFloat, below: CGFloat) {
+        switch block {
+        case .heading(let level, _):
+            switch level {
+            case 1: (38, 14)
+            case 2: (23, 14)
+            default: (28, 9)
+            }
+        case .item: (listSpacing, listSpacing)
+        default: (0, blockSpacing)
         }
     }
 
