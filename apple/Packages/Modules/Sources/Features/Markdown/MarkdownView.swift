@@ -217,16 +217,18 @@ private struct InlineText: View {
     private static func text(_ markdown: String, codeSize: CGFloat) -> Text {
         let attributed = attributed(markdown)
         let room = MarkdownStyle.inlineCodePadding.horizontal * 2
-        return attributed.runs.reduce(Text("")) { shown, run in
+        return attributed.runs.enumerated().reduce(Text("")) { shown, element in
+            let (span, run) = element
             let text = AttributedString(attributed[run.range])
             guard run.inlinePresentationIntent?.contains(.code) == true, let last = text.characters.indices.last else {
                 return Text("\(shown)\(Text(text))")
             }
             let font = CodeFont.inline(size: codeSize)
-            let body = Text(AttributedString(text[..<last])).font(font).customAttribute(InlineCodeMark())
+            let body = Text(AttributedString(text[..<last])).font(font).customAttribute(InlineCodeMark(span: span))
             // Tracking set here overrides the text's own.
             let end = Text(AttributedString(text[last...])).font(font).tracking(room)
-                .customAttribute(InlineCodeMark(endAdvance: CodeFont.inlineAdvance(of: text.characters[last], size: codeSize)))
+                .customAttribute(
+                    InlineCodeMark(span: span, endAdvance: CodeFont.inlineAdvance(of: text.characters[last], size: codeSize)))
             return Text("\(shown)\(body)\(end)")
         }
     }

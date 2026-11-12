@@ -20,13 +20,10 @@ nonisolated enum CodeFont {
     /// font the system falls back to.
     static func inlineAdvance(of character: Character, size: CGFloat) -> CGFloat {
         _ = registered
-        let string = String(character)
-        let base = CTFontCreateWithName("JetBrainsMonoNL-SemiBold" as CFString, size, nil)
-        let font = CTFontCreateForString(base, string as CFString, CFRange(location: 0, length: string.utf16.count))
-        var characters = Array(string.utf16)
-        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
-        CTFontGetGlyphsForCharacters(font, &characters, &glyphs, characters.count)
-        return CTFontGetAdvancesForGlyphs(font, .horizontal, &glyphs, nil, glyphs.count)
+        // A line shapes the character and finds the fallback font as the text does.
+        let font = CTFontCreateWithName("JetBrainsMonoNL-SemiBold" as CFString, size, nil)
+        let string = NSAttributedString(string: String(character), attributes: [.font: font])
+        return CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(string), nil, nil, nil))
     }
 
     /// Registers the bundled fonts with this process, once.

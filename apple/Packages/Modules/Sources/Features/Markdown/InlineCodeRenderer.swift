@@ -3,6 +3,8 @@ import SwiftUI
 /// Marks the runs of a `Text` that are inline code, for `InlineCodeRenderer`. The code's last character carries how far
 /// it advances by itself, without the room after it.
 struct InlineCodeMark: TextAttribute {
+    /// Which stretch of code in the text, so two right after each other stay apart.
+    let span: Int
     var endAdvance: CGFloat?
 }
 
@@ -17,7 +19,7 @@ struct InlineCodeRenderer: TextRenderer {
 
     /// Room for a fill reaching past the first or last line, and for code that wraps, drawn to the right of its line.
     var displayPadding: EdgeInsets {
-        EdgeInsets(top: padding.vertical, leading: 0, bottom: padding.vertical, trailing: padding.horizontal)
+        EdgeInsets(top: padding.vertical, leading: 0, bottom: padding.vertical, trailing: padding.horizontal * 2)
     }
 
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
@@ -83,7 +85,9 @@ struct InlineCodeRenderer: TextRenderer {
                 continue
             }
             let start = index
-            while isCode(line, index) { index += 1 }
+            // Code right after code gets its own fill.
+            let span = line[start][InlineCodeMark.self]?.span
+            while isCode(line, index), line[index][InlineCodeMark.self]?.span == span { index += 1 }
             result.append(
                 Stretch(
                     runs: start..<index, isShifted: !(start == 0 && goesOnFromAbove),
