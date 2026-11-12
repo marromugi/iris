@@ -16,8 +16,8 @@ import { createWorkersAiModel, WORKERS_AI_MODEL } from "./workers-ai-model";
 
 const modelProviderSchema = z.enum(["anthropic", "workers-ai"]);
 
-// Read when the Worker starts, so a value it doesn't know stops the Worker from starting (and a
-// deploy from going out) instead of failing each run.
+// Read when the Worker starts, so a value it doesn't know stops the Worker from starting instead
+// of failing each run.
 const modelProvider = modelProviderOf(workerEnv.MODEL_PROVIDER);
 
 export const UserAgent = createUserAgent(

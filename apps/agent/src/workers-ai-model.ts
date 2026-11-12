@@ -9,7 +9,7 @@ import {
 } from "@iris/agent";
 import { z } from "zod";
 
-/** The Workers AI model every user's agent thinks with. */
+/** The Workers AI model every user's agent thinks with when the provider is Workers AI. */
 export const WORKERS_AI_MODEL = "@cf/zai-org/glm-4.7-flash";
 
 /**

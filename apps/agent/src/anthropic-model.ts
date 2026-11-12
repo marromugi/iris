@@ -24,8 +24,9 @@ export const ANTHROPIC_MODEL = "claude-haiku-5-5";
 const MAX_TOKENS = 64_000;
 
 // Lets the API drop a thinking block whose earlier conversation has changed, instead of failing
-// the request: a run's tools are made again each time it is carried on, and they can change in
-// between (a tool's description can name the user's agents, who can be added while a run waits).
+// the request: a run's system prompt and tools are made again each time it is carried on, and
+// they change in between (the prompt carries the current time, and a tool's description names the
+// user's agents).
 const THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
 
 // The IDs Claude takes for a tool call and its result.

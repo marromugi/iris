@@ -135,3 +135,40 @@ test("when a run's tools change between steps, the real API leaves out the earli
     expect.objectContaining({ type: "thinking_dropped", reason: "prefix_binding_mismatch" }),
   );
 });
+
+test("the real API takes a conversation another service's model wrote, with tool calls Claude wouldn't write", async () => {
+  // As a thread's history from before the switch can be: blank text, a tool call ID Claude refuses,
+  // an input that isn't an object, and a result with nothing in it.
+  const conversation: Message[] = [
+    { role: "user", text: "Add 17 and 25 with the add tool." },
+    {
+      role: "assistant",
+      parts: [
+        { type: "text", text: "\n" },
+        { type: "tool-call", id: "functions.add:0", name: "add", input: "17, 25" },
+      ],
+    },
+    {
+      role: "tool",
+      callId: "functions.add:0",
+      isError: true,
+      content: 'The input for "add" is invalid: expected an object.',
+    },
+    {
+      role: "assistant",
+      parts: [{ type: "tool-call", id: "call.1", name: "add", input: { a: 17, b: 25 } }],
+    },
+    { role: "tool", callId: "call.1", isError: false, content: "" },
+    { role: "assistant", parts: [{ type: "text", text: "The add tool returned nothing." }] },
+    {
+      role: "user",
+      text: "Then work it out yourself: what is 17 + 25? Answer with just the number.",
+    },
+  ];
+
+  const reply = await step({ model, tools: [add] }, conversation);
+
+  console.log(JSON.stringify(reply, null, 2));
+  expect(reply?.role).toBe("assistant");
+  expect(JSON.stringify(reply)).toContain("42");
+});
