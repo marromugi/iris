@@ -108,7 +108,7 @@ actor FakeServer {
             return .failure(SocketRefusal(status: 401, failure: .unexpected))
         }
         if namesNoUser { return .failure(SocketRefusal(status: 403, failure: .unexpected)) }
-        guard request.url?.path == "/api/threads/\(Self.agentID)/events" else {
+        guard ["/api/threads/\(Self.agentID)/events", "/api/me/events"].contains(request.url?.path) else {
             return .failure(SocketRefusal(status: 404, failure: .unexpected))
         }
         return .success(socketScript)

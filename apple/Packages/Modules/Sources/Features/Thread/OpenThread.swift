@@ -9,16 +9,6 @@ final class OpenThread {
     /// whose post didn't fit are left out, so a reply is never shown without what it answers.
     static let entriesShown = 100
 
-    /// How long to wait before opening the events socket again: a second after one that stayed open, and twice as long
-    /// after each failure in a row, up to 30 seconds.
-    static func reopenDelay(afterFailures failures: Int) -> Duration {
-        .seconds(min(30, 1 << min(failures, 5)))
-    }
-
-    /// How long the socket has to stay open for its end not to count as a failure. A socket that fails to open, or
-    /// closes sooner, counts as one.
-    static let openLongEnough: Duration = .seconds(10)
-
     /// The thread's latest posts and runs, latest first. Turns to `.failed(.signedOut)` when the server refuses the
     /// sign-in, so the screen offers to sign in again.
     private(set) var entries: Loadable<[Entry]> = .loading
@@ -152,8 +142,8 @@ final class OpenThread {
     /// Reads the thread and keeps it current while the screen shows it. It opens the thread's events socket and reads
     /// the thread once it is open, since nothing from before then comes on it, or reads them through `/api` when it
     /// can't open. After the socket closes or fails, it opens it again, waiting longer after each failure in a row; a
-    /// socket that stayed open `openLongEnough` starts the count over. It stops when the screen goes away, and opens
-    /// no more sockets once the sign-in ends.
+    /// socket that stayed open `SocketReopening.openLongEnough` starts the count over. It stops when the screen goes
+    /// away, and opens no more sockets once the sign-in ends.
     func follow() async {
         var failures = 0
         while !Task.isCancelled {
@@ -174,7 +164,7 @@ final class OpenThread {
             }
             // The socket also closes when the screen goes away; that is no reason to open it again.
             if Task.isCancelled { return }
-            if let openedAt, now() - openedAt >= Self.openLongEnough {
+            if let openedAt, now() - openedAt >= SocketReopening.openLongEnough {
                 failures = 0
             } else {
                 failures += 1
@@ -185,7 +175,7 @@ final class OpenThread {
             }
             progress = [:]
             do {
-                try await wait(Self.reopenDelay(afterFailures: failures))
+                try await wait(SocketReopening.delay(afterFailures: failures))
             } catch {
                 return
             }

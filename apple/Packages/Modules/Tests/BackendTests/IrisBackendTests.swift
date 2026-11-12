@@ -292,6 +292,28 @@ struct IrisBackendTests {
         #expect(opened.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
     }
 
+    @Test func followsTheUsersOwnEventsOnTheirSocket() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await server.sendOnEvents([#"{"type":"mail"}"#])
+        let heard = Mutex<[String]>([])
+
+        try await backend.followUserEvents {
+            heard.withLock { $0.append("open") }
+        } onEvent: { event in
+            heard.withLock {
+                switch event {
+                case .case1(let changed): $0.append(changed._type.rawValue)
+                }
+            }
+        }
+
+        #expect(heard.withLock { $0 } == ["open", "mail"])
+        let opened = try #require(await server.requests.last)
+        #expect(opened.url?.absoluteString == "wss://iris.test/api/me/events")
+        #expect(opened.value(forHTTPHeaderField: "Authorization") == "Bearer access-1")
+    }
+
     @Test func opensTheSocketAgainWithARefreshedTokenAndSignsOutWhenThatIsRefusedToo() async throws {
         let backend = backend()
         try await signIn(backend)

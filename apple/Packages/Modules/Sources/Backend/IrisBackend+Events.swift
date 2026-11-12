@@ -17,7 +17,23 @@ extension IrisBackend {
         onOpen: @Sendable () async -> Void,
         onEvent: @Sendable (RunEvent) async -> Void
     ) async throws(AppError) {
-        let socket = try await openEvents(of: threadID)
+        try await follow(path: "/api/threads/\(threadID)/events", onOpen: onOpen, onEvent: onEvent)
+    }
+
+    /// Follows the user's own events, such as a change of their mail setup, as `followEvents(of:)` follows a thread's.
+    public func followUserEvents(
+        onOpen: @Sendable () async -> Void,
+        onEvent: @Sendable (UserEvent) async -> Void
+    ) async throws(AppError) {
+        try await follow(path: "/api/me/events", onOpen: onOpen, onEvent: onEvent)
+    }
+
+    private func follow<Event: Decodable>(
+        path: String,
+        onOpen: @Sendable () async -> Void,
+        onEvent: @Sendable (Event) async -> Void
+    ) async throws(AppError) {
+        let socket = try await openEvents(at: path)
         defer { socket.close() }
         if Task.isCancelled { throw .cancelled }
         await onOpen()
@@ -27,7 +43,7 @@ extension IrisBackend {
                 try await withThrowingTaskGroup(of: Void.self) { group in
                     group.addTask { await Self.closeWhenPingsGoUnanswered(socket, pings: pings) }
                     while let text = try await socket.receive() {
-                        await onEvent(try Self.event(from: text))
+                        await onEvent(try Self.event(Event.self, from: text))
                     }
                     group.cancelAll()
                 }
@@ -62,11 +78,11 @@ extension IrisBackend {
         }
     }
 
-    private func openEvents(of threadID: ChatThread.ID) async throws(AppError) -> any EventSocket {
+    private func openEvents(at path: String) async throws(AppError) -> any EventSocket {
         var token = try await vault.accessToken()
         var refreshed = false
         while true {
-            let socket = openSocket(try eventsRequest(of: threadID, token: token))
+            let socket = openSocket(try eventsRequest(at: path, token: token))
             do throws(SocketRefusal) {
                 try await socket.open()
                 return socket
@@ -88,21 +104,21 @@ extension IrisBackend {
         }
     }
 
-    private func eventsRequest(of threadID: ChatThread.ID, token: String) throws(AppError) -> URLRequest {
+    private func eventsRequest(at path: String, token: String) throws(AppError) -> URLRequest {
         guard var url = URLComponents(url: origin, resolvingAgainstBaseURL: false) else { throw .unexpected }
         url.scheme = url.scheme == "http" ? "ws" : "wss"
-        url.path = "/api/threads/\(threadID)/events"
+        url.path = path
         guard let socketURL = url.url else { throw .unexpected }
         var request = URLRequest(url: socketURL)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return request
     }
 
-    private static func event(from text: String) throws(AppError) -> RunEvent {
+    private static func event<Event: Decodable>(_: Event.Type, from text: String) throws(AppError) -> Event {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         do {
-            return try decoder.decode(RunEvent.self, from: Data(text.utf8))
+            return try decoder.decode(Event.self, from: Data(text.utf8))
         } catch {
             log.error("An event the app can't read: \(String(describing: error))")
             throw .unexpected

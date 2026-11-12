@@ -86,7 +86,11 @@ struct HomeScreen: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                AccountMenu(onSignOut: onSignOut)
+                NavigationLink {
+                    AccountScreen(onSignOut: onSignOut)
+                } label: {
+                    Label("アカウント", systemImage: "person.crop.circle")
+                }
             }
         }
         .sheet(item: $adding) { adding in
@@ -171,19 +175,6 @@ private struct ThreadPicture: View {
             }
         }
         .frame(width: 44, height: 44, alignment: .topLeading)
-    }
-}
-
-/// Signing out.
-private struct AccountMenu: View {
-    let onSignOut: () -> Void
-
-    var body: some View {
-        Menu {
-            Button("サインアウト", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive, action: onSignOut)
-        } label: {
-            Label("アカウント", systemImage: "person.crop.circle")
-        }
     }
 }
 
