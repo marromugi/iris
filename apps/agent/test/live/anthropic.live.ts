@@ -138,7 +138,7 @@ test("when a run's tools change between steps, the real API leaves out the earli
 
 test("the real API takes a conversation another service's model wrote, with tool calls Claude wouldn't write", async () => {
   // As a thread's history from before the switch can be: blank text, a tool call ID Claude refuses,
-  // an input that isn't an object, and a result with nothing in it.
+  // an input that isn't an object, a result with nothing in it, and a reply of only blank text.
   const conversation: Message[] = [
     { role: "user", text: "Add 17 and 25 with the add tool." },
     {
@@ -160,6 +160,8 @@ test("the real API takes a conversation another service's model wrote, with tool
     },
     { role: "tool", callId: "call.1", isError: false, content: "" },
     { role: "assistant", parts: [{ type: "text", text: "The add tool returned nothing." }] },
+    { role: "user", text: "Are you there?" },
+    { role: "assistant", parts: [{ type: "text", text: "\n" }] },
     {
       role: "user",
       text: "Then work it out yourself: what is 17 + 25? Answer with just the number.",
