@@ -670,6 +670,7 @@ test("a thread's runs go one at a time in the order they started, each reading t
 function storageMigratedUpTo(storage: DurableObjectStorage, count: number) {
   const sql = storage.sql;
   for (const table of [
+    "attachments",
     "mails",
     "mail_setup",
     "messages",

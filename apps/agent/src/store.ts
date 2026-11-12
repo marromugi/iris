@@ -23,6 +23,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
 import {
   agents,
+  attachments,
   dailySummaries,
   mails,
   mailSetup,
@@ -484,20 +485,40 @@ export interface Post {
   readonly createdAt: Date;
 }
 
+/** A post with the images it was sent with, in the order they were sent. */
+export interface PostWithAttachments extends Post {
+  readonly attachments: readonly Attachment[];
+}
+
+/** An image put up to send with a post. */
+export interface Attachment {
+  readonly id: string;
+  readonly mediaType: string;
+  readonly size: number;
+}
+
 /**
  * Adds a post and starts a run of each of `agentIds` that replies to it, all due at once and
  * started when the post was made. Each run's first message is the post as the thread reads it
- * (`asRead`). Returns the runs' IDs in the order of `agentIds`.
+ * (`asRead`). The post takes `attachmentIds`, which must be unused (`unusedAttachments`). Returns
+ * the runs' IDs in the order of `agentIds`.
  */
 export function insertPost(
   storage: DurableObjectStorage,
   post: Post,
   agentIds: readonly string[],
+  attachmentIds: readonly string[] = [],
 ): string[] {
   const opening = postAsRead(post, agentNamesById(storage));
   const runIds = agentIds.map(() => crypto.randomUUID());
   database(storage).transaction((tx) => {
     tx.insert(posts).values(post).run();
+    for (const [index, id] of attachmentIds.entries()) {
+      tx.update(attachments)
+        .set({ postId: post.id, position: index })
+        .where(and(eq(attachments.id, id), isNull(attachments.postId)))
+        .run();
+    }
     for (const [index, agentId] of agentIds.entries()) {
       const runId = runIds[index] ?? "";
       tx.insert(runs)
@@ -983,18 +1004,20 @@ export function threadEntries(
   threadId: string,
   limit: number,
 ): (
-  | { readonly type: "post"; readonly post: Post }
+  | { readonly type: "post"; readonly post: PostWithAttachments }
   | { readonly type: "run"; readonly run: Run }
 )[] {
   const db = database(storage);
-  const latestPosts = db
-    .select()
-    .from(posts)
-    .where(eq(posts.threadId, threadId))
-    .orderBy(desc(posts.createdAt), desc(posts.id))
-    .limit(limit)
-    .all()
-    .map((post) => ({ type: "post" as const, post, at: post.createdAt.getTime(), order: 0 }));
+  const latestPosts = withAttachments(
+    storage,
+    db
+      .select()
+      .from(posts)
+      .where(eq(posts.threadId, threadId))
+      .orderBy(desc(posts.createdAt), desc(posts.id))
+      .limit(limit)
+      .all(),
+  ).map((post) => ({ type: "post" as const, post, at: post.createdAt.getTime(), order: 0 }));
   const latestRuns = db
     .select()
     .from(runs)
@@ -1014,6 +1037,77 @@ export function threadEntries(
     .map((entry) =>
       entry.type === "post" ? { type: "post", post: entry.post } : { type: "run", run: entry.run },
     );
+}
+
+/** Keeps an image put up to send with a post, before any post takes it. */
+export function insertAttachment(
+  storage: DurableObjectStorage,
+  attachment: Attachment & { readonly createdAt: Date },
+): void {
+  database(storage).insert(attachments).values(attachment).run();
+}
+
+export function findAttachment(storage: DurableObjectStorage, id: string): Attachment | undefined {
+  return database(storage)
+    .select({ id: attachments.id, mediaType: attachments.mediaType, size: attachments.size })
+    .from(attachments)
+    .where(eq(attachments.id, id))
+    .get();
+}
+
+/** The images of `ids` that are kept and no post has taken yet, in the order of `ids`. */
+export function unusedAttachments(
+  storage: DurableObjectStorage,
+  ids: readonly string[],
+): Attachment[] {
+  if (ids.length === 0) {
+    return [];
+  }
+  const found = new Map(
+    database(storage)
+      .select({ id: attachments.id, mediaType: attachments.mediaType, size: attachments.size })
+      .from(attachments)
+      .where(and(inArray(attachments.id, [...ids]), isNull(attachments.postId)))
+      .all()
+      .map((attachment) => [attachment.id, attachment]),
+  );
+  return ids.flatMap((id) => {
+    const attachment = found.get(id);
+    return attachment === undefined ? [] : [attachment];
+  });
+}
+
+/** Removes the images no post took that were put up before `before`, and returns their IDs. */
+export function removeUnusedAttachments(storage: DurableObjectStorage, before: Date): string[] {
+  return database(storage)
+    .delete(attachments)
+    .where(and(isNull(attachments.postId), lt(attachments.createdAt, before)))
+    .returning({ id: attachments.id })
+    .all()
+    .map((row) => row.id);
+}
+
+/** Each of `postList` with the images it was sent with. */
+export function withAttachments(
+  storage: DurableObjectStorage,
+  postList: readonly Post[],
+): PostWithAttachments[] {
+  const ids = postList.map((post) => post.id);
+  const rows =
+    ids.length === 0
+      ? []
+      : database(storage)
+          .select()
+          .from(attachments)
+          .where(inArray(attachments.postId, ids))
+          .orderBy(asc(attachments.position))
+          .all();
+  return postList.map((post) => ({
+    ...post,
+    attachments: rows
+      .filter((row) => row.postId === post.id)
+      .map(({ id, mediaType, size }) => ({ id, mediaType, size })),
+  }));
 }
 
 /** Which of `agentIds` are the user's agents. */

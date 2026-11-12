@@ -89,6 +89,24 @@ export const messages = sqliteTable(
   (table) => [primaryKey({ columns: [table.runId, table.seq] })],
 );
 
+/**
+ * An image the user put up to send with a post. Its bytes are in the ATTACHMENTS bucket under
+ * `attachmentKey`; `postId` is null until a post takes it.
+ */
+export const attachments = sqliteTable(
+  "attachments",
+  {
+    id: text("id").primaryKey(),
+    postId: text("post_id"),
+    /** Where it comes among its post's images, from 0; 0 until a post takes it. */
+    position: integer("position").notNull().default(0),
+    mediaType: text("media_type").notNull(),
+    size: integer("size").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("attachments_post_id").on(table.postId)],
+);
+
 /** How many web searches the user's agents made in each month ("2026-11"). */
 export const searchCounts = sqliteTable("search_counts", {
   month: text("month").primaryKey(),

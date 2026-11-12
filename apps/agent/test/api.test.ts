@@ -63,7 +63,7 @@ test("tells the signed-in user who they are", async () => {
   const response = await call(userId, "/api/me");
 
   expect(response.status).toBe(200);
-  expect(await response.json()).toEqual({ id: userId, name: "花子" });
+  expect(await response.json()).toEqual({ id: userId, name: "花子", canAttachImages: true });
 });
 
 test("lists the agent a user starts with", async () => {
@@ -362,6 +362,7 @@ test("makes a group, lists it with the one-to-one threads, and posts in it", asy
       id: expect.any(String),
       agentId: null,
       text: "@株価 今日は？",
+      attachments: [],
       createdAt: expect.any(String),
     },
     runs: [expect.objectContaining({ agentId: second.id, taskId: null, endedAt: null })],
@@ -429,4 +430,174 @@ test("refuses a user that no longer exists", async () => {
 
 test("openapi.json is the document the routes make, served where the Worker is", () => {
   expect(apiDocument).toEqual(JSON.parse(JSON.stringify(agentApiDocument(env.ORIGIN))));
+});
+
+/** The smallest bytes that start like a JPEG, which is all the API checks. */
+const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+
+function putUp(userId: string, body: Uint8Array, contentType = "image/jpeg", testEnv: Env = env) {
+  return agentApi.request(
+    "/api/attachments",
+    { method: "POST", headers: { "Content-Type": contentType }, body },
+    testEnv,
+    context({ userId }),
+  );
+}
+
+async function agentThreadId(userId: string): Promise<string> {
+  const threads: { id: string; agentId: string | null }[] = await (
+    await call(userId, "/api/threads")
+  ).json();
+  const thread = threads.find((each) => each.agentId !== null);
+  if (thread === undefined) {
+    throw new Error("The user has no one-to-one thread.");
+  }
+  return thread.id;
+}
+
+test("puts up an image, sends it with a post, and gives its bytes back", async () => {
+  const userId = await addUser("花子");
+  const threadId = await agentThreadId(userId);
+  scriptedModel.push({ role: "assistant", parts: [{ type: "text", text: "いい写真ですね。" }] });
+
+  const putResponse = await putUp(userId, jpeg);
+  const attachment: { id: string } = await putResponse.clone().json();
+  const sent = await post(userId, `/api/threads/${threadId}/posts`, {
+    text: "",
+    attachmentIds: [attachment.id],
+  });
+  const again = await post(userId, `/api/threads/${threadId}/posts`, {
+    text: "もう一度",
+    attachmentIds: [attachment.id],
+  });
+  const bytes = await call(userId, `/api/attachments/${attachment.id}`);
+  const entries: { type: string; post?: unknown }[] = await (
+    await call(userId, `/api/threads/${threadId}/entries`)
+  ).json();
+
+  const kept = { id: expect.any(String), mediaType: "image/jpeg", size: jpeg.byteLength };
+  expect(putResponse.status).toBe(201);
+  expect(await putResponse.json()).toEqual(kept);
+  expect(sent.status).toBe(202);
+  expect(await sent.json()).toMatchObject({ post: { text: "", attachments: [kept] } });
+  expect(again.status).toBe(400);
+  expect(await again.json()).toEqual({ message: "An image isn't there, or was already sent." });
+  expect(bytes.status).toBe(200);
+  expect(bytes.headers.get("Content-Type")).toBe("image/jpeg");
+  expect(new Uint8Array(await bytes.arrayBuffer())).toEqual(jpeg);
+  expect(entries.filter((entry) => entry.type === "post")).toEqual([
+    { type: "post", post: expect.objectContaining({ attachments: [kept] }) },
+  ]);
+});
+
+test("keeps the images of a post in the order they were sent", async () => {
+  const userId = await addUser("花子");
+  scriptedModel.push({ role: "assistant", parts: [{ type: "text", text: "はい。" }] });
+  const ids: string[] = [];
+  for (const body of [jpeg, new Uint8Array([...jpeg, 9])]) {
+    const { id }: { id: string } = await (await putUp(userId, body)).json();
+    ids.push(id);
+  }
+
+  const sent = await post(userId, `/api/agents/${await firstAgentId(userId)}/messages`, {
+    text: "二枚",
+    attachmentIds: ids.toReversed(),
+  });
+  const entries: { type: string; post?: { attachments: { id: string }[] } }[] = await (
+    await call(userId, `/api/threads/${await agentThreadId(userId)}/entries`)
+  ).json();
+
+  expect(sent.status).toBe(202);
+  expect(
+    entries.find((entry) => entry.type === "post")?.post?.attachments.map((a) => a.id),
+  ).toEqual(ids.toReversed());
+});
+
+test("says why an image or a post with one isn't taken", async () => {
+  const userId = await addUser("花子");
+  const threadId = await agentThreadId(userId);
+
+  const wrongType = await putUp(userId, jpeg, "application/pdf");
+  const notJpeg = await putUp(userId, new Uint8Array([1, 2, 3]));
+  const tooLarge = await putUp(userId, new Uint8Array(5 * 1024 * 1024 + 1).fill(0xff));
+  const unknown = await post(userId, `/api/threads/${threadId}/posts`, {
+    text: "これ",
+    attachmentIds: [crypto.randomUUID()],
+  });
+  const empty = await post(userId, `/api/threads/${threadId}/posts`, { text: " " });
+  const fiveImages = await post(userId, `/api/threads/${threadId}/posts`, {
+    text: "多い",
+    attachmentIds: Array.from({ length: 5 }, () => crypto.randomUUID()),
+  });
+  const missing = await call(userId, `/api/attachments/${crypto.randomUUID()}`);
+
+  expect(wrongType.status).toBe(415);
+  expect(notJpeg.status).toBe(400);
+  expect(await notJpeg.json()).toEqual({ message: "The body isn't an image of type image/jpeg." });
+  expect(tooLarge.status).toBe(413);
+  expect(unknown.status).toBe(400);
+  expect(empty.status).toBe(400);
+  expect(fiveImages.status).toBe(400);
+  expect(missing.status).toBe(404);
+});
+
+test("gives no user another user's image", async () => {
+  const owner = await addUser("花子");
+  const other = await addUser("一郎");
+  const { id }: { id: string } = await (await putUp(owner, jpeg)).json();
+
+  const seen = await call(other, `/api/attachments/${id}`);
+  const sent = await post(other, `/api/threads/${await agentThreadId(other)}/posts`, {
+    text: "これ",
+    attachmentIds: [id],
+  });
+
+  expect(seen.status).toBe(404);
+  expect(sent.status).toBe(400);
+});
+
+test("takes no images while the model doesn't read them", async () => {
+  const userId = await addUser("花子");
+  const { id }: { id: string } = await (await putUp(userId, jpeg)).json();
+  const workersAi = { ...env, MODEL_PROVIDER: "workers-ai" };
+
+  const me: { canAttachImages: boolean } = await (
+    await agentApi.request("/api/me", undefined, workersAi, context({ userId }))
+  ).json();
+  const putResponse = await putUp(userId, jpeg, "image/jpeg", workersAi);
+  const sent = await agentApi.request(
+    `/api/threads/${await agentThreadId(userId)}/posts`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "これ", attachmentIds: [id] }),
+    },
+    workersAi,
+    context({ userId }),
+  );
+
+  expect(me.canAttachImages).toBe(false);
+  expect(putResponse.status).toBe(400);
+  expect(sent.status).toBe(400);
+  expect(await sent.json()).toEqual({
+    message: "The model the agents think with doesn't read images.",
+  });
+});
+
+test("removes the images no post took within a day when another is put up", async () => {
+  const userId = await addUser("花子");
+  const { id: stale }: { id: string } = await (await putUp(userId, jpeg)).json();
+  await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) => {
+    state.storage.sql.exec(
+      "UPDATE attachments SET created_at = ? WHERE id = ?",
+      Date.now() - 25 * 60 * 60 * 1000,
+      stale,
+    );
+  });
+
+  const { id: fresh }: { id: string } = await (await putUp(userId, jpeg)).json();
+
+  expect((await call(userId, `/api/attachments/${stale}`)).status).toBe(404);
+  expect(await env.ATTACHMENTS.get(`${userId}/${stale}`)).toBeNull();
+  expect((await call(userId, `/api/attachments/${fresh}`)).status).toBe(200);
 });

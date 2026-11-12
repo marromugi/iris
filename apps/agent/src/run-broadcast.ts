@@ -48,7 +48,7 @@ export class RunBroadcast implements RunWatcher {
   }
 
   /** A post was sent in its thread. */
-  posted(post: store.Post): void {
+  posted(post: store.PostWithAttachments): void {
     this.send(postsTag(post.threadId), { type: "post", post: postJson(post) });
   }
 

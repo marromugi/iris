@@ -11,6 +11,8 @@ import { listTasks } from "./routes/agents/[agentId]/tasks/get";
 import { addTask } from "./routes/agents/[agentId]/tasks/post";
 import { listAgents } from "./routes/agents/get";
 import { addAgent } from "./routes/agents/post";
+import { attachment } from "./routes/attachments/[attachmentId]/get";
+import { putUpAttachment } from "./routes/attachments/post";
 import { openUserEvents, USER_EVENTS_PATH } from "./routes/me/events/get";
 import { me } from "./routes/me/get";
 import { stopMail } from "./routes/me/mail/address/delete";
@@ -68,6 +70,8 @@ agentApi.openapiRoutes([
   addGroup,
   threadEntries,
   sendPost,
+  putUpAttachment,
+  attachment,
 ]);
 agentApi.get(EVENTS_PATH, openEvents);
 agentApi.get(THREAD_EVENTS_PATH, openThreadEvents);
