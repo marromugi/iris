@@ -8,7 +8,7 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-  // The tag of the user's mail address, `iris+<tag>@<MAIL_DOMAIN>`; null until one is issued.
+  // The tag of the user's mail address (`mailAddressOf` in src/mail/mail.ts); null until one is issued.
   mailTag: text("mail_tag").unique(),
 });
 

@@ -1,4 +1,5 @@
-import PostalMime, { type Address, type RawEmail } from "postal-mime";
+import PostalMime, { type Address, type Attachment, type RawEmail } from "postal-mime";
+import { htmlText } from "./html-text";
 
 const MAIL_LOCAL_PART = "iris";
 const MAIL_DOMAIN = "marromugi.me";
@@ -13,7 +14,7 @@ export const MAIL_ADDRESS = `${MAIL_LOCAL_PART}@${MAIL_DOMAIN}`;
 /** How long mail is kept after it arrives. */
 export const MAIL_KEPT_DAYS = 7;
 
-/** How much of a mail's text is kept, in characters. */
+/** How much of a mail's text is kept, in UTF-16 code units. */
 export const MAX_MAIL_TEXT = 50_000;
 
 /** A user's tag: 24 lowercase hex characters, so no one can guess the address. */
@@ -55,53 +56,31 @@ export function mailTagOf(address: string): string | undefined {
 
 /**
  * Reads a raw MIME message. The text is the plain text part, or the HTML part made into text when
- * there is no plain one. Throws on a message too malformed to read.
+ * the plain one is missing or blank. Images shown in the body without a name aren't listed as
+ * attachments. Throws on a message too malformed to read.
  */
 export async function parseMail(raw: RawEmail, receivedAt: Date): Promise<NewMail> {
   const email = await PostalMime.parse(raw);
-  const text = (email.text ?? htmlText(email.html ?? "")).trim();
+  const plain = email.text?.trim() ?? "";
+  const text = plain === "" ? htmlText(email.html ?? "").trim() : plain;
   return {
     from: mailboxOf(email.from),
     subject: email.subject ?? "",
     text:
       text.length > MAX_MAIL_TEXT
-        ? `${text.slice(0, MAX_MAIL_TEXT)}\n(the rest of the text is cut)`
+        ? // A cut between the two halves of a character would leave half of it.
+          `${text.slice(0, MAX_MAIL_TEXT).replace(/[\ud800-\udbff]$/, "")}\n(the rest of the text is cut)`
         : text,
-    attachmentNames: email.attachments.map((attachment) => attachment.filename ?? "(no name)"),
+    attachmentNames: email.attachments
+      .filter((attachment) => !isUnnamedInline(attachment))
+      .map((attachment) => attachment.filename ?? "(no name)"),
     receivedAt,
   };
 }
 
-/** The text of an HTML body: no markup, a line break where a block ends, entities written out. */
-export function htmlText(html: string): string {
-  return html
-    .replace(/<(head|style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
-    .replace(/<br\b[^>]*>|<\/(p|div|tr|li|h[1-6]|table|blockquote)\s*>/gi, "\n")
-    .replace(/<[^>]*>/g, "")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => entityText(name) ?? entity)
-    .replace(/[ \t\u00a0]+/g, " ")
-    .replace(/ *\n */g, "\n")
-    .replace(/\n{3,}/g, "\n\n");
-}
-
-const NAMED_ENTITIES: Readonly<Record<string, string>> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-
-function entityText(name: string): string | undefined {
-  if (name.startsWith("#")) {
-    const code =
-      name[1] === "x" || name[1] === "X" ? parseInt(name.slice(2), 16) : Number(name.slice(1));
-    return Number.isInteger(code) && code > 0 && code <= 0x10ffff
-      ? String.fromCodePoint(code)
-      : undefined;
-  }
-  return NAMED_ENTITIES[name.toLowerCase()];
+/** An image or the like shown in the body, such as a logo, rather than a file sent along. */
+function isUnnamedInline(attachment: Attachment): boolean {
+  return attachment.disposition === "inline" && attachment.filename === null;
 }
 
 /** The sender as one mailbox: a group's first member, or empty when there is none. */

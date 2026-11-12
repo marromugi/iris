@@ -46,10 +46,11 @@ const output = execFileSync(
   ],
   { stdio: ["ignore", "pipe", "inherit"], encoding: "utf8" },
 );
+// The local D1 reports no count of changed rows, so the statement returns the rows it changed.
 const [result] = z
-  .tuple([z.object({ meta: z.object({ changes: z.number() }) })])
+  .tuple([z.object({ results: z.array(z.object({ id: z.string() })) })])
   .parse(JSON.parse(output));
-if (result.meta.changes !== 1) {
+if (result.results.length !== 1) {
   console.error(`No one user is named ${name.data} in the ${remote ? "deployed" : "local"} D1.`);
   process.exit(1);
 }
