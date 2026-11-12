@@ -1,6 +1,8 @@
 import { OpenAPIHono, z } from "@hono/zod-openapi";
 import { answerError } from "./errors";
 import { type ApiEnv, signedInUser } from "./middlewares/signed-in-user";
+import { activateAgent } from "./routes/agents/[agentId]/activate/post";
+import { deactivateAgent } from "./routes/agents/[agentId]/deactivate/post";
 import { EVENTS_PATH, openEvents } from "./routes/agents/[agentId]/events/get";
 import { sendMessage } from "./routes/agents/[agentId]/messages/post";
 import { recentRuns } from "./routes/agents/[agentId]/runs/get";
@@ -30,7 +32,7 @@ export const PRODUCTION_ORIGIN = "https://iris-agent.marrromugi-dev.workers.dev"
  * `/api`: who is signed in, and their agents with each one's tasks and runs, for requests the OAuth layer let through with
  * `UserProps`. A request without them, or for a user that no longer exists, is 403; one that
  * doesn't fit the API is 400 with a message saying why. Every answer `/api` gives with a body is
- * JSON (a removal's 204 has none), and none is cached. The OAuth layer's 401 comes before `/api`
+ * JSON (a removal's or a deactivation's 204 has none), and none is cached. The OAuth layer's 401 comes before `/api`
  * and is its own.
  */
 export const agentApi = new OpenAPIHono<ApiEnv>({
@@ -46,6 +48,8 @@ agentApi.openapiRoutes([
   setTimeZone,
   listAgents,
   addAgent,
+  deactivateAgent,
+  activateAgent,
   listTasks,
   addTask,
   removeTask,

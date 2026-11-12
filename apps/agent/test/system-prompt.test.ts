@@ -57,10 +57,12 @@ test("each run is told who it is and where, the shared prompt first", async () =
   expect(asking?.system).toMatch(/^You are エージェント, one of the user's agents in iris\./);
   const today = new Date().toISOString().slice(0, "YYYY-MM-DD".length);
   expect(placeOf(asking)).toBe(
-    `This run started on ${today} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: one-to-one with the user.`,
+    `This run started on ${today} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: one-to-one with the user. Model: test-model.`,
   );
   expect(answering?.system).toMatch(/^You are 株価,/);
-  expect(placeOf(answering)).toMatch(/Thread: consult, where エージェント is asking you\.$/);
+  expect(placeOf(answering)).toMatch(
+    /Thread: consult, where エージェント is asking you\. Model: test-model\.$/,
+  );
 
   modelRequests.length = 0;
   const group = await userAgent().addGroup({ name: "チーム", agentIds: [first?.id ?? "", stocks] });
@@ -71,7 +73,9 @@ test("each run is told who it is and where, the shared prompt first", async () =
   await userAgent().post(group.thread.id, { text: "@株価 どう？" });
   await runDurableObjectAlarm(userAgent());
 
-  expect(modelRequests.map(placeOf)).toEqual([expect.stringMatching(/Thread: group "チーム"\.$/)]);
+  expect(modelRequests.map(placeOf)).toEqual([
+    expect.stringMatching(/Thread: group "チーム"\. Model: test-model\.$/),
+  ]);
 });
 
 test("a run carried on the next day is told the same day it started, so its prompt doesn't change", async () => {

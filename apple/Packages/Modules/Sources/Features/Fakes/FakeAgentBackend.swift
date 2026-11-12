@@ -4,13 +4,14 @@
     import Synchronization
 
     /// The user's agent as it is told to be, for previews and tests: its tasks start as the samples, adding and removing
-    /// change them, and every call fails with `failure` when one is set.
+    /// change them, deactivating and activating set `active`, and every call fails with `failure` when one is set.
     final class FakeAgentBackend: AgentBackend {
         struct Answers: Sendable {
             var tasks = [Samples.newsTask, Samples.weatherTask]
             var failure: AppError?
             /// When a task added here runs next.
             var nextRunAt = Samples.moment("2026-11-12T00:00:00Z")
+            var active = true
         }
 
         private let answers: Mutex<Answers>
@@ -21,6 +22,11 @@
 
         func answer(_ change: @Sendable (inout Answers) -> Void) {
             answers.withLock { change(&$0) }
+        }
+
+        /// Whether the agent is active, as deactivating and activating left it.
+        var active: Bool {
+            answers.withLock { $0.active }
         }
 
         func tasks() async throws(AppError) -> [ScheduledTask] {
@@ -46,6 +52,20 @@
             try answers.withLock { answers throws(AppError) in
                 if let failure = answers.failure { throw failure }
                 answers.tasks.removeAll { $0.id == id }
+            }
+        }
+
+        func deactivate() async throws(AppError) {
+            try answers.withLock { answers throws(AppError) in
+                if let failure = answers.failure { throw failure }
+                answers.active = false
+            }
+        }
+
+        func activate() async throws(AppError) {
+            try answers.withLock { answers throws(AppError) in
+                if let failure = answers.failure { throw failure }
+                answers.active = true
             }
         }
     }

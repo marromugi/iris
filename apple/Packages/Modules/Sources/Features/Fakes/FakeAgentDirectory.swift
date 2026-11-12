@@ -19,7 +19,7 @@
 
         func addAgent(named name: String, look: AgentLook) async throws(AppError) -> Agent {
             if let failure { throw failure }
-            return Agent(id: UUID().uuidString.lowercased(), name: name, look: look, lastRanAt: nil)
+            return Agent(id: UUID().uuidString.lowercased(), name: name, look: look, lastRanAt: nil, active: true)
         }
 
         func threads() async throws(AppError) -> [ChatThread] {
