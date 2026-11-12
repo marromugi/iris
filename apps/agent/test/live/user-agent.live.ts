@@ -29,7 +29,10 @@ test("a due task runs through the user agent's alarm on the real model", async (
   expect(await runDurableObjectAlarm(agent)).toBe(true);
 
   const [latest] = (await agent.recentRuns(agentId, 1)) ?? [];
-  console.log(`MODEL_PROVIDER: ${env.MODEL_PROVIDER}`, JSON.stringify(latest, null, 2));
+  console.log(
+    `MODEL_PROVIDER: ${env.MODEL_PROVIDER}; ANTHROPIC_API_KEY is "invalid": ${env.ANTHROPIC_API_KEY === "invalid"}`,
+    JSON.stringify(latest, null, 2),
+  );
   expect(latest?.lastError).toBeNull();
   expect(latest?.endedAt).not.toBeNull();
   expect(latest?.messages.at(-1)?.role).toBe("assistant");
