@@ -132,6 +132,14 @@ test("Gmail's forwarding confirmation to the address gives its link and code, an
       ),
     )?.account,
   ).toBe("hanako@gmail.com");
+  expect(
+    confirmation(
+      gmail(
+        "(#1) Gmail Forwarding Confirmation - Receive Mail from taro@gmail.com",
+        `hanako@gmail.com\n${confirmationUrl}`,
+      ),
+    )?.account,
+  ).toBe("taro@gmail.com");
   expect(confirmation(gmail("(#1) x", text), ["hanako@gmail.com"])).toBeUndefined();
   for (const other of [
     "https://mail.google.com/mail/",
