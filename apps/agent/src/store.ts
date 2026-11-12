@@ -909,3 +909,47 @@ export function countSearch(storage: DurableObjectStorage, month: string): numbe
     .get();
   return row?.count ?? 1;
 }
+
+/**
+ * What a run's system prompt needs: its agent's name, and its thread's one-to-one agent, group
+ * name, and the name of the agent that asked in it when it is a consult. Undefined when there is
+ * no such run.
+ */
+export function runSetting(
+  storage: DurableObjectStorage,
+  runId: string,
+):
+  | {
+      agentName: string | null;
+      thread: { agentId: string | null; name: string | null; askerName: string | null };
+    }
+  | undefined {
+  const asking = alias(runs, "asking");
+  const asker = alias(agents, "asker");
+  const row = database(storage)
+    .select({
+      agentName: agents.name,
+      threadAgentId: threads.agentId,
+      threadName: threads.name,
+      consultRunId: threads.consultRunId,
+      askerName: asker.name,
+    })
+    .from(runs)
+    .leftJoin(agents, eq(agents.id, runs.agentId))
+    .leftJoin(threads, eq(threads.id, runs.threadId))
+    .leftJoin(asking, eq(asking.id, threads.consultRunId))
+    .leftJoin(asker, eq(asker.id, asking.agentId))
+    .where(eq(runs.id, runId))
+    .get();
+  if (row === undefined) {
+    return undefined;
+  }
+  return {
+    agentName: row.agentName,
+    thread: {
+      agentId: row.threadAgentId,
+      name: row.threadName,
+      askerName: row.consultRunId === null ? null : (row.askerName ?? "another agent"),
+    },
+  };
+}
