@@ -1,7 +1,7 @@
 import { createRoute, defineOpenAPIRoute } from "@hono/zod-openapi";
 import type { Answer } from "../../../../answer";
 import { newMessageSchema } from "../../../../../message";
-import { errorResponse, invalid, signedIn } from "../../../../errors";
+import { errorResponse, signedIn } from "../../../../errors";
 import type { ApiEnv } from "../../../../middlewares/signed-in-user";
 import { json, runJson, runSchema } from "../../../../schemas";
 import { agentParams, NO_SUCH_AGENT, noSuchAgent } from "../params";
@@ -24,7 +24,9 @@ const route = createRoute({
     ),
     ...noSuchAgent,
     415: errorResponse("The body isn't sent as application/json"),
-    ...invalid,
+    400: errorResponse(
+      "The request doesn't fit the API, or every agent that would reply is deactivated; the message says why",
+    ),
     ...signedIn,
   },
 });

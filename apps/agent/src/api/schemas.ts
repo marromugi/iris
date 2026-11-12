@@ -32,6 +32,10 @@ export const agentSchema = z
     lastRanAt: timeSchema
       .nullable()
       .meta({ description: "When its latest run started; null until it first runs" }),
+    active: z.boolean().meta({
+      description:
+        "False while it is deactivated: it replies to nothing and its tasks don't run, but everything it has stays",
+    }),
   })
   .meta({ id: "Agent" });
 
@@ -41,6 +45,7 @@ export function agentJson(agent: Agent): z.infer<typeof agentSchema> {
     name: agent.name,
     look: agent.look,
     lastRanAt: agent.lastRanAt === null ? null : timeJson(agent.lastRanAt),
+    active: agent.active,
   };
 }
 

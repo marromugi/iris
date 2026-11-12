@@ -8,6 +8,8 @@ export const agents = sqliteTable("agents", {
   /** What shapes the noise of the agent's orb. */
   lookSeed: integer("look_seed").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  /** Set while the agent is deactivated: it starts no run of its own until it is activated again. */
+  deactivatedAt: integer("deactivated_at", { mode: "timestamp_ms" }),
 });
 
 /**
@@ -92,6 +94,35 @@ export const searchCounts = sqliteTable("search_counts", {
   month: text("month").primaryKey(),
   count: integer("count").notNull(),
 });
+
+/** The user's settings, in the one row there is. */
+export const settings = sqliteTable("settings", {
+  id: integer("id").primaryKey(),
+  /** The IANA time zone the user's days are read in, from their device. */
+  timeZone: text("time_zone").notNull(),
+});
+
+/**
+ * What happened in a thread over one of the user's days, from `startsAt` until `endsAt`, written
+ * by the model. `text` is null until it is written; a summary that fails `MAX_SUMMARY_ATTEMPTS`
+ * times keeps it null and is passed over.
+ */
+export const dailySummaries = sqliteTable(
+  "daily_summaries",
+  {
+    threadId: text("thread_id").notNull(),
+    /** The day it covers, as a date in the user's time zone ("2026-11-12"). */
+    day: text("day").notNull(),
+    startsAt: integer("starts_at", { mode: "timestamp_ms" }).notNull(),
+    endsAt: integer("ends_at", { mode: "timestamp_ms" }).notNull(),
+    text: text("text"),
+    failedAttempts: integer("failed_attempts").notNull().default(0),
+    lastError: text("last_error"),
+    /** When a failed summary is tried again. */
+    retryAt: integer("retry_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [primaryKey({ columns: [table.threadId, table.endsAt] })],
+);
 
 /** Mail the user forwarded to their iris address. Kept for `MAIL_KEPT_DAYS` after it arrived. */
 export const mails = sqliteTable(

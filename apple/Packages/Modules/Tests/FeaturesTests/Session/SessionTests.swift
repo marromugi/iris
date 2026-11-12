@@ -62,4 +62,32 @@ struct SessionTests {
 
         #expect(session.state == .signedOut)
     }
+
+    @Test func sendsTheTimeZoneAtOnceAndAgainOnEachChange() async {
+        let backend = FakeSessionBackend(.init(isSignedIn: true))
+        let session = Session(backend: backend)
+        let (changes, change) = AsyncStream<Void>.makeStream()
+        change.yield()
+        change.finish()
+        var zones = ["Asia/Tokyo", "America/New_York"]
+
+        await session.keepTimeZoneSent(current: { zones.removeFirst() }, changes: changes)
+
+        #expect(backend.timeZonesSent == ["Asia/Tokyo", "America/New_York"])
+    }
+
+    @Test func aFailedSendIsNotShownAndTheNextChangeSendsAgain() async {
+        let backend = FakeSessionBackend(.init(isSignedIn: true, setTimeZone: .failure(.offline)))
+        let session = Session(backend: backend)
+        await session.start()
+        let (changes, change) = AsyncStream<Void>.makeStream()
+        change.yield()
+        change.finish()
+
+        await session.keepTimeZoneSent(current: { "Asia/Tokyo" }, changes: changes)
+
+        #expect(backend.timeZonesSent == ["Asia/Tokyo", "Asia/Tokyo"])
+        #expect(session.state == .signedIn)
+        #expect(session.problem == nil)
+    }
 }

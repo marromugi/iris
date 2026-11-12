@@ -174,6 +174,18 @@ struct IrisBackendTests {
         }
     }
 
+    @Test func setsTheTimeZoneAsJSONAndSaysWhyOneIsRefused() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        try await backend.setTimeZone("America/New_York")
+
+        #expect(await server.timeZone == "America/New_York")
+        await #expect(throws: AppError.refused(message: "✖ Not a known IANA time zone.\n  → at timeZone")) {
+            try await backend.setTimeZone("Mars/Olympus")
+        }
+    }
+
     @Test func listsTheAgentsAndRefusesOneTheUserDoesNotHave() async throws {
         let backend = backend()
         try await signIn(backend)
@@ -184,6 +196,21 @@ struct IrisBackendTests {
         #expect(agents.first?.lastRanAt == Date(timeIntervalSince1970: 1_794_261_600))
         await #expect(throws: AppError.refused(message: "No agent of this user has this ID")) {
             try await backend.tasks(of: "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e")
+        }
+    }
+
+    @Test func deactivatesAndActivatesTheAgentAndSaysWhenItHasNone() async throws {
+        let backend = backend()
+        try await signIn(backend)
+
+        try await backend.deactivate(agent)
+        let deactivated = try await backend.agents().first?.active
+        try await backend.activate(agent)
+
+        #expect(deactivated == false)
+        #expect(try await backend.agents().first?.active == true)
+        await #expect(throws: AppError.refused(message: "No agent of this user has this ID")) {
+            try await backend.deactivate("0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e")
         }
     }
 

@@ -467,6 +467,18 @@
           "message"
         ]
       },
+      "TimeZone": {
+        "type": "object",
+        "properties": {
+          "timeZone": {
+            "type": "string",
+            "description": "An IANA time zone such as Asia/Tokyo, as the device is set to"
+          }
+        },
+        "required": [
+          "timeZone"
+        ]
+      },
       "Agent": {
         "type": "object",
         "properties": {
@@ -487,13 +499,18 @@
             ],
             "format": "date-time",
             "description": "When its latest run started; null until it first runs"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "False while it is deactivated: it replies to nothing and its tasks don't run, but everything it has stays"
           }
         },
         "required": [
           "id",
           "name",
           "look",
-          "lastRanAt"
+          "lastRanAt",
+          "active"
         ]
       },
       "Look": {
@@ -736,6 +753,70 @@
         }
       }
     },
+    "/api/me/time-zone": {
+      "put": {
+        "operationId": "setTimeZone",
+        "description": "Sets the time zone the user's days are read in. A day ends at 4:00 in it, when each thread's summary of the day is written. Until the app sets one, it is Asia/Tokyo.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeZone"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Set."
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body isn't sent as application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/agents": {
       "get": {
         "operationId": "listAgents",
@@ -826,6 +907,134 @@
           },
           "415": {
             "description": "The body isn't sent as application/json",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agentId}/deactivate": {
+      "post": {
+        "operationId": "deactivateAgent",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deactivated, or already was. It replies to nothing and its tasks don't run until it is activated; its runs that hadn't ended end without a reply. Everything it has stays."
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No agent of this user has this ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Something went wrong on the server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/{agentId}/activate": {
+      "post": {
+        "operationId": "activateAgent",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "agentId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Active, or already was. Its tasks next run at their first time after now."
+          },
+          "400": {
+            "description": "The request doesn't fit the API; the message says why",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No token, or one not valid for /api (expired, revoked, or for another resource): refresh, or sign in again. The body is empty; with a token, WWW-Authenticate says error=\"invalid_token\" (RFC 6750)."
+          },
+          "403": {
+            "description": "The token names no user, or one that no longer exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No agent of this user has this ID",
             "content": {
               "application/json": {
                 "schema": {
@@ -1204,7 +1413,7 @@
             }
           },
           "400": {
-            "description": "The request doesn't fit the API; the message says why",
+            "description": "The request doesn't fit the API, or every agent that would reply is deactivated; the message says why",
             "content": {
               "application/json": {
                 "schema": {
@@ -1481,7 +1690,7 @@
         },
         "responses": {
           "202": {
-            "description": "The post, and the runs that reply to it as they start: one for each member named with @ and its name, or for every member when none is. Each reply is added to its run.",
+            "description": "The post, and the runs that reply to it as they start: one for each member named with @ and its name, or for every member when none is, leaving out deactivated agents. Each reply is added to its run.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1491,7 +1700,7 @@
             }
           },
           "400": {
-            "description": "The request doesn't fit the API; the message says why",
+            "description": "The request doesn't fit the API, or every agent that would reply is deactivated; the message says why",
             "content": {
               "application/json": {
                 "schema": {

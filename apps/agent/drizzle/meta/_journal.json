@@ -68,8 +68,22 @@
     {
       "idx": 9,
       "version": "6",
-      "when": 1794474623361,
-      "tag": "0009_mails",
+      "when": 1794473921735,
+      "tag": "0009_agent_deactivated",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794476413318,
+      "tag": "0010_daily_summaries",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794477860869,
+      "tag": "0011_mails",
       "breakpoints": true
     }
   ]

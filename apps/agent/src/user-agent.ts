@@ -7,9 +7,18 @@ import { keptSince } from "./mail/mail-tools";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
-import { nextWakeAt, type RunAgent, type RunOf, type RunTools, runDue, Waker } from "./runner";
+import { summarizeDue } from "./daily-summary";
+import {
+  nextWakeAt,
+  type RunAgent,
+  type RunOf,
+  type RunTools,
+  runDue,
+  WAKE_UP_BUDGET_MS,
+  Waker,
+} from "./runner";
 import { DEFAULT_RECENT_RUNS } from "./runs";
-import { nextRunAt } from "./schedule";
+import { nextRunAt, timeZoneSchema } from "./schedule";
 import * as store from "./store";
 import { type NewTask, newTaskSchema } from "./task";
 
@@ -35,15 +44,24 @@ export type PostResult =
 
 export type ThreadEntry = ReturnType<typeof store.threadEntries>[number];
 
+/** The real time, for the alarm's work. */
+const clock = () => new Date();
+
+/** Why a post is refused when every agent that would reply to it is deactivated. */
+export const NO_ACTIVE_REPLIER = "Every agent that would reply to this is deactivated.";
+
 /**
  * Builds the Durable Object class for one user. One object per user holds that user's agents and
  * threads (each agent's own one-to-one thread, and groups), the posts sent in them, and the tasks
- * and runs that happen in them; `agentFor` gives the model and tools every run uses, and `toolsFor`
+ * and runs that happen in them, with the user's time zone and each thread's summary of each day;
+ * `agentFor` gives the model and tools every run uses, and `toolsFor`
  * the tools a run gets for its own agent, such as its sandbox, its browser, and web search. Its `fetch`
  * opens a WebSocket on which a thread's runs and posts are sent as they happen (`RunBroadcast`).
  *
  * The methods that take an agent's or a thread's ID answer undefined when the user has none with
- * it. A method on an agent works on the agent's own one-to-one thread.
+ * it. A method on an agent works on the agent's own one-to-one thread. A deactivated agent starts
+ * no run: its tasks wait, and a post it would reply to goes without its reply, or is refused when
+ * no other agent would reply.
  */
 export function createUserAgent(
   agentFor: (env: Env) => RunAgent,
@@ -134,8 +152,9 @@ export function createUserAgent(
 
     /**
      * Sends a post in the thread, and starts a run of each member that replies to it: those
-     * named with @, or every member when none is. Returns the post and its runs as they start.
-     * Empty text comes back as `ok: false`.
+     * named with @, or every member when none is, leaving out deactivated agents. Returns the
+     * post and its runs as they start. Empty text, or a post no active agent would reply to,
+     * comes back as `ok: false`.
      */
     async post(threadId: string, input: NewMessage): Promise<PostResult | undefined> {
       const thread = store.findThread(this.ctx.storage, threadId);
@@ -149,14 +168,13 @@ export function createUserAgent(
       if (!parsed.success) {
         return { ok: false, error: z.prettifyError(parsed.error) };
       }
-      const names = new Map(
-        store.listAgents(this.ctx.storage).map((agent) => [agent.id, agent.name]),
-      );
-      const members = thread.agentIds.map((id) => ({ id, name: names.get(id) ?? "" }));
-      return {
-        ok: true,
-        ...(await this.startPost(threadId, parsed.data.text, repliers(parsed.data.text, members))),
-      };
+      const byId = new Map(store.listAgents(this.ctx.storage).map((agent) => [agent.id, agent]));
+      const members = thread.agentIds.map((id) => ({ id, name: byId.get(id)?.name ?? "" }));
+      const active = repliers(parsed.data.text, members).filter((id) => byId.get(id)?.active);
+      if (active.length === 0) {
+        return { ok: false, error: NO_ACTIVE_REPLIER };
+      }
+      return { ok: true, ...(await this.startPost(threadId, parsed.data.text, active)) };
     }
 
     /** The thread's latest posts and runs together, the latest first, at most `limit` of them. */
@@ -182,7 +200,7 @@ export function createUserAgent(
       store.insertAgent(this.ctx.storage, agent);
       return {
         ok: true,
-        agent: { id: agent.id, name: agent.name, look: agent.look, lastRanAt: null },
+        agent: { id: agent.id, name: agent.name, look: agent.look, lastRanAt: null, active: true },
       };
     }
 
@@ -210,6 +228,36 @@ export function createUserAgent(
       return { ok: true, task };
     }
 
+    /**
+     * Deactivates the agent: it replies to nothing and its tasks don't run until it is activated
+     * again, and its runs that haven't ended end now without a reply. Says whether the user has
+     * the agent.
+     */
+    async deactivateAgent(agentId: string): Promise<boolean> {
+      const ended = store.deactivateAgent(this.ctx.storage, agentId, new Date());
+      if (ended === undefined) {
+        return false;
+      }
+      for (const runId of ended) {
+        this.broadcast.changed(runId);
+      }
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return true;
+    }
+
+    /**
+     * Activates the agent again. Its tasks next run at their first time after now: the times they
+     * missed while it was deactivated don't run. Says whether the user has the agent.
+     */
+    async activateAgent(agentId: string): Promise<boolean> {
+      const now = new Date();
+      const found = store.activateAgent(this.ctx.storage, agentId, (task) =>
+        nextRunAt(task.schedule, now),
+      );
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return found;
+    }
+
     /** Removes one of the agent's tasks and says whether it had one. Runs it already started carry on. */
     async removeTask(agentId: string, taskId: string): Promise<boolean | undefined> {
       if (!store.hasAgent(this.ctx.storage, agentId)) {
@@ -234,12 +282,29 @@ export function createUserAgent(
       if (!parsed.success) {
         return { ok: false, error: z.prettifyError(parsed.error) };
       }
+      if (!store.listAgents(this.ctx.storage).find((agent) => agent.id === agentId)?.active) {
+        return { ok: false, error: NO_ACTIVE_REPLIER };
+      }
       const { runs } = await this.startPost(threadId, parsed.data.text, [agentId]);
       const [run] = runs;
       if (run === undefined) {
         throw new Error(`The post to agent ${agentId} started no run.`);
       }
       return { ok: true, run };
+    }
+
+    /**
+     * Sets the time zone the user's days are read in, from their device, and when the next
+     * summary is due with it. An unknown time zone comes back as `ok: false`.
+     */
+    async setTimeZone(timeZone: string): Promise<{ ok: true } | { ok: false; error: string }> {
+      const parsed = timeZoneSchema.safeParse(timeZone);
+      if (!parsed.success) {
+        return { ok: false, error: z.prettifyError(parsed.error) };
+      }
+      store.setTimeZone(this.ctx.storage, parsed.data);
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return { ok: true };
     }
 
     /** The agent's tasks, the next to run first. */
@@ -268,16 +333,28 @@ export function createUserAgent(
       store.deleteMailBefore(this.ctx.storage, keptSince(mail.receivedAt));
     }
 
+    /** Carries on the work that is due and writes the summaries that are, side by side. */
     override async alarm(): Promise<void> {
       try {
+        const agent = agentFor(this.env);
+        const stopAt = clock().getTime() + WAKE_UP_BUDGET_MS;
+        const summarizing = summarizeDue(
+          this.ctx.storage,
+          agent.model,
+          clock,
+          () => clock().getTime() >= stopAt,
+          () => this.waker.wake(),
+        );
         const wakeAt = await runDue(
           this.ctx.storage,
-          agentFor(this.env),
-          () => new Date(),
+          agent,
+          clock,
           this.broadcast,
           this.waker,
           (run) => toolsFor(this.env, run, this.ctx.storage),
+          summarizing,
         );
+        await summarizing;
         await this.wakeAt(wakeAt);
       } finally {
         this.broadcast.idle();

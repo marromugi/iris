@@ -1,12 +1,13 @@
 import { type Message, messageSchema, nextAction } from "@iris/agent";
 import {
   and,
-  asc,
   count,
+  asc,
   desc,
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   lt,
   lte,
@@ -22,16 +23,19 @@ import { alias } from "drizzle-orm/sqlite-core";
 import migrations from "../drizzle/migrations";
 import {
   agents,
+  dailySummaries,
   mails,
   messages,
   posts,
   runs,
   searchCounts,
+  settings,
   tasks,
   threadMembers,
   threads,
 } from "./db/schema";
 import type { Look } from "./agent";
+import { DEFAULT_TIME_ZONE } from "./day";
 import type { Mail } from "./mail/mail";
 import type { Schedule } from "./schedule";
 
@@ -48,6 +52,8 @@ export interface Agent {
   readonly name: string;
   readonly look: Look;
   readonly lastRanAt: Date | null;
+  /** False while the agent is deactivated: it starts no run of its own and replies to nothing. */
+  readonly active: boolean;
 }
 
 export interface Task {
@@ -255,13 +261,105 @@ export function listAgents(storage: DurableObjectStorage): Agent[] {
       palette: agents.lookPalette,
       seed: agents.lookSeed,
       lastRanAt: max(runs.startedAt),
+      deactivatedAt: agents.deactivatedAt,
     })
     .from(agents)
     .leftJoin(runs, eq(runs.agentId, agents.id))
     .groupBy(agents.id)
     .orderBy(asc(agents.createdAt), asc(agents.id))
     .all()
-    .map(({ palette, seed, ...agent }) => ({ ...agent, look: { palette, seed } }));
+    .map(({ palette, seed, deactivatedAt, ...agent }) => ({
+      ...agent,
+      look: { palette, seed },
+      active: deactivatedAt === null,
+    }));
+}
+
+/** Why a run ended by deactivating its agent didn't reply. */
+export const DEACTIVATED_ERROR = "The agent was deactivated before this run ended.";
+
+/** Why a run answering in a consult ended when the agent that asked was deactivated. */
+export const ASKER_DEACTIVATED_ERROR =
+  "The agent that asked was deactivated before this run ended.";
+
+/**
+ * Deactivates the agent and ends its runs that haven't ended, so no run in their threads waits on
+ * them, and the unended runs answering in the consults those runs asked in, whose answers no one
+ * would read. Returns the IDs of the runs it ended; undefined when the user has no such agent. An
+ * agent already deactivated keeps the time it was first deactivated.
+ */
+export function deactivateAgent(
+  storage: DurableObjectStorage,
+  agentId: string,
+  at: Date,
+): string[] | undefined {
+  return database(storage).transaction((tx) => {
+    const agent = tx
+      .select({ deactivatedAt: agents.deactivatedAt })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get();
+    if (agent === undefined) {
+      return undefined;
+    }
+    if (agent.deactivatedAt === null) {
+      tx.update(agents).set({ deactivatedAt: at }).where(eq(agents.id, agentId)).run();
+    }
+    const own = tx
+      .update(runs)
+      .set({ endedAt: at, lastError: DEACTIVATED_ERROR })
+      .where(and(eq(runs.agentId, agentId), isNull(runs.endedAt)))
+      .returning({ id: runs.id })
+      .all()
+      .map((row) => row.id);
+    if (own.length === 0) {
+      return own;
+    }
+    const consults = tx
+      .select({ id: threads.id })
+      .from(threads)
+      .where(inArray(threads.consultRunId, own));
+    const answering = tx
+      .update(runs)
+      .set({ endedAt: at, lastError: ASKER_DEACTIVATED_ERROR })
+      .where(and(inArray(runs.threadId, consults), isNull(runs.endedAt)))
+      .returning({ id: runs.id })
+      .all()
+      .map((row) => row.id);
+    return [...own, ...answering];
+  });
+}
+
+/**
+ * Activates the agent again and moves each of its tasks to `nextRunAt` of it, so the times missed
+ * while it was deactivated don't run. Says whether the user has the agent.
+ */
+export function activateAgent(
+  storage: DurableObjectStorage,
+  agentId: string,
+  nextRunAt: (task: Task) => Date,
+): boolean {
+  return database(storage).transaction((tx) => {
+    const agent = tx
+      .select({ deactivatedAt: agents.deactivatedAt })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get();
+    if (agent === undefined) {
+      return false;
+    }
+    if (agent.deactivatedAt === null) {
+      return true;
+    }
+    tx.update(agents).set({ deactivatedAt: null }).where(eq(agents.id, agentId)).run();
+    for (const row of tx.select().from(tasks).where(eq(tasks.agentId, agentId)).all()) {
+      tx.update(tasks)
+        .set({ nextRunAt: nextRunAt(toTask(row)) })
+        .where(eq(tasks.id, row.id))
+        .run();
+    }
+    return true;
+  });
 }
 
 export function hasAgent(storage: DurableObjectStorage, id: string): boolean {
@@ -320,16 +418,17 @@ export function listTasks(storage: DurableObjectStorage, agentId: string): Task[
     .map(toTask);
 }
 
-/** The task whose run time came first, among every agent's tasks due by `now`. */
+/** The task whose run time came first, among the active agents' tasks due by `now`. */
 export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | undefined {
   const row = database(storage)
-    .select()
+    .select({ task: tasks })
     .from(tasks)
-    .where(lte(tasks.nextRunAt, now))
+    .innerJoin(agents, eq(agents.id, tasks.agentId))
+    .where(and(lte(tasks.nextRunAt, now), isNull(agents.deactivatedAt)))
     .orderBy(asc(tasks.nextRunAt), asc(tasks.id))
     .limit(1)
     .get();
-  return row === undefined ? undefined : toTask(row);
+  return row === undefined ? undefined : toTask(row.task);
 }
 
 /**
@@ -585,13 +684,13 @@ export function nextDueRun(storage: DurableObjectStorage, now: Date): string | u
 
 /**
  * The IDs of up to `limit` runs next in line that are due by `now`, the earliest due first,
- * leaving out `going`, the runs already being carried on.
+ * leaving out `leftOut`, such as the runs already being carried on.
  */
 export function nextDueRuns(
   storage: DurableObjectStorage,
   now: Date,
   limit: number,
-  going: readonly string[] = [],
+  leftOut: readonly string[] = [],
 ): string[] {
   if (limit <= 0) {
     return [];
@@ -599,19 +698,22 @@ export function nextDueRuns(
   return database(storage)
     .select({ id: runs.id })
     .from(runs)
-    .where(and(nextInLine(storage), lte(runs.dueAt, now), notInArray(runs.id, [...going])))
+    .where(and(nextInLine(storage), lte(runs.dueAt, now), notInArray(runs.id, [...leftOut])))
     .orderBy(asc(runs.dueAt), asc(runs.id))
     .limit(limit)
     .all()
     .map((row) => row.id);
 }
 
-/** When the earliest run next in line is due. */
-export function earliestRunDueAt(storage: DurableObjectStorage): Date | undefined {
+/** When the earliest run next in line is due, leaving out `leftOut`. */
+export function earliestRunDueAt(
+  storage: DurableObjectStorage,
+  leftOut: readonly string[] = [],
+): Date | undefined {
   const row = database(storage)
     .select({ next: min(runs.dueAt) })
     .from(runs)
-    .where(nextInLine(storage))
+    .where(and(nextInLine(storage), notInArray(runs.id, [...leftOut])))
     .get();
   return row?.next ?? undefined;
 }
@@ -619,6 +721,16 @@ export function earliestRunDueAt(storage: DurableObjectStorage): Date | undefine
 /** Sets when the run is next due to be carried on. */
 export function postponeRun(storage: DurableObjectStorage, runId: string, dueAt: Date): void {
   database(storage).update(runs).set({ dueAt }).where(eq(runs.id, runId)).run();
+}
+
+/** Whether the run has ended, or is gone. */
+export function hasRunEnded(storage: DurableObjectStorage, runId: string): boolean {
+  const row = database(storage)
+    .select({ endedAt: runs.endedAt })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .get();
+  return row === undefined || row.endedAt !== null;
 }
 
 /** Ends a run that finished or reached its step limit, clearing any earlier failure. */
@@ -755,13 +867,14 @@ export function recentRuns(storage: DurableObjectStorage, threadId: string, limi
  * one, or a run a task started that ended with a reply. The agent's own reply is its
  * conversation (without the post, which comes first, and without the model's reasoning); another
  * agent's is its reply as a user message after the agent's name. A post without such a reply, and a run without one (given up,
- * or stopped at its step limit), are passed over. Only what came before the run started counts,
- * so replies to the same post don't read each other. Conversations are read from storage only
+ * or stopped at its step limit), are passed over. Only what came from `from` until the run started
+ * counts, so replies to the same post don't read each other. Conversations are read from storage only
  * when the caller asks for their entry.
  */
 export function* earlierInThread(
   storage: DurableObjectStorage,
   runId: string,
+  from: Date = new Date(0),
 ): Generator<Message[], void, undefined> {
   const db = database(storage);
   const run = db
@@ -782,7 +895,13 @@ export function* earlierInThread(
       endedAt: runs.endedAt,
     })
     .from(runs)
-    .where(and(eq(runs.threadId, run.threadId), lt(runs.startedAt, run.startedAt)))
+    .where(
+      and(
+        eq(runs.threadId, run.threadId),
+        gte(runs.startedAt, from),
+        lt(runs.startedAt, run.startedAt),
+      ),
+    )
     .orderBy(asc(runs.endedAt), asc(runs.id))
     .all();
   type EarlierRun = (typeof earlierRunRows)[number];
@@ -790,7 +909,13 @@ export function* earlierInThread(
     db
       .select()
       .from(posts)
-      .where(and(eq(posts.threadId, run.threadId), lt(posts.createdAt, run.startedAt)))
+      .where(
+        and(
+          eq(posts.threadId, run.threadId),
+          gte(posts.createdAt, from),
+          lt(posts.createdAt, run.startedAt),
+        ),
+      )
       .all()
       .map((post) => ({
         at: post.createdAt,
@@ -902,10 +1027,13 @@ export function knownAgents(storage: DurableObjectStorage, agentIds: readonly st
     .map((row) => row.id);
 }
 
+/** The earliest next run time among the active agents' tasks. */
 export function earliestTaskRunAt(storage: DurableObjectStorage): Date | undefined {
   const row = database(storage)
     .select({ next: min(tasks.nextRunAt) })
     .from(tasks)
+    .innerJoin(agents, eq(agents.id, tasks.agentId))
+    .where(isNull(agents.deactivatedAt))
     .get();
   return row?.next ?? undefined;
 }
@@ -936,7 +1064,12 @@ export function runSetting(
   | {
       agentName: string | null;
       startedAt: Date;
-      thread: { agentId: string | null; name: string | null; askerName: string | null };
+      thread: {
+        id: string;
+        agentId: string | null;
+        name: string | null;
+        askerName: string | null;
+      };
     }
   | undefined {
   const asking = alias(runs, "asking");
@@ -945,6 +1078,7 @@ export function runSetting(
     .select({
       agentName: agents.name,
       startedAt: runs.startedAt,
+      threadId: runs.threadId,
       threadAgentId: threads.agentId,
       threadName: threads.name,
       consultRunId: threads.consultRunId,
@@ -964,11 +1098,273 @@ export function runSetting(
     agentName: row.agentName,
     startedAt: row.startedAt,
     thread: {
+      id: row.threadId,
       agentId: row.threadAgentId,
       name: row.threadName,
       askerName: row.consultRunId === null ? null : (row.askerName ?? "another agent"),
     },
   };
+}
+
+/** The time zone the user's days are read in. */
+export function userTimeZone(storage: DurableObjectStorage): string {
+  const row = database(storage).select({ timeZone: settings.timeZone }).from(settings).get();
+  return row?.timeZone ?? DEFAULT_TIME_ZONE;
+}
+
+export function setTimeZone(storage: DurableObjectStorage, timeZone: string): void {
+  database(storage)
+    .insert(settings)
+    .values({ id: 1, timeZone })
+    .onConflictDoUpdate({ target: settings.id, set: { timeZone } })
+    .run();
+}
+
+/** A thread's day summary, written or not yet. */
+export interface DailySummary {
+  readonly threadId: string;
+  readonly day: string;
+  readonly startsAt: Date;
+  readonly endsAt: Date;
+  readonly text: string | null;
+  readonly failedAttempts: number;
+  readonly retryAt: Date | null;
+}
+
+/** The threads days are summarized for: every thread but consults. */
+export function summarizedThreadIds(storage: DurableObjectStorage): string[] {
+  return database(storage)
+    .select({ id: threads.id })
+    .from(threads)
+    .where(isNull(threads.consultRunId))
+    .all()
+    .map((row) => row.id);
+}
+
+/** The thread's summaries, the earliest first. */
+export function dailySummariesOf(storage: DurableObjectStorage, threadId: string): DailySummary[] {
+  return database(storage)
+    .select({
+      threadId: dailySummaries.threadId,
+      day: dailySummaries.day,
+      startsAt: dailySummaries.startsAt,
+      endsAt: dailySummaries.endsAt,
+      text: dailySummaries.text,
+      failedAttempts: dailySummaries.failedAttempts,
+      retryAt: dailySummaries.retryAt,
+    })
+    .from(dailySummaries)
+    .where(eq(dailySummaries.threadId, threadId))
+    .orderBy(asc(dailySummaries.endsAt))
+    .all();
+}
+
+/** The thread's latest summary, written or not yet. */
+export function latestDailySummary(
+  storage: DurableObjectStorage,
+  threadId: string,
+): DailySummary | undefined {
+  return database(storage)
+    .select({
+      threadId: dailySummaries.threadId,
+      day: dailySummaries.day,
+      startsAt: dailySummaries.startsAt,
+      endsAt: dailySummaries.endsAt,
+      text: dailySummaries.text,
+      failedAttempts: dailySummaries.failedAttempts,
+      retryAt: dailySummaries.retryAt,
+    })
+    .from(dailySummaries)
+    .where(eq(dailySummaries.threadId, threadId))
+    .orderBy(desc(dailySummaries.endsAt))
+    .limit(1)
+    .get();
+}
+
+/**
+ * When something next happened in the thread from `after` on: the user posted, or a task started
+ * a run. Undefined when nothing has.
+ */
+export function firstActivityFrom(
+  storage: DurableObjectStorage,
+  threadId: string,
+  after: Date,
+): Date | undefined {
+  const db = database(storage);
+  const post = db
+    .select({ at: min(posts.createdAt) })
+    .from(posts)
+    .where(and(eq(posts.threadId, threadId), gte(posts.createdAt, after)))
+    .get();
+  const task = db
+    .select({ at: min(runs.startedAt) })
+    .from(runs)
+    .where(and(eq(runs.threadId, threadId), isNotNull(runs.taskId), gte(runs.startedAt, after)))
+    .get();
+  const times = [post?.at, task?.at].filter((at) => at !== null && at !== undefined);
+  return times.length === 0 ? undefined : new Date(Math.min(...times.map((at) => at.getTime())));
+}
+
+/** Whether a run of the thread that started before `before` hasn't ended. */
+export function hasRunGoingFrom(
+  storage: DurableObjectStorage,
+  threadId: string,
+  before: Date,
+): boolean {
+  return (
+    database(storage)
+      .select({ id: runs.id })
+      .from(runs)
+      .where(and(eq(runs.threadId, threadId), lt(runs.startedAt, before), isNull(runs.endedAt)))
+      .get() !== undefined
+  );
+}
+
+/** The IDs of the thread's runs that started at or after `from` and haven't ended. */
+export function unendedRunsStartedFrom(
+  storage: DurableObjectStorage,
+  threadId: string,
+  from: Date,
+): string[] {
+  return database(storage)
+    .select({ id: runs.id })
+    .from(runs)
+    .where(and(eq(runs.threadId, threadId), gte(runs.startedAt, from), isNull(runs.endedAt)))
+    .all()
+    .map((row) => row.id);
+}
+
+/** One thing said in a thread, as a day's summary reads it. */
+export interface SaidLine {
+  readonly at: Date;
+  /** Who said it: "User", an agent's name, or a task's run as "Task for <agent>". */
+  readonly speaker: string;
+  readonly text: string;
+}
+
+/**
+ * What was said in the thread from `startsAt` until `endsAt`, in order, for a thread that isn't a
+ * consult (where agents post): each post the user sent
+ * then, followed by the replies to it that ended with one, and each run a task started then, as
+ * its prompt followed by its reply. Tool calls, their results, and the model's reasoning are left
+ * out.
+ */
+export function saidBetween(
+  storage: DurableObjectStorage,
+  threadId: string,
+  startsAt: Date,
+  endsAt: Date,
+): SaidLine[] {
+  const db = database(storage);
+  const names = agentNamesById(storage);
+  const replyOf = (runId: string): string | undefined => {
+    const conversation = loadConversation(storage, runId);
+    return conversation.length > 0 && nextAction(conversation).type === "done"
+      ? replyText(conversation)
+      : undefined;
+  };
+  const inDay = (column: typeof posts.createdAt | typeof runs.startedAt) =>
+    and(gte(column, startsAt), lt(column, endsAt));
+  const said: { at: Date; lines: SaidLine[] }[] = [];
+  const dayPosts = db
+    .select()
+    .from(posts)
+    .where(and(eq(posts.threadId, threadId), inDay(posts.createdAt)))
+    .all();
+  for (const post of dayPosts) {
+    const replies = db
+      .select({ id: runs.id, agentId: runs.agentId, endedAt: runs.endedAt })
+      .from(runs)
+      .where(eq(runs.postId, post.id))
+      .orderBy(asc(runs.endedAt), asc(runs.id))
+      .all()
+      .flatMap((run) => {
+        const text = run.endedAt === null ? undefined : replyOf(run.id);
+        return text === undefined || run.endedAt === null
+          ? []
+          : [{ at: run.endedAt, speaker: names.get(run.agentId) ?? "", text }];
+      });
+    said.push({
+      at: post.createdAt,
+      lines: [
+        {
+          at: post.createdAt,
+          speaker: "User",
+          text: post.text,
+        },
+        ...replies,
+      ],
+    });
+  }
+  const taskRuns = db
+    .select({
+      id: runs.id,
+      agentId: runs.agentId,
+      startedAt: runs.startedAt,
+      endedAt: runs.endedAt,
+    })
+    .from(runs)
+    .where(and(eq(runs.threadId, threadId), isNotNull(runs.taskId), inDay(runs.startedAt)))
+    .all();
+  for (const run of taskRuns) {
+    const name = names.get(run.agentId) ?? "";
+    const [prompt] = loadConversation(storage, run.id);
+    const reply = run.endedAt === null ? undefined : replyOf(run.id);
+    said.push({
+      at: run.startedAt,
+      lines: [
+        {
+          at: run.startedAt,
+          speaker: `Task for ${name}`,
+          text: prompt?.role === "user" ? prompt.text : "",
+        },
+        ...(reply === undefined || run.endedAt === null
+          ? []
+          : [{ at: run.endedAt, speaker: name, text: reply }]),
+      ],
+    });
+  }
+  return said.toSorted((a, b) => a.at.getTime() - b.at.getTime()).flatMap((entry) => entry.lines);
+}
+
+/** Stores the day's summary as written, in place of a failed attempt at it. */
+export function saveDailySummary(
+  storage: DurableObjectStorage,
+  summary: { threadId: string; day: string; startsAt: Date; endsAt: Date; text: string },
+): void {
+  database(storage)
+    .insert(dailySummaries)
+    .values(summary)
+    .onConflictDoUpdate({
+      target: [dailySummaries.threadId, dailySummaries.endsAt],
+      set: { text: summary.text, lastError: null, retryAt: null },
+    })
+    .run();
+}
+
+/**
+ * Records a failed attempt at the day's summary, tried again at `retryAt`, and returns how many
+ * attempts at it have failed so far.
+ */
+export function recordDailySummaryFailure(
+  storage: DurableObjectStorage,
+  summary: { threadId: string; day: string; startsAt: Date; endsAt: Date },
+  failure: { error: string; retryAt: Date },
+): number {
+  const row = database(storage)
+    .insert(dailySummaries)
+    .values({ ...summary, failedAttempts: 1, lastError: failure.error, retryAt: failure.retryAt })
+    .onConflictDoUpdate({
+      target: [dailySummaries.threadId, dailySummaries.endsAt],
+      set: {
+        failedAttempts: sql`${dailySummaries.failedAttempts} + 1`,
+        lastError: failure.error,
+        retryAt: failure.retryAt,
+      },
+    })
+    .returning({ failedAttempts: dailySummaries.failedAttempts })
+    .get();
+  return row?.failedAttempts ?? 1;
 }
 
 /** Keeps a mail the user forwarded. */

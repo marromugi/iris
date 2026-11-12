@@ -71,7 +71,7 @@ test("lists the agent a user starts with", async () => {
 
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual([
-    { id: expect.any(String), name: "エージェント", look: anyLook, lastRanAt: null },
+    { id: expect.any(String), name: "エージェント", look: anyLook, lastRanAt: null, active: true },
   ]);
 });
 
@@ -88,6 +88,7 @@ test("adds an agent, which then lists last, and says why one can't be added", as
     name: "株価の確認",
     look: anyLook,
     lastRanAt: null,
+    active: true,
   });
   const listed: { name: string }[] = await (await call(userId, "/api/agents")).json();
   expect(listed.map((each) => each.name)).toEqual(["エージェント", "株価の確認"]);
@@ -122,6 +123,24 @@ test("adds a task to one agent and lists it for that agent only", async () => {
   expect((await call(user2, `/api/agents/${agentId}/tasks`)).status).toBe(404);
 });
 
+test("deactivates an agent, which lists as inactive and takes no message, and activates it again", async () => {
+  const userId = await addUser("一郎");
+  const agentId = await firstAgentId(userId);
+  const active = async () => {
+    const listed: { active: boolean }[] = await (await call(userId, "/api/agents")).json();
+    return listed[0]?.active;
+  };
+
+  const deactivated = await call(userId, `/api/agents/${agentId}/deactivate`, { method: "POST" });
+  const listedInactive = await active();
+  const refused = await post(userId, `/api/agents/${agentId}/messages`, { text: "Hello" });
+  const activated = await call(userId, `/api/agents/${agentId}/activate`, { method: "POST" });
+
+  expect([deactivated.status, listedInactive, refused.status]).toEqual([204, false, 400]);
+  expect(await refused.json()).toEqual({ message: expect.any(String) });
+  expect([activated.status, await active()]).toEqual([204, true]);
+});
+
 test("answers 404 for an agent the user doesn't have, and 400 for an ID that isn't one", async () => {
   const userId = await addUser("一郎");
   const missing = crypto.randomUUID();
@@ -133,6 +152,8 @@ test("answers 404 for an agent the user doesn't have, and 400 for an ID that isn
       method: "DELETE",
     }),
     await call(userId, `/api/agents/${missing}/runs`),
+    await call(userId, `/api/agents/${missing}/deactivate`, { method: "POST" }),
+    await call(userId, `/api/agents/${missing}/activate`, { method: "POST" }),
     await post(userId, `/api/agents/${missing}/messages`, { text: "Hello" }),
     await call(userId, `/api/agents/${missing}/events`, { headers: { Upgrade: "websocket" } }),
   ];
@@ -235,7 +256,7 @@ test("lists an agent's latest runs with their conversations, without the model's
     ],
   });
   expect(await (await call(userId, "/api/agents")).json()).toEqual([
-    { id: agentId, name: "エージェント", look: anyLook, lastRanAt: run?.startedAt },
+    { id: agentId, name: "エージェント", look: anyLook, lastRanAt: run?.startedAt, active: true },
   ]);
 });
 
@@ -366,6 +387,28 @@ test("a thread's event socket hears a post, then the runs that reply to it", asy
   expect(opened.status).toBe(101);
   expect(events.slice(0, 2).map((event) => event.type)).toEqual(["post", "run"]);
   expect(events[1]).toMatchObject({ type: "run", run: { agentId: first } });
+});
+
+test("sets the user's time zone, and says why one can't be set", async () => {
+  const userId = await addUser("花子");
+  const put = (body: unknown) =>
+    call(userId, "/api/me/time-zone", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  const set = await put({ timeZone: "Europe/London" });
+  const unknown = await put({ timeZone: "Mars/Olympus" });
+
+  expect(set.status).toBe(204);
+  expect(unknown.status).toBe(400);
+  expect(await unknown.json()).toEqual({ message: expect.stringContaining("time zone") });
+  expect(
+    await runInDurableObject(env.USER_AGENT.getByName(userId), (_, state) =>
+      store.userTimeZone(state.storage),
+    ),
+  ).toBe("Europe/London");
 });
 
 test("refuses a request that reaches it without a signed-in user", async () => {

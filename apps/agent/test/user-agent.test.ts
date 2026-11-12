@@ -38,6 +38,12 @@ const reply = (text: string): AssistantMessage => ({
 const dailyAtEightUtc = { cron: "0 8 * * *", timeZone: "UTC" };
 
 /**
+ * When the summary of a day that ran on November 10 is due: 4:00 in Tokyo the next morning,
+ * before the task's next time at 8:00 UTC.
+ */
+const SUMMARY_OF_NOVEMBER_10 = new Date("2026-11-11T04:00:00+09:00");
+
+/**
  * Puts a task of the first agent straight into storage with its alarm, so a test can choose a next
  * run time in the past.
  */
@@ -97,6 +103,7 @@ test("every user starts with one agent that hasn't run", async () => {
       name: "エージェント",
       look: anyLook,
       lastRanAt: null,
+      active: true,
     },
   ]);
 });
@@ -116,6 +123,7 @@ test("an added agent comes last in the list with its own thread, and a blank or 
     name: "株価の確認",
     look: anyLook,
     lastRanAt: null,
+    active: true,
   });
   expect((await userAgent().listAgents()).map((agent) => agent.name)).toEqual([
     "エージェント",
@@ -159,8 +167,8 @@ test("each agent has its own tasks and runs, and runs when its own task is due",
   const runs = await userAgent().recentRuns(stocks);
   expect(runs?.map((run) => run.taskId)).toEqual(["stocks-task"]);
   expect(await userAgent().listAgents()).toEqual([
-    { id: first, name: "エージェント", look: anyLook, lastRanAt: null },
-    { id: stocks, name: "株価の確認", look: anyLook, lastRanAt: dueAt },
+    { id: first, name: "エージェント", look: anyLook, lastRanAt: null, active: true },
+    { id: stocks, name: "株価の確認", look: anyLook, lastRanAt: dueAt, active: true },
   ]);
 });
 
@@ -333,7 +341,7 @@ test("a run that keeps failing is given up, keeping its error, and stops calling
   expect(run?.failedAttempts).toBe(MAX_FAILED_ATTEMPTS);
   expect(run?.lastError).toBe(`Attempt ${MAX_FAILED_ATTEMPTS} failed.`);
   expect(run?.endedAt).not.toBeNull();
-  expect(wakeAt).toEqual(new Date("2026-11-11T08:00:00Z"));
+  expect(wakeAt).toEqual(SUMMARY_OF_NOVEMBER_10);
 });
 
 test("a task that missed several times runs once and moves to its next time after now", async () => {
@@ -347,7 +355,7 @@ test("a task that missed several times runs once and moves to its next time afte
   );
 
   expect(await userAgent().recentRuns(agentId)).toHaveLength(1);
-  expect(wakeAt).toEqual(new Date("2026-11-11T08:00:00Z"));
+  expect(wakeAt).toEqual(SUMMARY_OF_NOVEMBER_10);
   const [task] = (await userAgent().listTasks(agentId)) ?? [];
   expect(task?.nextRunAt).toEqual(new Date("2026-11-11T08:00:00Z"));
 });
@@ -382,7 +390,7 @@ test("one wake-up carries on every due run side by side, and wakes for nothing m
   );
 
   expect(modelRequests).toHaveLength(2);
-  expect(next).toEqual(new Date("2026-11-11T08:00:00Z"));
+  expect(next).toEqual(SUMMARY_OF_NOVEMBER_10);
   const ended = await runInDurableObject(userAgent(), (_, state) =>
     state.storage.sql.exec("SELECT count(*) AS ended FROM runs WHERE ended_at IS NOT NULL").one(),
   );
@@ -668,6 +676,8 @@ function storageMigratedUpTo(storage: DurableObjectStorage, count: number) {
     "tasks",
     "posts",
     "search_counts",
+    "settings",
+    "daily_summaries",
     "thread_members",
     "threads",
     "agents",
@@ -721,6 +731,7 @@ test("the tasks and runs stored before agents become the first agent's", async (
     name: "エージェント",
     look: anyLook,
     lastRanAt: startedAt,
+    active: true,
   });
   expect((await userAgent().listTasks(agent!.id))?.map((task) => task.id)).toEqual(["task-1"]);
   const runs = (await userAgent().recentRuns(agent!.id)) ?? [];

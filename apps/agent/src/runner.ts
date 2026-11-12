@@ -7,6 +7,8 @@ import {
   type Tool,
 } from "@iris/agent";
 import { type ConsultContext, consultTool, RunCut } from "./consult";
+import { nextSummaryDueAt, runsWaitingForSummaries } from "./daily-summary";
+import { dayOfRun } from "./run-day";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 import { systemPromptOfRun } from "./system-prompt";
@@ -116,7 +118,12 @@ export class Waker {
  * `MAX_FAILED_ATTEMPTS` times and is given up.
  *
  * A run waits while a run of the same thread that started before it hasn't ended, the task's new
- * run included; runs that started together, such as the replies to one post, go side by side.
+ * run included; runs that started together, such as the replies to one post, go side by side. It
+ * also waits while a summary of an earlier day of its thread can be written and isn't yet
+ * (`runsWaitingForSummaries`), so it reads that summary.
+ *
+ * While `alongside`, other work of the same wake-up, goes on, it keeps starting work that
+ * becomes due, and returns only once that work is done too.
  *
  * Once `WAKE_UP_BUDGET_MS` has passed since it began, nothing new starts, and each run going on
  * stops after its current message and is due again at once, so the next wake-up carries it on.
@@ -128,7 +135,15 @@ export async function runDue(
   watching: RunWatcher = nobodyWatching,
   waker: Waker = new Waker(),
   toolsFor: (run: RunOf) => RunTools = () => ({ tools: [] }),
+  alongside: Promise<void> = Promise.resolve(),
 ): Promise<Date | undefined> {
+  let alongsideDone = false;
+  // Its failure is the caller's to hear; here it only ends the wait.
+  const alongsideEnded = alongside
+    .catch(() => undefined)
+    .finally(() => {
+      alongsideDone = true;
+    });
   const watcher = safely(watching);
   const stopAt = now().getTime() + WAKE_UP_BUDGET_MS;
   const outOfTime = () => now().getTime() >= stopAt;
@@ -139,7 +154,8 @@ export async function runDue(
     if (!outOfTime()) {
       startDueTasks(storage, now, watcher);
       const room = MAX_PARALLEL_RUNS - (going.size - waiting.size);
-      for (const runId of store.nextDueRuns(storage, now(), room, [...going.keys()])) {
+      const leftOut = [...going.keys(), ...runsWaitingForSummaries(storage)];
+      for (const runId of store.nextDueRuns(storage, now(), room, leftOut)) {
         const tools = runTools({
           storage,
           runId,
@@ -181,10 +197,14 @@ export async function runDue(
         );
       }
     }
-    if (going.size === 0) {
+    if (going.size === 0 && alongsideDone) {
       return nextWakeAt(storage);
     }
-    await Promise.race([...going.values(), waker.next()]);
+    await Promise.race([
+      ...going.values(),
+      waker.next(),
+      ...(alongsideDone ? [] : [alongsideEnded]),
+    ]);
   }
 }
 
@@ -215,11 +235,16 @@ function startDueTasks(storage: DurableObjectStorage, now: () => Date, watcher: 
   }
 }
 
-/** The earliest of the next task time and the due times of runs next in line. */
+/**
+ * The earliest of the next task time, the due times of runs next in line that aren't waiting for
+ * a summary, and the next summary's.
+ */
 export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
-  const times = [store.earliestTaskRunAt(storage), store.earliestRunDueAt(storage)].filter(
-    (time) => time !== undefined,
-  );
+  const times = [
+    store.earliestTaskRunAt(storage),
+    store.earliestRunDueAt(storage, runsWaitingForSummaries(storage)),
+    nextSummaryDueAt(storage),
+  ].filter((time) => time !== undefined);
   return times.length === 0
     ? undefined
     : new Date(Math.min(...times.map((time) => time.getTime())));
@@ -267,7 +292,8 @@ async function* noSteps(): AsyncGenerator<Message, void, undefined> {}
 
 /**
  * Carries the run on from its saved messages until it ends, it has taken `DEFAULT_MAX_STEPS`
- * steps in all, or `outOfTime` says so after a message, when it is due again at once.
+ * steps in all, or `outOfTime` says so after a message, when it is due again at once. A run ended
+ * meanwhile by deactivating its agent stops there and saves nothing more.
  */
 async function carryOn(
   storage: DurableObjectStorage,
@@ -280,18 +306,30 @@ async function carryOn(
   store.postponeRun(storage, runId, new Date(now().getTime() + RETRY_DELAY_MS));
   watcher.progress(runId, { type: "starting" });
   try {
-    const earlier = earlierMessages(store.earlierInThread(storage, runId), MAX_EARLIER_MESSAGES);
+    const earlier = earlierMessages(
+      store.earlierInThread(storage, runId, dayOfRun(storage, runId)?.startsAt),
+      MAX_EARLIER_MESSAGES,
+    );
     const conversation = store.loadConversation(storage, runId);
     let seq = conversation.length;
     // Steps count across attempts and wake-ups: the run's own messages after its first are the
     // steps it has taken.
     const stepsLeft = DEFAULT_MAX_STEPS - (conversation.length - 1);
-    const onProgress = (progress: ModelProgress) => watcher.progress(runId, progress);
+    // A run ended meanwhile, by deactivating its agent, tells no more of how it is getting on.
+    const onProgress = (progress: ModelProgress) => {
+      if (!store.hasRunEnded(storage, runId)) {
+        watcher.progress(runId, progress);
+      }
+    };
     const steps =
       stepsLeft > 0
         ? run(agent, [...earlier, ...conversation], { onProgress, maxSteps: stepsLeft })
         : noSteps();
     for await (const message of steps) {
+      if (store.hasRunEnded(storage, runId)) {
+        watcher.stopped(runId);
+        return;
+      }
       store.appendMessage(storage, runId, seq, message);
       seq += 1;
       // Still being carried on: not due again until an attempt cut off here would be.
@@ -303,9 +341,17 @@ async function carryOn(
         return;
       }
     }
+    if (store.hasRunEnded(storage, runId)) {
+      watcher.stopped(runId);
+      return;
+    }
     store.endRun(storage, runId, now());
     watcher.changed(runId);
   } catch (error) {
+    if (store.hasRunEnded(storage, runId)) {
+      watcher.stopped(runId);
+      return;
+    }
     if (error instanceof RunCut) {
       store.postponeRun(storage, runId, now());
       watcher.stopped(runId);
