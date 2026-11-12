@@ -528,6 +528,14 @@
                 ],
                 "description": "The code that confirms it in Gmail's settings instead, if any"
               },
+              "account": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "email",
+                "description": "The Gmail account that asked to forward, whose settings turn forwarding on; null if the mail doesn't name it"
+              },
               "receivedAt": {
                 "type": "string",
                 "format": "date-time"
@@ -536,6 +544,7 @@
             "required": [
               "url",
               "code",
+              "account",
               "receivedAt"
             ],
             "description": "Gmail's forwarding confirmation for the address, from when it arrives until mail arrives after it or the app lets it go; null otherwise"

@@ -36,13 +36,13 @@ struct MailConfirmationSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                     }
-                case .turnOnForwarding:
+                case .turnOnForwarding(let account):
                     Step(
                         systemImage: "arrow.triangle.turn.up.right.circle",
                         title: "Gmail で転送を有効にする",
-                        text: "最後に Gmail の設定 → 転送と POP/IMAP で「受信メールを \(address ?? "このアドレス") に転送する」を選び、「変更を保存」を押してください。"
+                        text: "最後に Gmail の設定 → メール転送と POP/IMAP で「受信メールを \(address ?? "このアドレス") に転送する」を選び、「変更を保存」を押してください。"
                     )
-                    Link("Gmail の転送の設定を開く", destination: Gmail.forwardingSettings)
+                    Link("Gmail の転送の設定を開く", destination: Gmail.forwardingSettings(account: account))
                         .buttonStyle(.borderedProminent)
                 }
             }
@@ -50,11 +50,16 @@ struct MailConfirmationSheet: View {
             .frame(maxHeight: .infinity, alignment: .top)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(offer == .turnOnForwarding ? "完了" : "あとで", action: onClose)
+                    Button(isLastStep ? "完了" : "あとで", action: onClose)
                 }
             }
         }
         .presentationDetents([.medium, .large])
+    }
+
+    private var isLastStep: Bool {
+        if case .turnOnForwarding = offer { return true }
+        return false
     }
 }
 
@@ -90,7 +95,8 @@ private struct Step: View {
     #Preview("転送を有効にする") {
         Color.clear.sheet(isPresented: .constant(true)) {
             MailConfirmationSheet(
-                offer: .turnOnForwarding, address: FakeMailBackend.address, onOpened: {}, onClose: {})
+                offer: .turnOnForwarding(account: FakeMailBackend.confirmation.account), address: FakeMailBackend.address,
+                onOpened: {}, onClose: {})
         }
     }
 #endif

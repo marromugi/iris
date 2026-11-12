@@ -5,11 +5,13 @@ export const GMAIL_FORWARDING_SENDER = "forwarding-noreply@google.com";
 
 /**
  * A Gmail forwarding confirmation: the link that confirms the address to Gmail, after which the user
- * turns forwarding on in Gmail's settings, and the code that does the same if it has one.
+ * turns forwarding on in Gmail's settings, the code that does the same if it has one, and the Gmail
+ * account that asked to forward, if the mail names it.
  */
 export interface MailConfirmation {
   readonly url: string;
   readonly code: string | null;
+  readonly account: string | null;
   readonly receivedAt: Date;
 }
 
@@ -28,6 +30,21 @@ const CONFIRMATION_URL =
 
 /** The code Gmail puts in the subject, as in "(#123456789) Gmail Forwarding Confirmation". */
 const CONFIRMATION_CODE = /\(#(\d+)\)/;
+
+/** A mail address, as Gmail names the account in "Receive Mail from hanako@gmail.com". */
+const MAIL_ADDRESS = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
+
+/**
+ * The Gmail account asking to forward: the first address in the subject, else in the text, other
+ * than `address` itself and Google's own.
+ */
+function forwardingAccount(mail: NewMail, address: string): string | null {
+  const candidates = [...mail.subject.matchAll(MAIL_ADDRESS), ...mail.text.matchAll(MAIL_ADDRESS)];
+  const account = candidates
+    .map((match) => match[0].toLowerCase())
+    .find((found) => found !== address.toLowerCase() && !found.endsWith("@google.com"));
+  return account ?? null;
+}
 
 /**
  * The confirmation in a mail when it is Gmail's forwarding confirmation for `address`, that is,
@@ -53,6 +70,7 @@ export function gmailForwardingConfirmation(
     : {
         url,
         code: CONFIRMATION_CODE.exec(mail.subject)?.[1] ?? null,
+        account: forwardingAccount(mail, address),
         receivedAt: mail.receivedAt,
       };
 }

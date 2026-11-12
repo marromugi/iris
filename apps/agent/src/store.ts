@@ -1443,7 +1443,12 @@ export function mailState(storage: DurableObjectStorage): MailState {
     confirmation:
       row?.confirmationUrl == null || row.confirmationAt === null
         ? null
-        : { url: row.confirmationUrl, code: row.confirmationCode, receivedAt: row.confirmationAt },
+        : {
+            url: row.confirmationUrl,
+            code: row.confirmationCode,
+            account: row.confirmationAccount,
+            receivedAt: row.confirmationAt,
+          },
     lastMailAt: row?.lastMailAt ?? null,
   };
 }
@@ -1456,6 +1461,7 @@ export function setMailConfirmation(
   const values = {
     confirmationUrl: confirmation.url,
     confirmationCode: confirmation.code,
+    confirmationAccount: confirmation.account,
     confirmationAt: confirmation.receivedAt,
   };
   database(storage)
@@ -1470,6 +1476,7 @@ export function recordMailArrived(storage: DurableObjectStorage, at: Date): void
   const values = {
     confirmationUrl: null,
     confirmationCode: null,
+    confirmationAccount: null,
     confirmationAt: null,
     lastMailAt: at,
   };
@@ -1484,7 +1491,12 @@ export function recordMailArrived(storage: DurableObjectStorage, at: Date): void
 export function clearMailConfirmation(storage: DurableObjectStorage): void {
   database(storage)
     .update(mailSetup)
-    .set({ confirmationUrl: null, confirmationCode: null, confirmationAt: null })
+    .set({
+      confirmationUrl: null,
+      confirmationCode: null,
+      confirmationAccount: null,
+      confirmationAt: null,
+    })
     .run();
 }
 

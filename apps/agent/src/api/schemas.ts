@@ -283,6 +283,10 @@ export const mailSetupSchema = z
           .string()
           .nullable()
           .meta({ description: "The code that confirms it in Gmail's settings instead, if any" }),
+        account: z.email().nullable().meta({
+          description:
+            "The Gmail account that asked to forward, whose settings turn forwarding on; null if the mail doesn't name it",
+        }),
         receivedAt: timeSchema,
       })
       .nullable()
@@ -309,6 +313,7 @@ export function mailSetupJson(address: string | null, state: MailState): MailSet
         : {
             url: state.confirmation.url,
             code: state.confirmation.code,
+            account: state.confirmation.account,
             receivedAt: timeJson(state.confirmation.receivedAt),
           },
     lastMailAt: state.lastMailAt === null ? null : timeJson(state.lastMailAt),

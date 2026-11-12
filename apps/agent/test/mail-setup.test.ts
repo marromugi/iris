@@ -92,6 +92,7 @@ test("Gmail's forwarding confirmation to the address gives its link and code, an
   expect(confirmation(gmail("(#123456789) Gmail Forwarding Confirmation", text))).toEqual({
     url: confirmationUrl,
     code: "123456789",
+    account: null,
     receivedAt: now,
   });
   expect(
@@ -103,8 +104,30 @@ test("Gmail's forwarding confirmation to the address gives its link and code, an
       ),
       [ADDRESS.toUpperCase().toLowerCase()],
     ),
-  ).toEqual({ url: "https://mail.google.com/mail/u/0/vf-abc", code: null, receivedAt: now });
+  ).toEqual({
+    url: "https://mail.google.com/mail/u/0/vf-abc",
+    code: null,
+    account: null,
+    receivedAt: now,
+  });
   expect(confirmation(newMail("someone@example.com", "(#1) x", text))).toBeUndefined();
+  expect(
+    confirmation(
+      gmail("(#1) Gmail Forwarding Confirmation - Receive Mail from Hanako@Gmail.com", text),
+    )?.account,
+  ).toBe("hanako@gmail.com");
+  expect(
+    confirmation(gmail("(#1) Gmail の転送の確認 - taro.y+x@example.co.jp からメールを受信", text))
+      ?.account,
+  ).toBe("taro.y+x@example.co.jp");
+  expect(
+    confirmation(
+      gmail(
+        "(#1) Gmail Forwarding Confirmation",
+        `Forward to ${ADDRESS} from forwarding-noreply@google.com? hanako@gmail.com asked.\n${confirmationUrl}`,
+      ),
+    )?.account,
+  ).toBe("hanako@gmail.com");
   expect(confirmation(gmail("(#1) x", text), ["hanako@gmail.com"])).toBeUndefined();
   for (const other of [
     "https://mail.google.com/mail/",
@@ -165,7 +188,12 @@ test("Gmail's confirmation waits for the user, kept from agents, until mail arri
 
   expect(waiting).toEqual({
     address,
-    confirmation: { url: confirmationUrl, code: "123456789", receivedAt: expect.any(String) },
+    confirmation: {
+      url: confirmationUrl,
+      code: "123456789",
+      account: "hanako@gmail.com",
+      receivedAt: expect.any(String),
+    },
     lastMailAt: null,
   });
   expect(keptBefore.mail).toEqual([]);
@@ -208,6 +236,7 @@ test("a second confirmation takes the place of the first", async () => {
     confirmation: {
       url: "https://mail-settings.google.com/mail/vf-second",
       code: "987654321",
+      account: "hanako@gmail.com",
       receivedAt: expect.any(String),
     },
     lastMailAt: null,
