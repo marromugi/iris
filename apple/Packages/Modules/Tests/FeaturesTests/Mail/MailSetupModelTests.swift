@@ -29,6 +29,15 @@ struct MailSetupModelTests {
         #expect(MailStatus(setup) == status)
     }
 
+    @Test func eachStatusHasItsOwnWords() {
+        let words = [
+            MailStatus.noAddress, .waiting, .confirmationArrived(FakeMailBackend.confirmation),
+            .receiving(lastMailAt: .now),
+        ].map(\.summary)
+
+        #expect(words == ["未設定", "設定中", "要確認", "受け取り中"])
+    }
+
     @Test func aConfirmationThatArrivedIsOffered() async {
         let mail = MailSetupModel(backend: FakeMailBackend(.init(setup: .success(FakeMailBackend.confirmationSetup))))
 
@@ -77,6 +86,7 @@ struct MailSetupModelTests {
         await eventually { !mail.isChanging }
 
         #expect(backend.madeAddresses == 1)
+        #expect(!mail.isChanging)
         #expect(mail.setup.value == FakeMailBackend.waitingSetup)
     }
 
