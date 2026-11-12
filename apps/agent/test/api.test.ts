@@ -559,7 +559,9 @@ test("gives no user another user's image", async () => {
 test("takes no images while the model doesn't read them", async () => {
   const userId = await addUser("花子");
   const { id }: { id: string } = await (await putUp(userId, jpeg)).json();
-  const workersAi = { ...env, MODEL_PROVIDER: "workers-ai" };
+  // wrangler types gives MODEL_PROVIDER wrangler.jsonc's one value as its type.
+  const workersAi: Env = { ...env };
+  Reflect.set(workersAi, "MODEL_PROVIDER", "workers-ai");
 
   const me: { canAttachImages: boolean } = await (
     await agentApi.request("/api/me", undefined, workersAi, context({ userId }))
