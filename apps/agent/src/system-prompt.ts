@@ -1,4 +1,16 @@
+import { DAY_STARTS_AT_HOUR, labelDaysBefore } from "./day";
+import { dayOfRun } from "./run-day";
 import * as store from "./store";
+
+/** How many days before its own a run reads the summaries of. */
+export const SUMMARY_DAYS_READ = 7;
+
+/** A day's summary of the thread as a run reads it. */
+export interface SummaryRead {
+  /** The date the day begins on, in the user's time zone. */
+  readonly day: string;
+  readonly text: string;
+}
 
 /** What every agent is told, whatever its run. */
 export const SHARED_PROMPT = `You are {name}, one of the user's agents in iris. You work in chat and on schedules the user sets.
@@ -21,18 +33,28 @@ export type RunPlace =
 
 /**
  * The system prompt for a run of the agent `name` in `place` that started at `startedAt`, thinking
- * with the model `modelName`. It says only the day the run started, so it stays the same however
- * long the run goes on and whenever it is carried on, and the model's service can keep reusing what
- * it read before.
+ * with the model `modelName`, followed by `summaries`, the thread's earlier days, oldest first. It
+ * says only the day the run started, so it stays the same however long the run goes on and
+ * whenever it is carried on, and the model's service can keep reusing what it read before.
  */
 export function systemPrompt(
   name: string,
   place: RunPlace,
   startedAt: Date,
   modelName: string,
+  summaries: readonly SummaryRead[] = [],
 ): string {
   const day = startedAt.toISOString().slice(0, "YYYY-MM-DD".length);
-  return `${SHARED_PROMPT.replace("{name}", name)}\n\nThis run started on ${day} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: ${placeLine(place)}. Model: ${modelName}.`;
+  const prompt = `${SHARED_PROMPT.replace("{name}", name)}\n\nThis run started on ${day} (UTC); it may be later now, so check with \`date\` when the time matters. Thread: ${placeLine(place)}. Model: ${modelName}.`;
+  if (summaries.length === 0) {
+    return prompt;
+  }
+  const days = summaries.map((summary) => `<day date="${summary.day}">\n${summary.text}\n</day>`);
+  return [
+    prompt,
+    `The conversation leaves out this thread's earlier days, each from ${DAY_STARTS_AT_HOUR}:00 to ${DAY_STARTS_AT_HOUR}:00 in the user's time zone. Their summaries, oldest first:`,
+    ...days,
+  ].join("\n\n");
 }
 
 function placeLine(place: RunPlace): string {
@@ -62,5 +84,34 @@ export function systemPromptOfRun(
       : thread.agentId === null
         ? { kind: "group", name: thread.name ?? "" }
         : { kind: "one-to-one" };
-  return systemPrompt(setting.agentName ?? "an agent", place, setting.startedAt, modelName);
+  return systemPrompt(
+    setting.agentName ?? "an agent",
+    place,
+    setting.startedAt,
+    modelName,
+    summariesRead(storage, runId, setting.thread.id),
+  );
+}
+
+/**
+ * The thread's written summaries of the `SUMMARY_DAYS_READ` days before the run's own, oldest
+ * first; none for a consult run.
+ */
+function summariesRead(
+  storage: DurableObjectStorage,
+  runId: string,
+  threadId: string,
+): SummaryRead[] {
+  const day = dayOfRun(storage, runId);
+  if (day === undefined) {
+    return [];
+  }
+  const from = labelDaysBefore(day.label, SUMMARY_DAYS_READ);
+  return store
+    .dailySummariesOf(storage, threadId)
+    .flatMap((summary) =>
+      summary.text !== null && summary.day >= from && summary.day < day.label
+        ? [{ day: summary.day, text: summary.text }]
+        : [],
+    );
 }

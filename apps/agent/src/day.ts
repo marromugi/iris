@@ -30,3 +30,10 @@ export function dayOf(at: Date, timeZone: string): Day {
   }).format(startsAt);
   return { label, startsAt, endsAt };
 }
+
+/** The label of the day `count` days before the day labelled `label`. */
+export function labelDaysBefore(label: string, count: number): string {
+  const date = new Date(`${label}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - count);
+  return date.toISOString().slice(0, "YYYY-MM-DD".length);
+}

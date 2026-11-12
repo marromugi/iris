@@ -335,6 +335,7 @@ export function createUserAgent(
           agent.model,
           clock,
           () => clock().getTime() >= stopAt,
+          () => this.waker.wake(),
         );
         const wakeAt = await runDue(
           this.ctx.storage,

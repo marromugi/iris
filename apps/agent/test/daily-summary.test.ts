@@ -9,7 +9,8 @@ import {
   SUMMARY_RETRY_DELAY_MS,
   summarizeDue,
 } from "../src/daily-summary";
-import { nextWakeAt, runDue, Waker } from "../src/runner";
+import { dayOf } from "../src/day";
+import { nextWakeAt, RETRY_DELAY_MS, runDue, Waker } from "../src/runner";
 import * as store from "../src/store";
 import { agentThread } from "./agent-thread";
 import { modelRequests, scriptedModel, testAgent } from "./worker";
@@ -287,9 +288,16 @@ test("the alarm writes the summaries that are due, and sets no alarm when nothin
   expect(await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm())).toBeNull();
 });
 
-test("a post sent while summaries are being written gets its reply in the same wake-up", async () => {
+test("a post to another thread sent while summaries are being written gets its reply in the same wake-up", async () => {
   await exchange("おはよう", "おはようございます。", new Date("2026-11-12T09:00:00+09:00"));
-  const { agentId, threadId } = await firstAgent();
+  const added = await userAgent().addAgent({ name: "株価" });
+  if (!added.ok) {
+    throw new Error(added.error);
+  }
+  const agentId = added.agent.id;
+  const threadId = await runInDurableObject(userAgent(), (_, state) =>
+    agentThread(state.storage, agentId),
+  );
   const now = new Date("2026-11-13T08:00:00+09:00");
   const { promise: replied, resolve: reply_ } = Promise.withResolvers<void>();
   const tooLate = new Promise<never>((_, reject) =>
@@ -339,4 +347,248 @@ test("a post sent while summaries are being written gets its reply in the same w
 
   expect(await summaries()).toEqual([{ day: "2026-11-12", text: "まとめ" }]);
   expect(modelRequests).toHaveLength(2);
+});
+
+/** Saves the first agent's thread's summary of the Tokyo day labelled `label`: `text`, or failed for good when null. */
+async function summarized(label: string, text: string | null) {
+  const { threadId } = await firstAgent();
+  const day = dayOf(new Date(`${label}T12:00:00+09:00`), "Asia/Tokyo");
+  const row = { threadId, day: day.label, startsAt: day.startsAt, endsAt: day.endsAt };
+  await runInDurableObject(userAgent(), (_, state) => {
+    if (text !== null) {
+      store.saveDailySummary(state.storage, { ...row, text });
+      return;
+    }
+    for (let attempt = 0; attempt < MAX_SUMMARY_ATTEMPTS; attempt += 1) {
+      store.recordDailySummaryFailure(state.storage, row, { error: "busy", retryAt: day.endsAt });
+    }
+  });
+}
+
+/** One wake-up at `now`, as the alarm does it: due runs, and due summaries side by side. */
+function wakeUpAt(now: Date) {
+  return runInDurableObject(userAgent(), async (_, state) => {
+    const waker = new Waker();
+    return runDue(
+      state.storage,
+      testAgent,
+      () => now,
+      undefined,
+      waker,
+      undefined,
+      summarizeDue(
+        state.storage,
+        testAgent.model,
+        () => now,
+        () => false,
+        () => waker.wake(),
+      ),
+    );
+  });
+}
+
+/** The summaries at the end of a run's system prompt, as `[date, text]`, oldest first. */
+const summariesIn = (system: string | undefined) =>
+  [...(system ?? "").matchAll(/<day date="([^"]+)">\n([\s\S]*?)\n<\/day>/g)].map(
+    ([, day, text]) => [day, text],
+  );
+
+test("a run reads what was said in its thread only from 4:00 of its day", async () => {
+  await exchange("夜ふかし中", "早めに寝ましょう。", new Date("2026-11-13T03:59:00+09:00"));
+  await summarized("2026-11-12", "12日のまとめ");
+  await exchange("おはよう", "おはようございます。", new Date("2026-11-13T04:00:00+09:00"));
+  await exchange("今日の予定は？", undefined, new Date("2026-11-13T09:00:00+09:00"));
+  scriptedModel.push(reply("10 時から会議です。"));
+
+  await wakeUpAt(new Date("2026-11-13T09:00:00+09:00"));
+
+  expect(modelRequests[0]?.messages).toEqual([
+    { role: "user", text: "おはよう" },
+    reply("おはようございます。"),
+    { role: "user", text: "今日の予定は？" },
+  ]);
+});
+
+test("a run is told its thread's written summaries of the 7 days before its own, oldest first, and keeps them when carried on", async () => {
+  await summarized("2026-11-05", "8日前");
+  await summarized("2026-11-06", "7日前");
+  await summarized("2026-11-09", null);
+  await summarized("2026-11-12", "昨日");
+  await summarized("2026-11-10", "3日前");
+  await exchange("続きを", undefined, new Date("2026-11-13T09:00:00+09:00"));
+  scriptedModel.push(new Error("The model service is unreachable."), reply("はい。"));
+
+  await wakeUpAt(new Date("2026-11-13T09:00:00+09:00"));
+  await wakeUpAt(new Date(new Date("2026-11-13T09:00:00+09:00").getTime() + RETRY_DELAY_MS));
+
+  const [first, carriedOn] = modelRequests;
+  expect(summariesIn(first?.system)).toEqual([
+    ["2026-11-06", "7日前"],
+    ["2026-11-10", "3日前"],
+    ["2026-11-12", "昨日"],
+  ]);
+  expect(first?.system).toMatch(
+    /Model: test-model\.\n\nThe conversation leaves out this thread's earlier days, each from 4:00 to 4:00 in the user's time zone\. Their summaries, oldest first:\n\n<day date="2026-11-06">/,
+  );
+  expect(carriedOn?.system).toBe(first?.system);
+});
+
+test("a run with no summaries to read gets the prompt it had before", async () => {
+  await exchange("こんにちは", undefined, new Date("2026-11-13T09:00:00+09:00"));
+  scriptedModel.push(reply("こんにちは！"));
+
+  await wakeUpAt(new Date("2026-11-13T09:00:00+09:00"));
+
+  expect(modelRequests[0]?.system).toMatch(/Model: test-model\.$/);
+});
+
+test("a run that started after a day ended waits for that day's summary, and reads it", async () => {
+  await exchange("買い物リスト", "牛乳、卵", new Date("2026-11-12T10:00:00+09:00"));
+  await exchange("リストは？", undefined, new Date("2026-11-13T04:01:00+09:00"));
+  scriptedModel.push(reply("12日のまとめ"), reply("牛乳と卵です。"));
+
+  await wakeUpAt(new Date("2026-11-13T04:01:00+09:00"));
+
+  const [summary, run] = modelRequests;
+  expect(summary?.system).toBe(SUMMARY_PROMPT);
+  expect(summariesIn(run?.system)).toEqual([["2026-11-12", "12日のまとめ"]]);
+  expect(run?.messages).toEqual([{ role: "user", text: "リストは？" }]);
+});
+
+test("a run waits while its thread's summary of an earlier day is being tried again", async () => {
+  await exchange("買い物リスト", "牛乳、卵", new Date("2026-11-12T10:00:00+09:00"));
+  scriptedModel.push(new Error("The model is busy."));
+  await summarizeAt(new Date("2026-11-13T04:00:00+09:00"));
+  await exchange("リストは？", undefined, new Date("2026-11-13T04:01:00+09:00"));
+
+  const wakeAgainAt = await wakeUpAt(new Date("2026-11-13T04:01:00+09:00"));
+  expect(modelRequests).toHaveLength(1);
+  const retryAt = new Date(
+    new Date("2026-11-13T04:00:00+09:00").getTime() + SUMMARY_RETRY_DELAY_MS,
+  );
+  expect(wakeAgainAt).toEqual(retryAt);
+
+  scriptedModel.push(reply("12日のまとめ"), reply("牛乳と卵です。"));
+  await wakeUpAt(retryAt);
+  expect(summariesIn(modelRequests[2]?.system)).toEqual([["2026-11-12", "12日のまとめ"]]);
+});
+
+test("a run started before the day ended goes first, then the summary, then a run started after", async () => {
+  await exchange("調べて", undefined, new Date("2026-11-13T03:58:00+09:00"));
+  await exchange("終わった？", undefined, new Date("2026-11-13T04:01:00+09:00"));
+  scriptedModel.push(reply("調べました。"), reply("12日のまとめ"), reply("終わりました。"));
+
+  // The summary can be written only once the earlier run has ended, so the wake-up asks to be
+  // woken again at once, when the summary is due.
+  const now = new Date("2026-11-13T04:01:00+09:00");
+  expect(await wakeUpAt(now)).toEqual(new Date("2026-11-13T04:00:00+09:00"));
+  expect(modelRequests).toHaveLength(1);
+  await wakeUpAt(new Date(now.getTime() + 1000));
+
+  expect(modelRequests.map((request) => request.system === SUMMARY_PROMPT)).toEqual([
+    false,
+    true,
+    false,
+  ]);
+  expect(summariesIn(modelRequests[0]?.system)).toEqual([]);
+  expect(summariesIn(modelRequests[2]?.system)).toEqual([["2026-11-12", "12日のまとめ"]]);
+});
+
+test("a run starts once its own thread's summary is written, while other threads' are still being written", async () => {
+  const added = await userAgent().addAgent({ name: "株価" });
+  if (!added.ok) {
+    throw new Error(added.error);
+  }
+  const other = added.agent.id;
+  await runInDurableObject(userAgent(), (_, state) => {
+    const threadId = agentThread(state.storage, other);
+    const said = (text: string, at: Date) =>
+      store.insertPost(
+        state.storage,
+        { id: crypto.randomUUID(), threadId, agentId: null, callId: null, text, createdAt: at },
+        [other],
+      );
+    const [runId = ""] = said("株価は？", new Date("2026-11-12T10:00:00+09:00"));
+    store.appendMessage(state.storage, runId, 1, reply("上がっています。"));
+    store.endRun(state.storage, runId, new Date("2026-11-12T10:01:00+09:00"));
+    said("今日は？", new Date("2026-11-13T04:01:00+09:00"));
+  });
+  await exchange("買い物リスト", "牛乳、卵", new Date("2026-11-12T10:00:00+09:00"));
+  await exchange("リストは？", undefined, new Date("2026-11-13T04:01:00+09:00"));
+  const { promise: runAsked, resolve: runStarted } = Promise.withResolvers<void>();
+  const tooLate = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error("The run didn't start before the next summary.")), 2000),
+  );
+  scriptedModel.push(
+    reply("一つ目のまとめ"),
+    async () => {
+      await Promise.race([runAsked, tooLate]);
+      return reply("二つ目のまとめ");
+    },
+    () => {
+      runStarted();
+      return reply("はい。");
+    },
+    reply("はい。"),
+  );
+
+  await wakeUpAt(new Date("2026-11-13T04:01:00+09:00"));
+
+  expect(modelRequests.map((request) => request.system === SUMMARY_PROMPT)).toEqual([
+    true,
+    true,
+    false,
+    false,
+  ]);
+  expect(summariesIn(modelRequests[2]?.system)).toEqual([["2026-11-12", "一つ目のまとめ"]]);
+});
+
+test("a consult is read whole, across 4:00, and gets no summaries", async () => {
+  const added = await userAgent().addAgent({ name: "株価" });
+  if (!added.ok) {
+    throw new Error(added.error);
+  }
+  const answerer = added.agent.id;
+  await exchange("株価を聞いてきて", undefined, new Date("2026-11-13T03:50:00+09:00"));
+  const { agentId } = await firstAgent();
+  await runInDurableObject(userAgent(), (_, state) => {
+    const [asking] = store.recentRuns(state.storage, agentThread(state.storage, agentId), 1);
+    const askingRunId = asking?.id ?? "";
+    // The asking run waits for the answer; it isn't carried on here.
+    store.postponeRun(state.storage, askingRunId, new Date("2026-11-14T00:00:00Z"));
+    store.insertConsult(state.storage, {
+      id: "consult-1",
+      runId: askingRunId,
+      askerId: agentId,
+      answerer: { id: answerer, name: "株価" },
+      createdAt: new Date("2026-11-13T03:59:00+09:00"),
+    });
+    const ask = (text: string, at: Date) =>
+      store.insertPost(
+        state.storage,
+        {
+          id: crypto.randomUUID(),
+          threadId: "consult-1",
+          agentId,
+          callId: null,
+          text,
+          createdAt: at,
+        },
+        [answerer],
+      );
+    const [first = ""] = ask("今日は？", new Date("2026-11-13T03:59:00+09:00"));
+    store.appendMessage(state.storage, first, 1, reply("上がっています。"));
+    store.endRun(state.storage, first, new Date("2026-11-13T04:00:30+09:00"));
+    ask("いくら？", new Date("2026-11-13T04:01:00+09:00"));
+  });
+  scriptedModel.push(reply("100 円です。"));
+
+  await wakeUpAt(new Date("2026-11-13T04:01:00+09:00"));
+
+  expect(modelRequests[0]?.messages).toEqual([
+    { role: "user", text: "エージェント: 今日は？" },
+    reply("上がっています。"),
+    { role: "user", text: "エージェント: いくら？" },
+  ]);
+  expect(summariesIn(modelRequests[0]?.system)).toEqual([]);
 });

@@ -7,7 +7,8 @@ import {
   type Tool,
 } from "@iris/agent";
 import { type ConsultContext, consultTool, RunCut } from "./consult";
-import { nextSummaryDueAt } from "./daily-summary";
+import { nextSummaryDueAt, runsWaitingForSummaries } from "./daily-summary";
+import { dayOfRun } from "./run-day";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
 import { systemPromptOfRun } from "./system-prompt";
@@ -117,7 +118,9 @@ export class Waker {
  * `MAX_FAILED_ATTEMPTS` times and is given up.
  *
  * A run waits while a run of the same thread that started before it hasn't ended, the task's new
- * run included; runs that started together, such as the replies to one post, go side by side.
+ * run included; runs that started together, such as the replies to one post, go side by side. It
+ * also waits while a summary of an earlier day of its thread can be written and isn't yet
+ * (`runsWaitingForSummaries`), so it reads that summary.
  *
  * While `alongside`, other work of the same wake-up, goes on, it keeps starting work that
  * becomes due, and returns only once that work is done too.
@@ -151,7 +154,8 @@ export async function runDue(
     if (!outOfTime()) {
       startDueTasks(storage, now, watcher);
       const room = MAX_PARALLEL_RUNS - (going.size - waiting.size);
-      for (const runId of store.nextDueRuns(storage, now(), room, [...going.keys()])) {
+      const leftOut = [...going.keys(), ...runsWaitingForSummaries(storage)];
+      for (const runId of store.nextDueRuns(storage, now(), room, leftOut)) {
         const tools = runTools({
           storage,
           runId,
@@ -231,11 +235,14 @@ function startDueTasks(storage: DurableObjectStorage, now: () => Date, watcher: 
   }
 }
 
-/** The earliest of the next task time, the due times of runs next in line, and the next summary's. */
+/**
+ * The earliest of the next task time, the due times of runs next in line that aren't waiting for
+ * a summary, and the next summary's.
+ */
 export function nextWakeAt(storage: DurableObjectStorage): Date | undefined {
   const times = [
     store.earliestTaskRunAt(storage),
-    store.earliestRunDueAt(storage),
+    store.earliestRunDueAt(storage, runsWaitingForSummaries(storage)),
     nextSummaryDueAt(storage),
   ].filter((time) => time !== undefined);
   return times.length === 0
@@ -299,7 +306,10 @@ async function carryOn(
   store.postponeRun(storage, runId, new Date(now().getTime() + RETRY_DELAY_MS));
   watcher.progress(runId, { type: "starting" });
   try {
-    const earlier = earlierMessages(store.earlierInThread(storage, runId), MAX_EARLIER_MESSAGES);
+    const earlier = earlierMessages(
+      store.earlierInThread(storage, runId, dayOfRun(storage, runId)?.startsAt),
+      MAX_EARLIER_MESSAGES,
+    );
     const conversation = store.loadConversation(storage, runId);
     let seq = conversation.length;
     // Steps count across attempts and wake-ups: the run's own messages after its first are the
