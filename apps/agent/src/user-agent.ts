@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { type NewAgent, newAgentSchema, randomLook } from "./agent";
 import { type NewGroup, newGroupSchema } from "./group";
+import type { NewMail } from "./mail/mail";
+import { keptSince } from "./mail/mail-tools";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
@@ -323,6 +325,12 @@ export function createUserAgent(
         return undefined;
       }
       return store.recentRuns(this.ctx.storage, threadId, limit);
+    }
+
+    /** Keeps a mail the user forwarded, and lets go of what is older than mail is kept. */
+    keepMail(mail: NewMail): void {
+      store.insertMail(this.ctx.storage, { id: crypto.randomUUID(), ...mail });
+      store.deleteMailBefore(this.ctx.storage, keptSince(mail.receivedAt));
     }
 
     /** Carries on the work that is due and writes the summaries that are, side by side. */

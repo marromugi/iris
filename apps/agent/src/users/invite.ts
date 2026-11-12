@@ -71,22 +71,3 @@ export async function newInvite(
     },
   };
 }
-
-function sqlText(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
-/**
- * The SQL that stores `invite` in D1, with its values written out: `wrangler d1 execute` takes a
- * statement, not bound parameters.
- */
-export function inviteInsertStatement(invite: NewInvite): string {
-  const values = [
-    sqlText(invite.id),
-    sqlText(invite.name),
-    sqlText(invite.keyHash),
-    invite.createdAt.getTime(),
-    invite.expiresAt.getTime(),
-  ];
-  return `INSERT INTO invites (id, name, key_hash, created_at, expires_at) VALUES (${values.join(", ")})`;
-}

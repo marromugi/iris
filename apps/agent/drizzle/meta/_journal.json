@@ -78,6 +78,13 @@
       "when": 1794476413318,
       "tag": "0010_daily_summaries",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794477860869,
+      "tag": "0011_mails",
+      "breakpoints": true
     }
   ]
 }

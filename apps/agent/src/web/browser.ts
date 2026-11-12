@@ -2,7 +2,8 @@ import { type Browser, type BrowserWorker, launch, type Page } from "@cloudflare
 import { defineTool, type Tool } from "@iris/agent";
 import { z } from "zod";
 import { isBlocked } from "./blocked-hosts";
-import { untrusted } from "./search";
+import { untrusted } from "../untrusted";
+import { WEB_CONTENT } from "./search";
 
 /** How much of a page's text the model reads, in characters. */
 export const MAX_PAGE_TEXT = 8000;
@@ -147,6 +148,7 @@ export function pageReport(page: PageView): string {
     .slice(0, MAX_PAGE_LINKS)
     .map((link, index) => `[${index + 1}] ${link.text || "(no text)"} — ${link.url}`);
   return untrusted(
+    WEB_CONTENT,
     [
       page.title,
       page.url,

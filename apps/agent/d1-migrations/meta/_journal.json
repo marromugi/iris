@@ -8,6 +8,13 @@
       "when": 1794239533991,
       "tag": "0000_create_users_invites_passkeys",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794474624274,
+      "tag": "0001_users_mail_tag",
+      "breakpoints": true
     }
   ]
 }

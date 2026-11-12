@@ -12,6 +12,22 @@
 
 アプリは `/api` で読み書きする。`/api` の定義は `openapi.json` に書き出してあり、アプリのクライアントはここから作る。`GET /api/agents/{agentId}/events` を WebSocket で開くと、そのエージェントの実行が変わるたびにその実行が、実行のあいだは「起動中」「考え中」「書いている途中の文字」が届く（`RunEvent`、`src/run-broadcast.ts`）。途中の文字を送る間隔は `WRITING_EVERY_MS`（`src/api/schemas.ts`）まで。保存するのは返事ができてから。アプリは、ソケットを開いてから実行を読む（開く前に起きたことは届かない）。ソケットは Durable Object の休止を妨げない。
 
+## メール
+
+ユーザーは Gmail などから、自分のアドレス `iris+<タグ>@marromugi.me` にメールを転送できる。タグは 24 桁の16進数で、ユーザーごとに D1 の `users.mail_tag` にある。Email Routing のルール（`wrangler.jsonc` の `addresses`）が `iris@marromugi.me` 宛てを Worker の `email` ハンドラに渡し、ハンドラはタグからユーザーを引いて、そのユーザーの Durable Object にメールを置く（`src/mail/`）。持っているユーザーのいないアドレス宛てと、読めないメールは送り主に返す。置くのは送り主、件名、本文のテキスト（プレーンテキストがなければ HTML から作る。5 万字ほどで切る）、添付の名前だけ。メールは届いてから 7 日（`MAIL_KEPT_DAYS`）で消える。消すのは次のメールが届いたときで、それまでもツールには 7 日より前のものは見えない。
+
+エージェントはどれも `mail_list`（届いた時刻の範囲で、新しい順に 100 通まで）と `mail_read`（1 通の本文）でメールを読む。中身は送り主が書いたものとして、指示ではなく材料としてモデルに渡す。
+
+```sh
+pnpm --filter @iris/agent-worker mail-address <名前> [--remote]   # その人にアドレスを出して表示する。前のアドレスは使えなくなる
+```
+
+メールのために、デプロイの前にダッシュボードの Email Service → Email Routing → Settings で `marromugi.me` の subaddressing を有効にする（一度だけ）。これがないと `iris+<タグ>@` 宛てが `iris@` のルールに当たらない。ルール自体は `wrangler deploy` が `addresses` から作る。
+
+7 日で消えるのは置いたメールだけで、エージェントがツールで読んだ中身は、その実行の会話として残る。
+
+Gmail の転送先に登録すると、確認のメールがそのアドレスに届く。エージェントに「確認コードを教えて」と頼めば `mail_read` で読める。
+
 ## サインイン
 
 Worker は OAuth の認可サーバーでもある（`@cloudflare/workers-oauth-provider`）。トークンの宛先は `<ORIGIN>/api` だけ。
@@ -59,7 +75,7 @@ pnpm --filter @iris/agent-worker dev
 
 ## デプロイ
 
-本番は `https://iris-agent.marrromugi-dev.workers.dev`。D1 データベース `iris` と KV 名前空間 `iris-oauth` は作ってあり、その ID が `wrangler.jsonc` にある。D1 のマイグレーションを足したら、デプロイの前に本番にも当てる。
+本番は `https://iris-agent.marrromugi-dev.workers.dev`。D1 データベース `iris` と KV 名前空間 `iris-oauth` は作ってあり、その ID が `wrangler.jsonc` にある。D1 の ID は、スクリプト（`invite` と `mail-address`）が使う `scripts/d1.jsonc` にもある（`--remote` のときだけ本番に届く。`wrangler login` が要り、そのあいだアカウントに一時的なプレビューの Worker が立つ）。D1 のマイグレーションを足したら、デプロイの前に本番にも当てる。
 
 ```sh
 cd apps/agent

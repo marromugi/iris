@@ -1,6 +1,7 @@
 import { type Message, messageSchema, nextAction } from "@iris/agent";
 import {
   and,
+  count,
   asc,
   desc,
   eq,
@@ -23,6 +24,7 @@ import migrations from "../drizzle/migrations";
 import {
   agents,
   dailySummaries,
+  mails,
   messages,
   posts,
   runs,
@@ -34,6 +36,7 @@ import {
 } from "./db/schema";
 import type { Look } from "./agent";
 import { DEFAULT_TIME_ZONE } from "./day";
+import type { Mail } from "./mail/mail";
 import type { Schedule } from "./schedule";
 
 /** The format messages are stored in. A stored message in any other format is refused, not guessed at. */
@@ -1362,4 +1365,71 @@ export function recordDailySummaryFailure(
     .returning({ failedAttempts: dailySummaries.failedAttempts })
     .get();
   return row?.failedAttempts ?? 1;
+}
+
+/** Keeps a mail the user forwarded. */
+export function insertMail(storage: DurableObjectStorage, mail: Mail): void {
+  database(storage)
+    .insert(mails)
+    .values({
+      id: mail.id,
+      fromAddress: mail.from.address,
+      fromName: mail.from.name,
+      subject: mail.subject,
+      text: mail.text,
+      attachmentNames: [...mail.attachmentNames],
+      receivedAt: mail.receivedAt,
+    })
+    .run();
+}
+
+/** Removes the mail that arrived before `cutoff`. */
+export function deleteMailBefore(storage: DurableObjectStorage, cutoff: Date): void {
+  database(storage).delete(mails).where(lt(mails.receivedAt, cutoff)).run();
+}
+
+/**
+ * The mail that arrived from `after` up to before `before`, the latest first, at most `limit` of
+ * it, with how many more there are.
+ */
+export function listMail(
+  storage: DurableObjectStorage,
+  range: { after: Date; before: Date | undefined },
+  limit: number,
+): { mail: Mail[]; more: number } {
+  const where = and(
+    gte(mails.receivedAt, range.after),
+    range.before === undefined ? undefined : lt(mails.receivedAt, range.before),
+  );
+  const db = database(storage);
+  const rows = db
+    .select()
+    .from(mails)
+    .where(where)
+    .orderBy(desc(mails.receivedAt), desc(mails.id))
+    .limit(limit)
+    .all();
+  const total = db.select({ n: count() }).from(mails).where(where).get()?.n ?? 0;
+  return { mail: rows.map(toMail), more: Math.max(0, total - rows.length) };
+}
+
+/** A kept mail by ID that arrived from `after`, if there is one. */
+export function findMail(storage: DurableObjectStorage, id: string, after: Date): Mail | undefined {
+  const row = database(storage)
+    .select()
+    .from(mails)
+    .where(and(eq(mails.id, id), gte(mails.receivedAt, after)))
+    .get();
+  return row === undefined ? undefined : toMail(row);
+}
+
+function toMail(row: typeof mails.$inferSelect): Mail {
+  return {
+    id: row.id,
+    from: { address: row.fromAddress, name: row.fromName },
+    subject: row.subject,
+    text: row.text,
+    attachmentNames: row.attachmentNames,
+    receivedAt: row.receivedAt,
+  };
 }
