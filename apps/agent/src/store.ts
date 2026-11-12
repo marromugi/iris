@@ -681,13 +681,13 @@ export function nextDueRun(storage: DurableObjectStorage, now: Date): string | u
 
 /**
  * The IDs of up to `limit` runs next in line that are due by `now`, the earliest due first,
- * leaving out `going`, the runs already being carried on.
+ * leaving out `leftOut`, such as the runs already being carried on.
  */
 export function nextDueRuns(
   storage: DurableObjectStorage,
   now: Date,
   limit: number,
-  going: readonly string[] = [],
+  leftOut: readonly string[] = [],
 ): string[] {
   if (limit <= 0) {
     return [];
@@ -695,19 +695,22 @@ export function nextDueRuns(
   return database(storage)
     .select({ id: runs.id })
     .from(runs)
-    .where(and(nextInLine(storage), lte(runs.dueAt, now), notInArray(runs.id, [...going])))
+    .where(and(nextInLine(storage), lte(runs.dueAt, now), notInArray(runs.id, [...leftOut])))
     .orderBy(asc(runs.dueAt), asc(runs.id))
     .limit(limit)
     .all()
     .map((row) => row.id);
 }
 
-/** When the earliest run next in line is due. */
-export function earliestRunDueAt(storage: DurableObjectStorage): Date | undefined {
+/** When the earliest run next in line is due, leaving out `leftOut`. */
+export function earliestRunDueAt(
+  storage: DurableObjectStorage,
+  leftOut: readonly string[] = [],
+): Date | undefined {
   const row = database(storage)
     .select({ next: min(runs.dueAt) })
     .from(runs)
-    .where(nextInLine(storage))
+    .where(and(nextInLine(storage), notInArray(runs.id, [...leftOut])))
     .get();
   return row?.next ?? undefined;
 }
@@ -861,13 +864,14 @@ export function recentRuns(storage: DurableObjectStorage, threadId: string, limi
  * one, or a run a task started that ended with a reply. The agent's own reply is its
  * conversation (without the post, which comes first, and without the model's reasoning); another
  * agent's is its reply as a user message after the agent's name. A post without such a reply, and a run without one (given up,
- * or stopped at its step limit), are passed over. Only what came before the run started counts,
- * so replies to the same post don't read each other. Conversations are read from storage only
+ * or stopped at its step limit), are passed over. Only what came from `from` until the run started
+ * counts, so replies to the same post don't read each other. Conversations are read from storage only
  * when the caller asks for their entry.
  */
 export function* earlierInThread(
   storage: DurableObjectStorage,
   runId: string,
+  from: Date = new Date(0),
 ): Generator<Message[], void, undefined> {
   const db = database(storage);
   const run = db
@@ -888,7 +892,13 @@ export function* earlierInThread(
       endedAt: runs.endedAt,
     })
     .from(runs)
-    .where(and(eq(runs.threadId, run.threadId), lt(runs.startedAt, run.startedAt)))
+    .where(
+      and(
+        eq(runs.threadId, run.threadId),
+        gte(runs.startedAt, from),
+        lt(runs.startedAt, run.startedAt),
+      ),
+    )
     .orderBy(asc(runs.endedAt), asc(runs.id))
     .all();
   type EarlierRun = (typeof earlierRunRows)[number];
@@ -896,7 +906,13 @@ export function* earlierInThread(
     db
       .select()
       .from(posts)
-      .where(and(eq(posts.threadId, run.threadId), lt(posts.createdAt, run.startedAt)))
+      .where(
+        and(
+          eq(posts.threadId, run.threadId),
+          gte(posts.createdAt, from),
+          lt(posts.createdAt, run.startedAt),
+        ),
+      )
       .all()
       .map((post) => ({
         at: post.createdAt,
@@ -1045,7 +1061,12 @@ export function runSetting(
   | {
       agentName: string | null;
       startedAt: Date;
-      thread: { agentId: string | null; name: string | null; askerName: string | null };
+      thread: {
+        id: string;
+        agentId: string | null;
+        name: string | null;
+        askerName: string | null;
+      };
     }
   | undefined {
   const asking = alias(runs, "asking");
@@ -1054,6 +1075,7 @@ export function runSetting(
     .select({
       agentName: agents.name,
       startedAt: runs.startedAt,
+      threadId: runs.threadId,
       threadAgentId: threads.agentId,
       threadName: threads.name,
       consultRunId: threads.consultRunId,
@@ -1073,6 +1095,7 @@ export function runSetting(
     agentName: row.agentName,
     startedAt: row.startedAt,
     thread: {
+      id: row.threadId,
       agentId: row.threadAgentId,
       name: row.threadName,
       askerName: row.consultRunId === null ? null : (row.askerName ?? "another agent"),
@@ -1192,6 +1215,20 @@ export function hasRunGoingFrom(
       .where(and(eq(runs.threadId, threadId), lt(runs.startedAt, before), isNull(runs.endedAt)))
       .get() !== undefined
   );
+}
+
+/** The IDs of the thread's runs that started at or after `from` and haven't ended. */
+export function unendedRunsStartedFrom(
+  storage: DurableObjectStorage,
+  threadId: string,
+  from: Date,
+): string[] {
+  return database(storage)
+    .select({ id: runs.id })
+    .from(runs)
+    .where(and(eq(runs.threadId, threadId), gte(runs.startedAt, from), isNull(runs.endedAt)))
+    .all()
+    .map((row) => row.id);
 }
 
 /** One thing said in a thread, as a day's summary reads it. */

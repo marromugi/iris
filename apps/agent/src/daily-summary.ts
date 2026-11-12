@@ -77,6 +77,17 @@ function writableSummaries(storage: DurableObjectStorage): DueSummary[] {
   });
 }
 
+/**
+ * The runs that wait for a summary before they start: those that started once a day of their
+ * thread had ended whose summary can be written and isn't yet, so they read it. A summary waits
+ * only for runs that started before its day ended, so the two never wait for each other.
+ */
+export function runsWaitingForSummaries(storage: DurableObjectStorage): string[] {
+  return writableSummaries(storage).flatMap((due) =>
+    store.unendedRunsStartedFrom(storage, due.threadId, due.day.endsAt),
+  );
+}
+
 /** When the earliest summary that can be written is due; undefined when none can be. */
 export function nextSummaryDueAt(storage: DurableObjectStorage): Date | undefined {
   const times = writableSummaries(storage).map((due) => due.dueAt.getTime());
@@ -84,8 +95,8 @@ export function nextSummaryDueAt(storage: DurableObjectStorage): Date | undefine
 }
 
 /**
- * Writes each summary that is due, one after another, until none is or `outOfTime` says so. A
- * failed attempt is tried again `SUMMARY_RETRY_DELAY_MS` later, until it has failed
+ * Writes each summary that is due, one after another, until none is or `outOfTime` says so,
+ * calling `tried` after each attempt, so runs waiting for it can start. A failed attempt is tried again `SUMMARY_RETRY_DELAY_MS` later, until it has failed
  * `MAX_SUMMARY_ATTEMPTS` times and its day is passed over.
  */
 export async function summarizeDue(
@@ -93,6 +104,7 @@ export async function summarizeDue(
   model: Model,
   now: () => Date,
   outOfTime: () => boolean,
+  tried: () => void = () => {},
 ): Promise<void> {
   for (;;) {
     if (outOfTime()) {
@@ -105,6 +117,7 @@ export async function summarizeDue(
       return;
     }
     await summarize(storage, model, due, now);
+    tried();
   }
 }
 
