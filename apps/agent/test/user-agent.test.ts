@@ -97,6 +97,7 @@ test("every user starts with one agent that hasn't run", async () => {
       name: "エージェント",
       look: anyLook,
       lastRanAt: null,
+      active: true,
     },
   ]);
 });
@@ -116,6 +117,7 @@ test("an added agent comes last in the list with its own thread, and a blank or 
     name: "株価の確認",
     look: anyLook,
     lastRanAt: null,
+    active: true,
   });
   expect((await userAgent().listAgents()).map((agent) => agent.name)).toEqual([
     "エージェント",
@@ -159,8 +161,8 @@ test("each agent has its own tasks and runs, and runs when its own task is due",
   const runs = await userAgent().recentRuns(stocks);
   expect(runs?.map((run) => run.taskId)).toEqual(["stocks-task"]);
   expect(await userAgent().listAgents()).toEqual([
-    { id: first, name: "エージェント", look: anyLook, lastRanAt: null },
-    { id: stocks, name: "株価の確認", look: anyLook, lastRanAt: dueAt },
+    { id: first, name: "エージェント", look: anyLook, lastRanAt: null, active: true },
+    { id: stocks, name: "株価の確認", look: anyLook, lastRanAt: dueAt, active: true },
   ]);
 });
 
@@ -720,6 +722,7 @@ test("the tasks and runs stored before agents become the first agent's", async (
     name: "エージェント",
     look: anyLook,
     lastRanAt: startedAt,
+    active: true,
   });
   expect((await userAgent().listTasks(agent!.id))?.map((task) => task.id)).toEqual(["task-1"]);
   const runs = (await userAgent().recentRuns(agent!.id)) ?? [];

@@ -46,7 +46,9 @@ export function consultTool(context: ConsultContext): Tool | undefined {
   if (run === undefined || store.findThread(storage, run.threadId)?.consultRunId !== null) {
     return undefined;
   }
-  const others = store.listAgents(storage).filter((agent) => agent.id !== run.agentId);
+  const others = store
+    .listAgents(storage)
+    .filter((agent) => agent.id !== run.agentId && agent.active);
   if (others.length === 0) {
     return undefined;
   }
@@ -109,7 +111,8 @@ async function answer(context: ConsultContext, answerRunId: string) {
         ? { ok: true as const, content: answered.reply }
         : { ok: false as const, error: `No answer came: ${answered.failure}` };
     }
-    if (context.outOfTime()) {
+    // A run ended while it waits, by deactivating its agent, stops waiting.
+    if (context.outOfTime() || store.hasRunEnded(context.storage, context.runId)) {
       throw new RunCut();
     }
     await new Promise((resolve) => setTimeout(resolve, ANSWER_CHECK_MS));

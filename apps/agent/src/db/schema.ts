@@ -8,6 +8,8 @@ export const agents = sqliteTable("agents", {
   /** What shapes the noise of the agent's orb. */
   lookSeed: integer("look_seed").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  /** Set while the agent is deactivated: it starts no run of its own until it is activated again. */
+  deactivatedAt: integer("deactivated_at", { mode: "timestamp_ms" }),
 });
 
 /**

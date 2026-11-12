@@ -44,6 +44,8 @@ export interface Agent {
   readonly name: string;
   readonly look: Look;
   readonly lastRanAt: Date | null;
+  /** False while the agent is deactivated: it starts no run of its own and replies to nothing. */
+  readonly active: boolean;
 }
 
 export interface Task {
@@ -251,13 +253,85 @@ export function listAgents(storage: DurableObjectStorage): Agent[] {
       palette: agents.lookPalette,
       seed: agents.lookSeed,
       lastRanAt: max(runs.startedAt),
+      deactivatedAt: agents.deactivatedAt,
     })
     .from(agents)
     .leftJoin(runs, eq(runs.agentId, agents.id))
     .groupBy(agents.id)
     .orderBy(asc(agents.createdAt), asc(agents.id))
     .all()
-    .map(({ palette, seed, ...agent }) => ({ ...agent, look: { palette, seed } }));
+    .map(({ palette, seed, deactivatedAt, ...agent }) => ({
+      ...agent,
+      look: { palette, seed },
+      active: deactivatedAt === null,
+    }));
+}
+
+/** Why a run ended by deactivating its agent didn't reply. */
+export const DEACTIVATED_ERROR = "The agent was deactivated before this run ended.";
+
+/**
+ * Deactivates the agent and ends its runs that haven't ended, so no run in their threads waits on
+ * them. Returns the IDs of the runs it ended; undefined when the user has no such agent. An agent
+ * already deactivated keeps the time it was first deactivated.
+ */
+export function deactivateAgent(
+  storage: DurableObjectStorage,
+  agentId: string,
+  at: Date,
+): string[] | undefined {
+  return database(storage).transaction((tx) => {
+    const agent = tx
+      .select({ deactivatedAt: agents.deactivatedAt })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get();
+    if (agent === undefined) {
+      return undefined;
+    }
+    if (agent.deactivatedAt === null) {
+      tx.update(agents).set({ deactivatedAt: at }).where(eq(agents.id, agentId)).run();
+    }
+    return tx
+      .update(runs)
+      .set({ endedAt: at, lastError: DEACTIVATED_ERROR })
+      .where(and(eq(runs.agentId, agentId), isNull(runs.endedAt)))
+      .returning({ id: runs.id })
+      .all()
+      .map((row) => row.id);
+  });
+}
+
+/**
+ * Activates the agent again and moves each of its tasks to `nextRunAt` of it, so the times missed
+ * while it was deactivated don't run. Says whether the user has the agent.
+ */
+export function activateAgent(
+  storage: DurableObjectStorage,
+  agentId: string,
+  nextRunAt: (task: Task) => Date,
+): boolean {
+  return database(storage).transaction((tx) => {
+    const agent = tx
+      .select({ deactivatedAt: agents.deactivatedAt })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get();
+    if (agent === undefined) {
+      return false;
+    }
+    if (agent.deactivatedAt === null) {
+      return true;
+    }
+    tx.update(agents).set({ deactivatedAt: null }).where(eq(agents.id, agentId)).run();
+    for (const row of tx.select().from(tasks).where(eq(tasks.agentId, agentId)).all()) {
+      tx.update(tasks)
+        .set({ nextRunAt: nextRunAt(toTask(row)) })
+        .where(eq(tasks.id, row.id))
+        .run();
+    }
+    return true;
+  });
 }
 
 export function hasAgent(storage: DurableObjectStorage, id: string): boolean {
@@ -316,16 +390,17 @@ export function listTasks(storage: DurableObjectStorage, agentId: string): Task[
     .map(toTask);
 }
 
-/** The task whose run time came first, among every agent's tasks due by `now`. */
+/** The task whose run time came first, among the active agents' tasks due by `now`. */
 export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | undefined {
   const row = database(storage)
-    .select()
+    .select({ task: tasks })
     .from(tasks)
-    .where(lte(tasks.nextRunAt, now))
+    .innerJoin(agents, eq(agents.id, tasks.agentId))
+    .where(and(lte(tasks.nextRunAt, now), isNull(agents.deactivatedAt)))
     .orderBy(asc(tasks.nextRunAt), asc(tasks.id))
     .limit(1)
     .get();
-  return row === undefined ? undefined : toTask(row);
+  return row === undefined ? undefined : toTask(row.task);
 }
 
 /**
@@ -617,6 +692,16 @@ export function postponeRun(storage: DurableObjectStorage, runId: string, dueAt:
   database(storage).update(runs).set({ dueAt }).where(eq(runs.id, runId)).run();
 }
 
+/** Whether the run has ended, or is gone. */
+export function hasRunEnded(storage: DurableObjectStorage, runId: string): boolean {
+  const row = database(storage)
+    .select({ endedAt: runs.endedAt })
+    .from(runs)
+    .where(eq(runs.id, runId))
+    .get();
+  return row === undefined || row.endedAt !== null;
+}
+
 /** Ends a run that finished or reached its step limit, clearing any earlier failure. */
 export function endRun(storage: DurableObjectStorage, runId: string, endedAt: Date): void {
   database(storage).update(runs).set({ endedAt, lastError: null }).where(eq(runs.id, runId)).run();
@@ -898,10 +983,13 @@ export function knownAgents(storage: DurableObjectStorage, agentIds: readonly st
     .map((row) => row.id);
 }
 
+/** The earliest next run time among the active agents' tasks. */
 export function earliestTaskRunAt(storage: DurableObjectStorage): Date | undefined {
   const row = database(storage)
     .select({ next: min(tasks.nextRunAt) })
     .from(tasks)
+    .innerJoin(agents, eq(agents.id, tasks.agentId))
+    .where(isNull(agents.deactivatedAt))
     .get();
   return row?.next ?? undefined;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE `agents` ADD `deactivated_at` integer;
