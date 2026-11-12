@@ -25,7 +25,7 @@ export interface ConsultContext {
   /** Tells the wake-up that a run became due, the one that answers. */
   readonly wake: () => void;
   /** Tells whoever watches that a question was asked in a consult, and its answer started. */
-  readonly asked: (post: store.Post, answerRunId: string) => void;
+  readonly asked: (post: store.PostWithAttachments, answerRunId: string) => void;
   /**
    * Called while the run waits for an answer, so the wake-up doesn't count it against its limit.
    * A run whose answer came counts again, which may put the wake-up over its limit until a run ends.
@@ -81,13 +81,14 @@ export function consultTool(context: ConsultContext): Tool | undefined {
             createdAt: context.now(),
           });
         }
-        const post: store.Post = {
+        const post: store.PostWithAttachments = {
           id: crypto.randomUUID(),
           threadId,
           agentId: run.agentId,
           callId: call.id,
           text: question,
           createdAt: context.now(),
+          attachments: [],
         };
         [answerRunId = ""] = store.insertPost(storage, post, [answerer.id]);
         context.asked(post, answerRunId);

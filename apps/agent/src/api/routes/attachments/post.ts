@@ -57,9 +57,14 @@ export const putUpAttachment = defineOpenAPIRoute<typeof route, ApiEnv>({
     if (!canAttachImages(c.env)) {
       return c.json({ message: NO_IMAGES }, 400);
     }
+    const tooLarge = () =>
+      c.json({ message: `An image can be at most ${MAX_ATTACHMENT_BYTES} bytes.` }, 413);
+    if (Number(c.req.header("Content-Length") ?? 0) > MAX_ATTACHMENT_BYTES) {
+      return tooLarge();
+    }
     const bytes = new Uint8Array(await c.req.arrayBuffer());
     if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
-      return c.json({ message: `An image can be at most ${MAX_ATTACHMENT_BYTES} bytes.` }, 413);
+      return tooLarge();
     }
     if (!looksLike(mediaType, bytes)) {
       return c.json({ message: `The body isn't an image of type ${mediaType}.` }, 400);
@@ -75,7 +80,12 @@ export const putUpAttachment = defineOpenAPIRoute<typeof route, ApiEnv>({
       throw error;
     }
     if (removed.length > 0) {
-      await c.env.ATTACHMENTS.delete(removed.map((id) => attachmentKey(c.var.user.id, id)));
+      // The image is kept by now; bytes left behind here only take room.
+      await c.env.ATTACHMENTS.delete(removed.map((id) => attachmentKey(c.var.user.id, id))).catch(
+        (error: unknown) => {
+          console.error("Removing unused attachments' bytes failed.", error);
+        },
+      );
     }
     return c.json(attachment, 201);
   },
