@@ -4,7 +4,8 @@ import { type Database, openDatabase } from "../src/users/database";
 
 /**
  * Runs `use` on the D1 database: the deployed one when `remote`, otherwise the local one that
- * `pnpm dev` uses. The deployed one is reached through a remote binding, which needs `wrangler login`.
+ * `pnpm dev` uses. The deployed one is reached through a remote binding, which needs `wrangler login`
+ * and runs a temporary preview Worker in the account while it is open.
  */
 export async function withD1<T>(remote: boolean, use: (db: Database) => Promise<T>): Promise<T> {
   const { env, dispose } = await getPlatformProxy<{ DB: D1Database }>({
@@ -15,6 +16,9 @@ export async function withD1<T>(remote: boolean, use: (db: Database) => Promise<
   try {
     return await use(openDatabase(env.DB));
   } finally {
-    await dispose();
+    // What `use` wrote stays written; a failure to close must not hide its result.
+    await dispose().catch((error: unknown) => {
+      console.warn(`Closing the D1 connection failed: ${String(error)}`);
+    });
   }
 }

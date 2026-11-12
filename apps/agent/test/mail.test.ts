@@ -75,11 +75,13 @@ test("the Email Routing rule wrangler.jsonc makes is for the address mail is tak
   expect(wranglerConfig).toContain(`"addresses": ["${MAIL_ADDRESS}"]`);
 });
 
-test("the scripts' D1 is the Worker's", () => {
+test("the scripts' D1 is the Worker's, deployed when they ask for it", () => {
   const databaseId = /"database_id": "([^"]+)"/.exec(wranglerConfig)?.[1];
 
   expect(databaseId).toBeDefined();
   expect(scriptsD1Config).toContain(`"database_id": "${databaseId}"`);
+  expect(scriptsD1Config).toContain(`"remote": true`);
+  expect(wranglerConfig).not.toContain(`"remote": true`);
 });
 
 test("a user's address carries their tag, and only such an address gives one back", () => {
