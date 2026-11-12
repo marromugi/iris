@@ -8,6 +8,7 @@ public struct IrisRoot: View {
     @State private var session: Session
     @State private var agents: any AgentDirectory
     @Environment(\.webAuthenticationSession) private var webAuthenticationSession
+    @Environment(\.scenePhase) private var scenePhase
 
     /// The app against the server at `origin`, keeping the sign-in in the Keychain.
     public init(origin: URL) {
@@ -24,8 +25,9 @@ public struct IrisRoot: View {
         content
             .environment(session)
             .task { await session.start() }
-            .task(id: session.state == .signedIn) {
-                guard session.state == .signedIn else { return }
+            // Starts again each time the app comes back, since a change while it was away may not be posted.
+            .task(id: session.state == .signedIn && scenePhase == .active) {
+                guard session.state == .signedIn, scenePhase == .active else { return }
                 await session.keepTimeZoneSent(
                     current: { TimeZone.autoupdatingCurrent.identifier },
                     changes: NotificationCenter.default.notifications(named: .NSSystemTimeZoneDidChange).map { _ in }
