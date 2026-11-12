@@ -37,7 +37,7 @@ public typealias RunEvent = Components.Schemas.RunEvent
 /// How a run being carried on is getting on: picked up, thinking, or writing with the text so far.
 public typealias RunProgress = Components.Schemas.RunProgress
 /// Where the user's mail setup stands: their address (nil until one is made), Gmail's forwarding confirmation waiting
-/// for them, and when mail last arrived.
+/// for them, the Gmail account that asked to forward, and when mail last arrived.
 public typealias MailSetup = Components.Schemas.MailSetup
 /// Gmail's forwarding confirmation: the link that confirms the address to Gmail, and the code that does the same.
 public typealias MailConfirmation = Components.Schemas.MailSetup.ConfirmationPayload

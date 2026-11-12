@@ -56,8 +56,8 @@ export default {
       env.DB,
       {
         keep: (userId, mail) => env.USER_AGENT.getByName(userId).keepMail(mail),
-        confirm: (userId, confirmation) =>
-          env.USER_AGENT.getByName(userId).keepMailConfirmation(confirmation),
+        confirm: (userId, request) =>
+          env.USER_AGENT.getByName(userId).keepMailConfirmation(request),
       },
       () => new Date(),
     ),

@@ -23,10 +23,12 @@
 
         static let address = "iris+0123456789abcdef01234567@marromugi.me"
         static let confirmation = MailConfirmation(
-            url: "https://mail-settings.google.com/mail/vf-abc", code: "123456789", account: "hanako@gmail.com",
+            url: "https://mail-settings.google.com/mail/vf-abc", code: "123456789",
             receivedAt: Date(timeIntervalSince1970: 1_794_480_000))
         static let waitingSetup = MailSetup(address: address)
-        static let confirmationSetup = MailSetup(address: address, confirmation: confirmation)
+        static let account = "hanako@gmail.com"
+        static let confirmationSetup = MailSetup(
+            address: address, confirmation: confirmation, forwardingAccount: account)
         static let receivingSetup = MailSetup(
             address: address, lastMailAt: Date(timeIntervalSince1970: 1_794_480_600))
 

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7dc747e6-89fb-4ceb-8b8b-677d1fe86239",
+  "id": "5fc2f1be-6bc8-4dbe-b101-ec4187c76734",
   "prevId": "fe2a5be3-cddd-42de-bbe5-86265870d503",
   "tables": {
     "agents": {
@@ -157,8 +157,8 @@
           "notNull": false,
           "autoincrement": false
         },
-        "confirmation_account": {
-          "name": "confirmation_account",
+        "forwarding_account": {
+          "name": "forwarding_account",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

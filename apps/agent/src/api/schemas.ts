@@ -283,10 +283,6 @@ export const mailSetupSchema = z
           .string()
           .nullable()
           .meta({ description: "The code that confirms it in Gmail's settings instead, if any" }),
-        account: z.email().nullable().meta({
-          description:
-            "The Gmail account that asked to forward, whose settings turn forwarding on; null if the mail doesn't name it",
-        }),
         receivedAt: timeSchema,
       })
       .nullable()
@@ -294,6 +290,10 @@ export const mailSetupSchema = z
         description:
           "Gmail's forwarding confirmation for the address, from when it arrives until mail arrives after it or the app lets it go; null otherwise",
       }),
+    forwardingAccount: z.string().nullable().meta({
+      description:
+        "The Gmail account that last asked to forward to the address, whose settings turn forwarding on; null until a confirmation names one",
+    }),
     lastMailAt: timeSchema.nullable().meta({
       description:
         "When mail other than Gmail's confirmation last arrived at the address; null until the first does",
@@ -313,9 +313,9 @@ export function mailSetupJson(address: string | null, state: MailState): MailSet
         : {
             url: state.confirmation.url,
             code: state.confirmation.code,
-            account: state.confirmation.account,
             receivedAt: timeJson(state.confirmation.receivedAt),
           },
+    forwardingAccount: state.forwardingAccount,
     lastMailAt: state.lastMailAt === null ? null : timeJson(state.lastMailAt),
   };
 }

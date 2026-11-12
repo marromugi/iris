@@ -14,8 +14,8 @@ final class MailSetupModel {
     enum Offer: Identifiable, Equatable {
         /// Gmail's confirmation arrived: open its link.
         case confirm(MailConfirmation)
-        /// The link was opened: turn forwarding on in the settings of the Gmail account that asked, when known.
-        case turnOnForwarding(account: String?)
+        /// The link was opened: turn forwarding on in Gmail's settings.
+        case turnOnForwarding
 
         /// One for both, so going from one step to the next keeps the sheet up and changes what it shows.
         var id: String { "mail setup" }
@@ -123,7 +123,7 @@ final class MailSetupModel {
     func openedConfirmation() {
         guard case .confirm(let confirmation) = offer else { return }
         handledConfirmationAt = confirmation.receivedAt
-        offer = .turnOnForwarding(account: confirmation.account)
+        offer = .turnOnForwarding
     }
 
     /// The user closed the sheet. A confirmation closed unopened stays, and the mail screen can offer it again. Closing
@@ -218,7 +218,7 @@ final class MailSetupModel {
     /// turn forwarding on stays.
     private func show(_ read: Loadable<MailSetup>) {
         setup = read
-        if case .turnOnForwarding = offer { return }
+        if offer == .turnOnForwarding { return }
         if let confirmation = read.value?.confirmation, confirmation.receivedAt != handledConfirmationAt {
             offer = .confirm(confirmation)
         } else if case .confirm = offer, read.value?.confirmation == nil {

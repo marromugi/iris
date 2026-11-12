@@ -70,7 +70,7 @@ struct MailSetupModelTests {
         mail.closeOffer()
         await eventually { backend.dismissed == 1 }
 
-        #expect(duringTheStep.offer == .turnOnForwarding(account: "hanako@gmail.com"))
+        #expect(duringTheStep.offer == .turnOnForwarding)
         #expect(duringTheStep.dismissed == 0)
         #expect(backend.dismissed == 1)
         #expect(mail.offer == nil)
@@ -117,7 +117,7 @@ struct MailSetupModelTests {
 
         mail.closeOffer()
 
-        #expect(duringTheStep == .turnOnForwarding(account: "hanako@gmail.com"))
+        #expect(duringTheStep == .turnOnForwarding)
         #expect(mail.offer == .confirm(second))
     }
 
@@ -166,12 +166,10 @@ struct MailSetupModelTests {
     @Test func aSocketThatKeepsFailingIsOpenedAgainLaterEachTime() async {
         let backend = FakeMailBackend(.init(follow: .offline))
         let waits = Mutex<[Duration]>([])
-        let mail = MailSetupModel(
-            backend: backend,
-            wait: { delay in
-                waits.withLock { $0.append(delay) }
-                if waits.withLock({ $0.count }) >= 3 { throw CancellationError() }
-            })
+        let mail = MailSetupModel(backend: backend, wait: { delay in
+            waits.withLock { $0.append(delay) }
+            if waits.withLock({ $0.count }) >= 3 { throw CancellationError() }
+        })
 
         await mail.follow()
 

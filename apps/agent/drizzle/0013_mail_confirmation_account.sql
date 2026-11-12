@@ -1,1 +1,0 @@
-ALTER TABLE `mail_setup` ADD `confirmation_account` text;

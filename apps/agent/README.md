@@ -18,7 +18,7 @@
 
 エージェントはどれも `mail_list`（届いた時刻の範囲で、新しい順に 100 通まで）と `mail_read`（1 通の本文）でメールを読む。中身は送り主が書いたものとして、指示ではなく材料としてモデルに渡す。
 
-アプリは `GET /api/me/mail` でメールの状態（アドレス、Gmail の転送の確認、最後にメールが届いた時刻）を読み、`POST /api/me/mail/address` でアドレスを作る（作り直すと前のアドレスは使えなくなり、確認と最後の時刻は消える。置いたメールは残る）。`DELETE /api/me/mail/address` で受け取りをやめる（アドレスと置いたメールが消える）。Gmail の転送の確認メール（送り主 `forwarding-noreply@google.com`）はエージェントに見せず、確認リンクと件名のコードだけを取り出してメールの状態に置く。確認は、そのあとにふつうのメールが届くと消える。`GET /api/me/events` を WebSocket で開くと、メールの状態が変わるたびに `{ "type": "mail" }` が届く（`UserEvent`、`src/user-events.ts`）。アプリはそれを受けて `/api/me/mail` を読み直す。
+アプリは `GET /api/me/mail` でメールの状態（アドレス、Gmail の転送の確認、最後にメールが届いた時刻）を読み、`POST /api/me/mail/address` でアドレスを作る（作り直すと前のアドレスは使えなくなり、確認と最後の時刻は消える。置いたメールは残る）。`DELETE /api/me/mail/address` で受け取りをやめる（アドレスと置いたメールが消える）。Gmail の転送の確認メール（送り主 `forwarding-noreply@google.com`）はエージェントに見せず、確認リンク、件名のコード、転送を頼んだ Gmail のアカウントだけを取り出してメールの状態に置く。確認は、そのあとにふつうのメールが届くと消える。アカウントはアドレスを作り直すまで残り、アプリが Gmail の転送の設定をそのアカウントで開くのに使う。`GET /api/me/events` を WebSocket で開くと、メールの状態が変わるたびに `{ "type": "mail" }` が届く（`UserEvent`、`src/user-events.ts`）。アプリはそれを受けて `/api/me/mail` を読み直す。
 
 メールのために、デプロイの前にダッシュボードの Email Service → Email Routing → Settings で `marromugi.me` の subaddressing を有効にする（一度だけ）。これがないと `iris+<タグ>@` 宛てが `iris@` のルールに当たらない。ルール自体は `wrangler deploy` が `addresses` から作る。
 

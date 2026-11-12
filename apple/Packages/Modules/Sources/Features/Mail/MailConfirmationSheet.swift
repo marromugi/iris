@@ -6,6 +6,8 @@ struct MailConfirmationSheet: View {
     let offer: MailSetupModel.Offer
     /// The address mail is forwarded to, for the last step to name.
     let address: String?
+    /// The Gmail account that asked to forward, whose settings the last step opens; nil when not known.
+    let account: String?
     let onOpened: () -> Void
     let onClose: () -> Void
 
@@ -36,7 +38,7 @@ struct MailConfirmationSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                     }
-                case .turnOnForwarding(let account):
+                case .turnOnForwarding:
                     Step(
                         systemImage: "arrow.triangle.turn.up.right.circle",
                         title: "Gmail で転送を有効にする",
@@ -50,16 +52,11 @@ struct MailConfirmationSheet: View {
             .frame(maxHeight: .infinity, alignment: .top)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(isLastStep ? "完了" : "あとで", action: onClose)
+                    Button(offer == .turnOnForwarding ? "完了" : "あとで", action: onClose)
                 }
             }
         }
         .presentationDetents([.medium, .large])
-    }
-
-    private var isLastStep: Bool {
-        if case .turnOnForwarding = offer { return true }
-        return false
     }
 }
 
@@ -88,14 +85,14 @@ private struct Step: View {
         Color.clear.sheet(isPresented: .constant(true)) {
             MailConfirmationSheet(
                 offer: .confirm(FakeMailBackend.confirmation), address: FakeMailBackend.address,
-                onOpened: {}, onClose: {})
+                account: FakeMailBackend.account, onOpened: {}, onClose: {})
         }
     }
 
     #Preview("転送を有効にする") {
         Color.clear.sheet(isPresented: .constant(true)) {
             MailConfirmationSheet(
-                offer: .turnOnForwarding(account: FakeMailBackend.confirmation.account), address: FakeMailBackend.address,
+                offer: .turnOnForwarding, address: FakeMailBackend.address, account: FakeMailBackend.account,
                 onOpened: {}, onClose: {})
         }
     }

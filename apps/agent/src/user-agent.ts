@@ -4,7 +4,7 @@ import { type NewAgent, newAgentSchema, randomLook } from "./agent";
 import { type NewGroup, newGroupSchema } from "./group";
 import type { NewMail } from "./mail/mail";
 import { keptSince } from "./mail/mail-tools";
-import type { MailConfirmation, MailState } from "./mail/setup";
+import type { GmailForwardingRequest, MailState } from "./mail/setup";
 import { repliers } from "./mentions";
 import { type NewMessage, newMessageSchema } from "./message";
 import { RunBroadcast } from "./run-broadcast";
@@ -347,9 +347,9 @@ export function createUserAgent(
       sendUserEvent(this.ctx, { type: "mail" });
     }
 
-    /** Holds Gmail's forwarding confirmation for the user to open. */
-    keepMailConfirmation(confirmation: MailConfirmation): void {
-      store.setMailConfirmation(this.ctx.storage, confirmation);
+    /** Holds Gmail's forwarding confirmation for the user to open, and the account that asked. */
+    keepMailConfirmation(request: GmailForwardingRequest): void {
+      store.setMailConfirmation(this.ctx.storage, request);
       sendUserEvent(this.ctx, { type: "mail" });
     }
 

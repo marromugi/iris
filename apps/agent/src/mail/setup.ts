@@ -5,22 +5,28 @@ export const GMAIL_FORWARDING_SENDER = "forwarding-noreply@google.com";
 
 /**
  * A Gmail forwarding confirmation: the link that confirms the address to Gmail, after which the user
- * turns forwarding on in Gmail's settings, the code that does the same if it has one, and the Gmail
- * account that asked to forward, if the mail names it.
+ * turns forwarding on in Gmail's settings, and the code that does the same if it has one.
  */
 export interface MailConfirmation {
   readonly url: string;
   readonly code: string | null;
-  readonly account: string | null;
   readonly receivedAt: Date;
+}
+
+/** Gmail's forwarding confirmation, and the Gmail account that asked to forward if the mail names it. */
+export interface GmailForwardingRequest {
+  readonly confirmation: MailConfirmation;
+  readonly account: string | null;
 }
 
 /**
  * Where the user's mail setup stands, apart from their address: the confirmation waiting for them,
- * until mail arrives after it, and when mail last arrived.
+ * until mail arrives after it, the Gmail account that last asked to forward, and when mail last
+ * arrived.
  */
 export interface MailState {
   readonly confirmation: MailConfirmation | null;
+  readonly forwardingAccount: string | null;
   readonly lastMailAt: Date | null;
 }
 
@@ -34,6 +40,9 @@ const CONFIRMATION_CODE = /\(#(\d+)\)/;
 /** A mail address, as Gmail names the account in "Receive Mail from hanako@gmail.com". */
 const MAIL_ADDRESS = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
 
+/** Google's own addresses, on google.com or any of its subdomains. */
+const GOOGLE_ADDRESS = /@(?:[\w-]+\.)*google\.com$/;
+
 /**
  * The Gmail account asking to forward: the first address in the subject, else in the text, other
  * than `address` itself and Google's own.
@@ -42,7 +51,7 @@ function forwardingAccount(mail: NewMail, address: string): string | null {
   const candidates = [...mail.subject.matchAll(MAIL_ADDRESS), ...mail.text.matchAll(MAIL_ADDRESS)];
   const account = candidates
     .map((match) => match[0].toLowerCase())
-    .find((found) => found !== address.toLowerCase() && !found.endsWith("@google.com"));
+    .find((found) => found !== address.toLowerCase() && !GOOGLE_ADDRESS.test(found));
   return account ?? null;
 }
 
@@ -56,7 +65,7 @@ export function gmailForwardingConfirmation(
   mail: NewMail,
   to: readonly string[],
   address: string,
-): MailConfirmation | undefined {
+): GmailForwardingRequest | undefined {
   if (
     mail.from.address.toLowerCase() !== GMAIL_FORWARDING_SENDER ||
     !to.includes(address.toLowerCase())
@@ -68,9 +77,11 @@ export function gmailForwardingConfirmation(
   return url === undefined
     ? undefined
     : {
-        url,
-        code: CONFIRMATION_CODE.exec(mail.subject)?.[1] ?? null,
+        confirmation: {
+          url,
+          code: CONFIRMATION_CODE.exec(mail.subject)?.[1] ?? null,
+          receivedAt: mail.receivedAt,
+        },
         account: forwardingAccount(mail, address),
-        receivedAt: mail.receivedAt,
       };
 }

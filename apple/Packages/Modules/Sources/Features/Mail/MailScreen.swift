@@ -54,7 +54,7 @@ struct MailSetupList: View {
                 AddressSection(address: address)
                 StatusSection(status: MailStatus(setup), onShowConfirmation: onShowConfirmation)
                 Section {
-                    Link(destination: Gmail.forwardingSettings(account: setup.confirmation?.account)) {
+                    Link(destination: Gmail.forwardingSettings(account: setup.forwardingAccount)) {
                         Label("Gmail の転送の設定を開く", systemImage: "arrow.up.forward.app")
                     }
                 } footer: {
