@@ -128,6 +128,8 @@ test("sends the system prompt, the conversation with Claude's thinking, and the 
       },
       { role: "assistant", parts: [{ type: "text", text: "Osaka is sunny." }] },
       { role: "user", text: "Thanks." },
+      { role: "assistant", parts: [{ type: "text", text: "\n" }] },
+      { role: "user", text: "Bye." },
     ],
     tools: [
       {
@@ -184,6 +186,7 @@ test("sends the system prompt, the conversation with Claude's thinking, and the 
       },
       { role: "assistant", content: [{ type: "text", text: "Osaka is sunny." }] },
       { role: "user", content: "Thanks." },
+      { role: "user", content: "Bye." },
     ],
     tools: [
       {

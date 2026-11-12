@@ -172,3 +172,45 @@ test("the real API takes a conversation another service's model wrote, with tool
   expect(reply?.role).toBe("assistant");
   expect(JSON.stringify(reply)).toContain("42");
 });
+
+/** A system prompt as the shared one is made: the same text with the time it was made at. */
+const systemAt = (time: string) =>
+  `You are an agent in iris. Use tools when they help.\n\nCurrent time: ${time}.`;
+
+test("when a run's system prompt changes between wake-ups, the real API leaves out the earlier thinking and carries on", async () => {
+  const conversation: Message[] = [
+    {
+      role: "user",
+      text: "A shop sold 17 apples in the morning and 25 in the afternoon, then got 8 back as returns. Work out how many apples were sold in the end, using the add tool for each step (a negative number subtracts). Tell me the final number.",
+    },
+  ];
+  // The first wake-up: Claude's call and the tool's result, stored.
+  const first = { model, tools: [add], system: systemAt("2026-11-13T08:00:00.000Z") };
+  for (const _ of [1, 2]) {
+    const message = await step(first, conversation);
+    if (message !== undefined) {
+      conversation.push(stored(message));
+    }
+  }
+  const thought = conversation.some(
+    (message) =>
+      message.role === "assistant" && message.parts.some((part) => part.type === "reasoning"),
+  );
+
+  // A later wake-up carries the run on with the prompt made again at a later time.
+  const asked = exchanges.length;
+  const reply = await step(
+    { model, tools: [add], system: systemAt("2026-11-13T08:01:30.000Z") },
+    conversation,
+  );
+
+  const response = await exchanges[asked]?.response;
+  console.log(JSON.stringify(conversation, null, 2));
+  console.log("Left out:", JSON.stringify(leftOut(response ?? "")));
+  // The check is about thinking that was sent back, so a run where Claude didn't think proves nothing.
+  expect(thought).toBe(true);
+  expect(reply?.role).toBe("assistant");
+  expect(leftOut(response ?? "")).toContainEqual(
+    expect.objectContaining({ type: "thinking_dropped", reason: "prefix_binding_mismatch" }),
+  );
+});

@@ -153,11 +153,16 @@ function toAnthropicMessages(messages: readonly Message[]): BetaMessageParam[] {
       continue;
     }
     results = undefined;
-    converted.push(
-      message.role === "user"
-        ? { role: "user", content: message.text }
-        : { role: "assistant", content: message.parts.flatMap(toAnthropicBlock) },
-    );
+    if (message.role === "user") {
+      converted.push({ role: "user", content: message.text });
+      continue;
+    }
+    // A reply with nothing Claude takes, such as another service's blank text, is left out: the API
+    // refuses an empty assistant message, and with no tool call there's no result to answer.
+    const content = message.parts.flatMap(toAnthropicBlock);
+    if (content.length > 0) {
+      converted.push({ role: "assistant", content });
+    }
   }
   return converted;
 }
