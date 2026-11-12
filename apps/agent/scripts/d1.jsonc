@@ -1,0 +1,16 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  // The D1 database the scripts work on, apart from the Worker's config so that only the scripts
+  // ever reach the deployed one: `remote: true` here, while wrangler.jsonc keeps every binding local
+  // for `test:live`. Its database_id is the one in wrangler.jsonc.
+  "name": "iris-agent-scripts",
+  "compatibility_date": "2026-11-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "iris",
+      "database_id": "0799ab4b-f110-40a1-a3c9-278726eb3e53",
+      "remote": true,
+    },
+  ],
+}

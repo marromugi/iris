@@ -71,7 +71,7 @@ pnpm --filter @iris/agent-worker dev
 
 ## デプロイ
 
-本番は `https://iris-agent.marrromugi-dev.workers.dev`。D1 データベース `iris` と KV 名前空間 `iris-oauth` は作ってあり、その ID が `wrangler.jsonc` にある。D1 のマイグレーションを足したら、デプロイの前に本番にも当てる。
+本番は `https://iris-agent.marrromugi-dev.workers.dev`。D1 データベース `iris` と KV 名前空間 `iris-oauth` は作ってあり、その ID が `wrangler.jsonc` にある。D1 の ID は、スクリプト（`invite` と `mail-address`）が使う `scripts/d1.jsonc` にもある（`--remote` のときだけ本番に届く）。D1 のマイグレーションを足したら、デプロイの前に本番にも当てる。
 
 ```sh
 cd apps/agent

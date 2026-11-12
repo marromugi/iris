@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Database } from "./database";
-import { inviteKeyHash } from "./invite";
+import { inviteKeyHash, type NewInvite } from "./invite";
 import { invites, passkeys, users } from "./schema";
 
 /** Someone who may sign in. Their ID also names their Durable Object. */
@@ -135,4 +135,23 @@ export async function userWithId(db: Database, id: string): Promise<User | undef
 export async function userIdForMailTag(db: Database, tag: string): Promise<string | undefined> {
   const row = await db.select({ id: users.id }).from(users).where(eq(users.mailTag, tag)).get();
   return row?.id;
+}
+
+/** Stores a new invite. */
+export async function addInvite(db: Database, invite: NewInvite): Promise<void> {
+  await db.insert(invites).values(invite);
+}
+
+/**
+ * Gives the one user named `name` the mail tag `tag`, replacing the tag they had, and says whether
+ * there was one such user. Nothing changes when no user, or more than one, has the name.
+ */
+export async function giveMailTag(db: Database, name: string, tag: string): Promise<boolean> {
+  const named = eq(users.name, name);
+  const changed = await db
+    .update(users)
+    .set({ mailTag: tag })
+    .where(and(named, eq(db.$count(users, named), 1)))
+    .returning({ id: users.id });
+  return changed.length === 1;
 }

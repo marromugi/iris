@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import type { Tool } from "@iris/agent";
 import { afterEach, expect, test } from "vitest";
+import scriptsD1Config from "../scripts/d1.jsonc?raw";
 import wranglerConfig from "../wrangler.jsonc?raw";
 import * as entry from "../src/index";
 import {
@@ -20,7 +21,7 @@ import { MAIL_LIST_LIMIT, mailReport, mailTools } from "../src/mail/mail-tools";
 import * as store from "../src/store";
 import { untrusted } from "../src/untrusted";
 import { openDatabase } from "../src/users/database";
-import { mailTagUpdateStatement } from "../src/users/mail-tag";
+import { giveMailTag } from "../src/users/user-store";
 import { users } from "../src/users/schema";
 
 afterEach(async () => {
@@ -72,6 +73,13 @@ function keptMail(userId: string): Promise<Mail[]> {
 
 test("the Email Routing rule wrangler.jsonc makes is for the address mail is taken at", () => {
   expect(wranglerConfig).toContain(`"addresses": ["${MAIL_ADDRESS}"]`);
+});
+
+test("the scripts' D1 is the Worker's", () => {
+  const databaseId = /"database_id": "([^"]+)"/.exec(wranglerConfig)?.[1];
+
+  expect(databaseId).toBeDefined();
+  expect(scriptsD1Config).toContain(`"database_id": "${databaseId}"`);
 });
 
 test("a user's address carries their tag, and only such an address gives one back", () => {
@@ -375,11 +383,13 @@ test("a new mail tag goes to the one user with the name, and to none when two sh
   const tagOf = async (id: string) =>
     (await db.select({ tag: users.mailTag }).from(users).where(eq(users.id, id)).get())?.tag;
 
-  const hanako = await env.DB.prepare(mailTagUpdateStatement("Hanako", tag)).all();
-  const taro = await env.DB.prepare(mailTagUpdateStatement("Taro", newMailTag())).all();
+  const hanako = await giveMailTag(db, "Hanako", tag);
+  const taro = await giveMailTag(db, "Taro", newMailTag());
+  const nobody = await giveMailTag(db, "Nobody", newMailTag());
 
-  expect(hanako.results).toEqual([{ id: "user-1" }]);
+  expect(hanako).toBe(true);
   expect(await tagOf("user-1")).toBe(tag);
-  expect(taro.results).toEqual([]);
+  expect(taro).toBe(false);
+  expect(nobody).toBe(false);
   expect([await tagOf("user-2"), await tagOf("user-3")]).toEqual([null, null]);
 });

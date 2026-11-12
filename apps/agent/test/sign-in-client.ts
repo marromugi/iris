@@ -8,7 +8,9 @@ import { expect } from "vitest";
 import { createApp } from "../src/app";
 import { SIGN_IN_PATHS } from "../src/sign-in/paths";
 import { APP_REDIRECT } from "../src/sign-in/redirects";
-import { inviteInsertStatement, newInvite } from "../src/users/invite";
+import { openDatabase } from "../src/users/database";
+import { newInvite } from "../src/users/invite";
+import { addInvite } from "../src/users/user-store";
 import type { FakeAuthenticator } from "./passkey-authenticator";
 
 // Driving the Worker as the iris app does: registering itself, opening the sign-in sheet,
@@ -69,7 +71,7 @@ export async function s256(verifier: string): Promise<string> {
 /** Issues an invite as the invite command does, into the test D1, and returns its key. */
 export async function issueInvite(name: string, now = new Date()): Promise<string> {
   const { key, invite } = await newInvite(name, now);
-  await env.DB.prepare(inviteInsertStatement(invite)).run();
+  await addInvite(openDatabase(env.DB), invite);
   return key;
 }
 
