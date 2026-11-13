@@ -314,6 +314,42 @@ struct OpenThreadTests {
         #expect(thread.runs?.count == 5)
     }
 
+    @Test func takesNoImagesWhileAPostIsOnItsWaySoTheyFitWhenItComesBack() async {
+        let backend = HeldSends(FakeThreadBackend())
+        let thread = OpenThread(backend: backend)
+        await thread.load()
+        await thread.checkImageAttaching()
+        await thread.attach(Array(repeating: FakePickedImage(), count: 4)).value
+
+        let sending = thread.send()
+        await backend.heldSend()
+        #expect(thread.imagesLeft == 0)
+        await thread.attach([FakePickedImage()]).value
+        await backend.fail(with: .offline)
+        await sending?.value
+
+        #expect(thread.images.count == 4)
+        #expect(thread.canSend)
+    }
+
+    @Test func asksAgainWhetherPostsMayCarryImagesEachTimeTheSocketOpens() async {
+        let backend = FakeThreadBackend(.init(canAttachImages: false))
+        let thread = OpenThread(backend: backend, wait: { _ in })
+        let following = Task { await thread.follow() }
+        await eventually { backend.socketsOpened == 1 }
+        await eventually { thread.entries.value != nil }
+        #expect(thread.imagesLeft == 0)
+
+        backend.answer { $0.canAttachImages = true }
+        backend.closeSocket()
+        await eventually { thread.imagesLeft == 4 }
+
+        #expect(thread.imagesLeft == 4)
+        following.cancel()
+        backend.closeSocket()
+        await following.value
+    }
+
     /// A thread that is read and may carry images, with `backend` behind it.
     func threadTakingImages(_ backend: FakeThreadBackend = FakeThreadBackend()) async -> OpenThread {
         let thread = OpenThread(backend: backend)

@@ -31,6 +31,8 @@ struct AttachedImageThumbnail: View {
             }
             .frame(width: Self.side, height: Self.side)
             .clipShape(.rect(cornerRadius: 8))
+            // A wide photo fills past the square; only the square takes taps.
+            .contentShape(.rect(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("画像")

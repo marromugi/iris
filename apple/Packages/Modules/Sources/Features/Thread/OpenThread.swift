@@ -64,17 +64,18 @@ final class OpenThread {
         return !images.isEmpty || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// How many more images the next post can take; none while posts may not carry images.
+    /// How many more images the next post can take; none while posts may not carry images, or while a post is on its
+    /// way, whose images come back should it not go through.
     var imagesLeft: Int {
-        canAttachImages ? max(Self.imagesPerPost - images.count, 0) : 0
+        canAttachImages && !isSending ? max(Self.imagesPerPost - images.count, 0) : 0
     }
 
-    /// Asks the server whether posts may carry images. When it can't say, they stay without.
+    /// Asks the server whether posts may carry images. When it can't say, the last answer stays: none until one comes.
     func checkImageAttaching() async {
         do throws(AppError) {
             canAttachImages = try await backend.canAttachImages()
         } catch {
-            canAttachImages = false
+            // Asked again each time the events socket opens.
         }
     }
 
@@ -185,8 +186,8 @@ final class OpenThread {
     }
 
     /// Reads the thread and keeps it current while the screen shows it. It opens the thread's events socket and reads
-    /// the thread once it is open, since nothing from before then comes on it, or reads them through `/api` when it
-    /// can't open. After the socket closes or fails, it opens it again, waiting longer after each failure in a row; a
+    /// the thread, and whether posts may carry images, once it is open, since nothing from before then comes on it, or
+    /// reads them through `/api` when it can't open. After the socket closes or fails, it opens it again, waiting longer after each failure in a row; a
     /// socket that stayed open `SocketReopening.openLongEnough` starts the count over. It stops when the screen goes
     /// away, and opens no more sockets once the sign-in ends.
     func follow() async {
@@ -217,6 +218,7 @@ final class OpenThread {
                 // server no longer accepts, should the socket's refusal not have said so.
                 await load()
                 if case .failed(.signedOut) = entries { return }
+                await checkImageAttaching()
             }
             progress = [:]
             do {
@@ -230,6 +232,7 @@ final class OpenThread {
     private func opened() async {
         openedAt = now()
         await load()
+        await checkImageAttaching()
     }
 
     /// Puts the post or run in the thread unless one with its ID is there.

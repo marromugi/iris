@@ -139,7 +139,6 @@ struct ThreadScreen: View {
             Text(problem.message ?? "")
         }
         .task { await open.follow() }
-        .task { await open.checkImageAttaching() }
     }
 
     private var emptyDescription: String {

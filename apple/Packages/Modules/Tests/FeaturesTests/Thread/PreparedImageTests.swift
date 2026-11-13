@@ -35,6 +35,23 @@ struct PreparedImageTests {
         #expect(max(prepared.thumbnail.width, prepared.thumbnail.height) == PreparedImage.thumbnailEdge)
     }
 
+    @Test func turnsAPhotoTheWayItIsShown() async throws {
+        // Stored 300 wide and 100 high, shown turned a quarter clockwise, as an iPhone keeps a photo taken upright.
+        let stored = try #require(
+            CGImageSourceCreateWithData(Samples.photo(width: 300, height: 100) as CFData, nil)
+                .flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
+        let jpeg = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(jpeg, "public.jpeg" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, stored, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        #expect(CGImageDestinationFinalize(destination))
+
+        let prepared = try await PreparedImage.make(from: jpeg as Data)
+
+        let shown = try shape(of: prepared.jpeg)
+        #expect(shown.width == 100)
+        #expect(shown.height == 300)
+    }
+
     @Test func dataThatIsNotAnImageIsUnexpected() async {
         await #expect(throws: AppError.unexpected) {
             try await PreparedImage.make(from: Data("not an image".utf8))
