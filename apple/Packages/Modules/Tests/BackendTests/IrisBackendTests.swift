@@ -293,6 +293,19 @@ struct IrisBackendTests {
         #expect(sent.post.attachments.map(\.id) == [attachment.id])
     }
 
+    @Test func readsAnImagePutUpAsItWasPutUpAndSaysWhenOneIsGone() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        await #expect(throws: AppError.refused(message: "No image of this user has this ID")) {
+            try await backend.attachment(id: FakeServer.attachmentID)
+        }
+        let jpeg = Data(repeating: 0xFF, count: 2 * 1024 * 1024)
+
+        let attachment = try await backend.putUp(jpeg: jpeg)
+
+        #expect(try await backend.attachment(id: attachment.id) == jpeg)
+    }
+
     @Test func followsAThreadsEventsOnItsSocketUntilTheServerClosesIt() async throws {
         let backend = backend()
         try await signIn(backend)

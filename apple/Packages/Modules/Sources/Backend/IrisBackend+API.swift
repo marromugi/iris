@@ -206,7 +206,7 @@ extension IrisBackend {
         }
     }
 
-    /// Puts up a JPEG image to send with a post, and gives back its ID. The server takes at most 5 MB, and refuses
+    /// Puts up a JPEG image to send with a post, and gives back its ID. The server takes at most `Attachment.largestBytes`, and refuses
     /// images while the model can't read them. A post must take it within a day, or the server removes it.
     public func putUp(jpeg: Data) async throws(AppError) -> Attachment {
         switch try await call({ try await client.putUpAttachment(body: .jpeg(HTTPBody(jpeg))) }) {
@@ -214,6 +214,23 @@ extension IrisBackend {
         case .badRequest(let refused): throw try refusal { try refused.body.json }
         case .contentTooLarge(let refused): throw try refusal { try refused.body.json }
         case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// The bytes of an image put up for a post, as it was put up: JPEG, PNG, GIF, or WebP. One that is gone, or isn't
+    /// the user's, is `.refused`.
+    public func attachment(id: Attachment.ID) async throws(AppError) -> Data {
+        switch try await call({ try await client.attachment(path: .init(attachmentId: id)) }) {
+        case .ok(let ok):
+            let body =
+                switch ok.body {
+                case .jpeg(let body), .png(let body), .imageGif(let body), .imageWebp(let body): body
+                }
+            return try await call { try await Data(collecting: body, upTo: Attachment.largestBytes) }
+        case .notFound(let missing): throw try refusal { try missing.body.json }
         case .internalServerError(let failed): throw try refusal { try failed.body.json }
         case .unauthorized, .forbidden: throw .signedOut
         case .undocumented: throw .unexpected

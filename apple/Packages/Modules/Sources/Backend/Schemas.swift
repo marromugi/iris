@@ -50,4 +50,7 @@ public typealias UserEvent = Components.Schemas.UserEvent
 
 extension Agent: Identifiable {}
 extension ChatThread: Identifiable {}
-extension Attachment: Identifiable {}
+extension Attachment: Identifiable {
+    /// The most bytes an image may have; the server takes no larger one.
+    public static let largestBytes = 5 * 1024 * 1024
+}

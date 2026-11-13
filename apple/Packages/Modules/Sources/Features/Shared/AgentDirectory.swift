@@ -1,4 +1,5 @@
 import Backend
+import Foundation
 
 /// The user's agents and threads: which there are, and the way to reach each one.
 nonisolated protocol AgentDirectory: Sendable {
@@ -14,6 +15,8 @@ nonisolated protocol AgentDirectory: Sendable {
     func agent(id: Agent.ID) -> any AgentBackend
     /// The thread that `threads()` listed with this ID.
     func thread(id: ChatThread.ID) -> any ThreadBackend
+    /// The bytes of an image a post carries. One that is gone is `.refused`.
+    func attachment(id: Attachment.ID) async throws(AppError) -> Data
 }
 
 extension IrisBackend: AgentDirectory {
