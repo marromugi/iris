@@ -33,6 +33,16 @@ struct PostImagesTests {
         #expect(image.height == 519)
     }
 
+    @Test func showsAPhotoTheWayItsEXIFSaysToTurnIt() async throws {
+        let images = PostImages(
+            directory: FakeAgentDirectory(images: FakeImages(["a": Samples.turnedPhoto(width: 300, height: 200)])))
+
+        let image = try await images.image("a", longestEdge: 780)
+
+        #expect(image.width == 200)
+        #expect(image.height == 300)
+    }
+
     @Test func anImageThatIsGoneOrIsNoImageFails() async {
         let images = PostImages(directory: FakeAgentDirectory(images: FakeImages(["text": Data("hello".utf8)])))
 
@@ -65,6 +75,16 @@ struct PostImagesTests {
         _ = try await images.data(of: "b")
 
         #expect(shelf.reads == ["a", "b", "c", "b"])
+    }
+
+    @Test func keepsTheImageJustReadEvenWhenItAloneIsPastTheBytesItKeeps() async throws {
+        let shelf = FakeImages(["a": Data(repeating: 1, count: 30)])
+        let images = PostImages(directory: FakeAgentDirectory(images: shelf), keptBytes: 20)
+
+        _ = try await images.data(of: "a")
+        _ = try await images.data(of: "a")
+
+        #expect(shelf.reads == ["a"])
     }
 }
 

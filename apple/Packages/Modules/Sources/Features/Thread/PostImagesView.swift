@@ -22,9 +22,10 @@ struct PostImagesView: View {
                 LoneImage(phase: phase)
             }
         } else {
-            Grid(horizontalSpacing: Self.spacing, verticalSpacing: Self.spacing) {
+            // Rows of their own rather than a grid, so a short last row keeps to the right like the post.
+            VStack(alignment: .trailing, spacing: Self.spacing) {
                 ForEach(rows, id: \.first?.id) { row in
-                    GridRow {
+                    HStack(spacing: Self.spacing) {
                         ForEach(row) { item in
                             PostImageButton(
                                 id: item.attachment.id, label: "画像 \(item.number)/\(attachments.count)",

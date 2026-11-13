@@ -35,6 +35,22 @@
             return png as Data
         }
 
+        /// A JPEG kept `width` by `height` pixels whose EXIF says to turn it a quarter clockwise to show it, as a phone
+        /// held upright saves one.
+        static func turnedPhoto(width: Int, height: Int) -> Data {
+            guard let source = CGImageSourceCreateWithData(photo(width: width, height: height) as CFData, nil),
+                let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+            else { preconditionFailure("A sample photo can be read") }
+            let jpeg = NSMutableData()
+            guard
+                let destination = CGImageDestinationCreateWithData(jpeg, UTType.jpeg.identifier as CFString, 1, nil)
+            else { preconditionFailure("A sample photo can be written") }
+            CGImageDestinationAddImage(
+                destination, image, [kCGImagePropertyOrientation: CGImagePropertyOrientation.right.rawValue] as CFDictionary)
+            guard CGImageDestinationFinalize(destination) else { preconditionFailure("A sample photo can be written") }
+            return jpeg as Data
+        }
+
         /// Images posts carry, as the server lists them, and their bytes: wide, tall, and square, then one that is gone.
         static let pictures: [Attachment] = [
             Attachment(id: "picture-wide", mediaType: "image/png", size: 0),
