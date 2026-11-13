@@ -1,4 +1,5 @@
 #if DEBUG
+    import Backend
     import CoreGraphics
     import Foundation
     import ImageIO
@@ -32,6 +33,26 @@
             CGImageDestinationAddImage(destination, image, nil)
             guard CGImageDestinationFinalize(destination) else { preconditionFailure("A sample photo can be written") }
             return png as Data
+        }
+
+        /// Images posts carry, as the server lists them, and their bytes: wide, tall, and square, then one that is gone.
+        static let pictures: [Attachment] = [
+            Attachment(id: "picture-wide", mediaType: "image/png", size: 0),
+            Attachment(id: "picture-tall", mediaType: "image/png", size: 0),
+            Attachment(id: "picture-square", mediaType: "image/png", size: 0),
+            Attachment(id: "picture-gone", mediaType: "image/jpeg", size: 0),
+        ]
+        static let pictureBytes: [Attachment.ID: Data] = [
+            "picture-wide": photo(width: 1568, height: 1045),
+            "picture-tall": photo(width: 882, height: 1568, from: (0.4, 0.75, 0.5), to: (0.1, 0.2, 0.45)),
+            "picture-square": photo(width: 1200, height: 1200, from: (0.9, 0.85, 0.4), to: (0.7, 0.3, 0.5)),
+        ]
+
+        /// A post of the user's that carries `count` of the pictures, with `text`.
+        static func picturePost(_ count: Int, text: String = "") -> Post {
+            Post(
+                id: "picture-post-\(count)", agentId: nil, text: text, attachments: Array(pictures.prefix(count)),
+                createdAt: moment("2026-11-10T08:00:00Z"))
         }
     }
 #endif

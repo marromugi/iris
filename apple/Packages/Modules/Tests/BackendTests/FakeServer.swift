@@ -10,6 +10,8 @@ import Synchronization
 actor FakeServer {
     /// The user's one agent.
     static let agentID = "5d7c9e1a-2b4f-4c6d-8e0a-1b3c5d7e9f20"
+    /// The ID an image put up here is given.
+    static let attachmentID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
 
     private struct Grant {
         let clientID: String
@@ -216,7 +218,12 @@ actor FakeServer {
             attachmentsPutUp.append(request.httpBody ?? Data())
             return Self.answer(
                 request, 201,
-                #"{"id":"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d","mediaType":"\#(type)","size":\#(size)}"#)
+                #"{"id":"\#(Self.attachmentID)","mediaType":"\#(type)","size":\#(size)}"#)
+        case ("GET", "/api/attachments/\(Self.attachmentID)"):
+            guard let image = attachmentsPutUp.last else {
+                return Self.answer(request, 404, #"{"message":"No image of this user has this ID"}"#)
+            }
+            return Self.answer(request, 200, image, type: "image/jpeg")
         case ("GET", "/api/me/mail"):
             return Self.answer(request, 200, mailSetupJSON)
         case ("POST", "/api/me/mail/address"):
@@ -325,6 +332,12 @@ actor FakeServer {
         let headers = body.isEmpty ? [:] : ["Content-Type": "application/json"]
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: headers)!
         return (Data(body.utf8), response)
+    }
+
+    private static func answer(_ request: URLRequest, _ status: Int, _ body: Data, type: String) -> (Data, URLResponse) {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": type])!
+        return (body, response)
     }
 
     private static func form(_ body: Data?) -> [String: String] {

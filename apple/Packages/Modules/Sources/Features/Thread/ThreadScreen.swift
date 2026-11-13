@@ -12,10 +12,14 @@ struct ThreadScreen: View {
     /// The user's agents by ID, for showing whose run each is.
     let agents: [Agent.ID: Agent]
     let directory: any AgentDirectory
+    /// The images the user's posts carry, read once each.
+    let images: PostImages
     @State private var open: OpenThread
     /// The one-to-one thread's agent being active; nil for a group or a consult.
     @State private var activity: AgentActivity?
     @State private var isConfirmingDeactivation = false
+    /// A post's images opened to look at.
+    @State private var opened: OpenedImages?
     @Environment(\.colorScheme) private var colorScheme
 
     /// The screen's background: white, or in dark mode a black a little lifted, which is easier on the eyes than pure
@@ -27,12 +31,13 @@ struct ThreadScreen: View {
     /// `onAgentSwitched` is called with the agent and whether it is now active, once the one-to-one thread's agent was
     /// deactivated or activated.
     init(
-        thread: ChatThread, agents: [Agent.ID: Agent], directory: any AgentDirectory,
+        thread: ChatThread, agents: [Agent.ID: Agent], directory: any AgentDirectory, images: PostImages,
         onAgentSwitched: @escaping (Agent.ID, Bool) -> Void = { _, _ in }
     ) {
         self.thread = thread
         self.agents = agents
         self.directory = directory
+        self.images = images
         _open = State(initialValue: OpenThread(backend: directory.thread(id: thread.id)))
         _activity = State(
             initialValue: thread.agentId.map { agentID in
@@ -52,7 +57,9 @@ struct ThreadScreen: View {
                             if let asker = post.agentId {
                                 AgentPostView(post: post, agent: agents[asker])
                             } else {
-                                UserBubble(text: post.text)
+                                UserPostView(post: post, images: images) { id in
+                                    opened = OpenedImages(ids: post.attachments.map(\.id), first: id)
+                                }
                             }
                         case .run(let run):
                             // A group's or a consult's runs show whose they are.
@@ -138,6 +145,7 @@ struct ThreadScreen: View {
         } message: { problem in
             Text(problem.message ?? "")
         }
+        .imageViewer($opened, images: images)
         .task { await open.follow() }
     }
 
@@ -150,16 +158,17 @@ struct ThreadScreen: View {
 
 #if DEBUG
     private let agents = Dictionary(uniqueKeysWithValues: Samples.agents.map { ($0.id, $0) })
+    private let images = PostImages(directory: FakeAgentDirectory(images: FakeImages(Samples.pictureBytes)))
 
     #Preview("実行あり") {
         NavigationStack {
-            ThreadScreen(thread: Samples.threads[1], agents: agents, directory: FakeAgentDirectory())
+            ThreadScreen(thread: Samples.threads[1], agents: agents, directory: FakeAgentDirectory(), images: images)
         }
     }
 
     #Preview("グループ") {
         NavigationStack {
-            ThreadScreen(thread: Samples.threads[0], agents: agents, directory: FakeAgentDirectory())
+            ThreadScreen(thread: Samples.threads[0], agents: agents, directory: FakeAgentDirectory(), images: images)
         }
     }
 
@@ -167,7 +176,7 @@ struct ThreadScreen: View {
         NavigationStack {
             ThreadScreen(
                 thread: Samples.threads[1], agents: agents,
-                directory: FakeAgentDirectory(thread: FakeThreadBackend(.init(runs: [], posts: []))))
+                directory: FakeAgentDirectory(thread: FakeThreadBackend(.init(runs: [], posts: []))), images: images)
         }
     }
 
@@ -179,7 +188,23 @@ struct ThreadScreen: View {
             return agent
         }
         NavigationStack {
-            ThreadScreen(thread: thread, agents: stopped, directory: FakeAgentDirectory())
+            ThreadScreen(thread: thread, agents: stopped, directory: FakeAgentDirectory(), images: images)
+        }
+    }
+
+    #Preview("画像つきの投稿") {
+        NavigationStack {
+            ThreadScreen(
+                thread: Samples.threads[1], agents: agents,
+                directory: FakeAgentDirectory(
+                    thread: FakeThreadBackend(
+                        .init(
+                            runs: [],
+                            posts: [
+                                Samples.picturePost(1, text: "この写真の場所はどこ？"), Samples.picturePost(3),
+                                Samples.mailPost,
+                            ]))),
+                images: images)
         }
     }
 
@@ -188,7 +213,8 @@ struct ThreadScreen: View {
             ThreadScreen(
                 thread: Samples.consult, agents: agents,
                 directory: FakeAgentDirectory(
-                    thread: FakeThreadBackend(.init(runs: [Samples.consultAnswer], posts: [Samples.consultQuestion]))))
+                    thread: FakeThreadBackend(.init(runs: [Samples.consultAnswer], posts: [Samples.consultQuestion]))),
+                images: images)
         }
     }
 #endif

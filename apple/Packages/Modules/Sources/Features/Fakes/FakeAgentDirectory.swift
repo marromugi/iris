@@ -3,13 +3,14 @@
     import Foundation
 
     /// The user's agents and threads as they are told to be, for previews: `listed` are the agents and `threads` the
-    /// threads, each agent is `backend` and each thread `thread`, and listing and adding fail with `failure` when one is
-    /// set. An added agent or group is given back but not listed.
+    /// threads, each agent is `backend` and each thread `thread`, the images posts carry are `images`, and listing and
+    /// adding fail with `failure` when one is set. An added agent or group is given back but not listed.
     nonisolated struct FakeAgentDirectory: AgentDirectory {
         var listed = Samples.agents
         var threadsListed = Samples.threads
         var backend = FakeAgentBackend()
         var thread = FakeThreadBackend()
+        var images = FakeImages()
         var failure: AppError?
 
         func agents() async throws(AppError) -> [Agent] {
@@ -40,6 +41,10 @@
 
         func thread(id: ChatThread.ID) -> any ThreadBackend {
             thread
+        }
+
+        func attachment(id: Attachment.ID) async throws(AppError) -> Data {
+            try images.read(id)
         }
     }
 #endif

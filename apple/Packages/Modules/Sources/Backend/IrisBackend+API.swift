@@ -219,4 +219,21 @@ extension IrisBackend {
         case .undocumented: throw .unexpected
         }
     }
+
+    /// The bytes of an image put up for a post, as it was put up: JPEG, PNG, GIF, or WebP. One that is gone, or isn't
+    /// the user's, is `.refused`.
+    public func attachment(id: Attachment.ID) async throws(AppError) -> Data {
+        switch try await call({ try await client.attachment(path: .init(attachmentId: id)) }) {
+        case .ok(let ok):
+            let body =
+                switch ok.body {
+                case .jpeg(let body), .png(let body), .imageGif(let body), .imageWebp(let body): body
+                }
+            return try await call { try await Data(collecting: body, upTo: Attachment.largestBytes) }
+        case .notFound(let missing): throw try refusal { try missing.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
 }

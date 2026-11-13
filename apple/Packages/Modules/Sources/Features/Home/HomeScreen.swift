@@ -8,6 +8,14 @@ struct HomeScreen: View {
     let onSignOut: () -> Void
     @State private var home = Loadable<Home>.loading
     @State private var adding: Adding?
+    /// The images the user's posts carry, kept while they are signed in, whichever thread shows them.
+    @State private var images: PostImages
+
+    init(directory: any AgentDirectory, onSignOut: @escaping () -> Void) {
+        self.directory = directory
+        self.onSignOut = onSignOut
+        _images = State(initialValue: PostImages(directory: directory))
+    }
 
     /// What the home reads: the threads, and the agents, for naming who is in a group and choosing a group's members.
     struct Home {
@@ -66,7 +74,7 @@ struct HomeScreen: View {
             .listStyle(.plain)
             .refreshable { await load() }
             .navigationDestination(for: ChatThread.self) { thread in
-                ThreadScreen(thread: thread, agents: home.agentsByID, directory: directory) { agentID, active in
+                ThreadScreen(thread: thread, agents: home.agentsByID, directory: directory, images: images) { agentID, active in
                     switched(agentID, active: active)
                 }
             }
