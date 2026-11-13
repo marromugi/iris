@@ -83,7 +83,10 @@ struct ThreadScreen: View {
                 if let activity, !activity.isActive {
                     DeactivatedBar(isSwitching: activity.isSwitching) { activity.activate() }
                 } else if thread.consultRunId == nil {
-                    MessageBar(text: $open.draft, canSend: open.canSend) { open.send() }
+                    MessageBar(
+                        text: $open.draft, canSend: open.canSend, images: open.images, imagesLeft: open.imagesLeft,
+                        onPick: { open.attach($0) }, onRemove: { open.remove($0) }
+                    ) { open.send() }
                 }
             }
         }

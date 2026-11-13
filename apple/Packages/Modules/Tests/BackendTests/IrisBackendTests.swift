@@ -277,6 +277,22 @@ struct IrisBackendTests {
         }
     }
 
+    @Test func putsUpAJPEGAndSendsItsIDWithAPostOfNoText() async throws {
+        let backend = backend()
+        try await signIn(backend)
+        // Larger than any other body the app sends, as a 1568-pixel photo can be.
+        let jpeg = Data(repeating: 0xFF, count: 2 * 1024 * 1024)
+
+        #expect(try await backend.me().canAttachImages)
+        let attachment = try await backend.putUp(jpeg: jpeg)
+        let sent = try await backend.sendPost("", attaching: [attachment.id], to: agent)
+
+        #expect(attachment.mediaType == "image/jpeg")
+        #expect(attachment.size == jpeg.count)
+        #expect(await server.attachmentsPutUp == [jpeg])
+        #expect(sent.post.attachments.map(\.id) == [attachment.id])
+    }
+
     @Test func followsAThreadsEventsOnItsSocketUntilTheServerClosesIt() async throws {
         let backend = backend()
         try await signIn(backend)

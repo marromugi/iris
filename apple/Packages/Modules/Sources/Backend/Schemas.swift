@@ -25,8 +25,12 @@ public typealias NewAgent = Components.Schemas.NewAgent
 public typealias ScheduledTask = Components.Schemas.Task
 /// What adding a task sends: the prompt each run starts with, and when it runs.
 public typealias NewTask = Components.Schemas.NewTask
-/// What sending a message to an agent sends: the text the run it starts begins with.
+/// What sending a message to an agent sends: the text the run it starts begins with, and the images put up for it.
 public typealias NewMessage = Components.Schemas.NewMessage
+/// An image put up to send with a post: its ID, media type, and size in bytes.
+public typealias Attachment = Components.Schemas.Attachment
+/// The signed-in user: their name, and whether their posts may carry images.
+public typealias Me = Components.Schemas.Me
 /// One run of an agent, started by a task or by a message sent to it: when it started and ended, how its attempts
 /// went, and its conversation.
 public typealias Run = Components.Schemas.Run
@@ -46,3 +50,4 @@ public typealias UserEvent = Components.Schemas.UserEvent
 
 extension Agent: Identifiable {}
 extension ChatThread: Identifiable {}
+extension Attachment: Identifiable {}

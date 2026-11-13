@@ -1,3 +1,6 @@
+import Foundation
+import OpenAPIRuntime
+
 // Every call throws `.signedOut` when the server refuses the sign-in, `.refused` with the server's message for a
 // `{ message }` answer (an agent the user does not have among them), and `.unexpected` for an answer the app does not
 // expect.
@@ -176,14 +179,40 @@ extension IrisBackend {
         }
     }
 
-    /// Sends a post in the thread, and gives back the post and the runs that reply to it as they start.
-    public func sendPost(_ text: String, to threadID: ChatThread.ID) async throws(AppError) -> SentPost {
-        switch try await call({
-            try await client.sendPost(path: .init(threadId: threadID), body: .json(NewMessage(text: text)))
-        }) {
+    /// Sends a post in the thread with the images put up for it, by ID, and gives back the post and the runs that reply
+    /// to it as they start. The server takes up to 4 images, and empty text only with an image.
+    public func sendPost(
+        _ text: String, attaching attachmentIDs: [Attachment.ID] = [], to threadID: ChatThread.ID
+    ) async throws(AppError) -> SentPost {
+        let message = NewMessage(text: text, attachmentIds: attachmentIDs)
+        switch try await call({ try await client.sendPost(path: .init(threadId: threadID), body: .json(message)) }) {
         case .accepted(let accepted): return try decoded { try accepted.body.json }
         case .notFound(let refused): throw try refusal { try refused.body.json }
         case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// The signed-in user, with whether their posts may carry images.
+    public func me() async throws(AppError) -> Me {
+        switch try await call({ try await client.me() }) {
+        case .ok(let ok): return try decoded { try ok.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
+    /// Puts up a JPEG image to send with a post, and gives back its ID. The server takes at most 5 MB, and refuses
+    /// images while the model can't read them. A post must take it within a day, or the server removes it.
+    public func putUp(jpeg: Data) async throws(AppError) -> Attachment {
+        switch try await call({ try await client.putUpAttachment(body: .jpeg(HTTPBody(jpeg))) }) {
+        case .created(let created): return try decoded { try created.body.json }
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .contentTooLarge(let refused): throw try refusal { try refused.body.json }
         case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
         case .internalServerError(let failed): throw try refusal { try failed.body.json }
         case .unauthorized, .forbidden: throw .signedOut

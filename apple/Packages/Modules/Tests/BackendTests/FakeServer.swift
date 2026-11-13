@@ -35,6 +35,8 @@ actor FakeServer {
     private(set) var timeZone: String?
     /// The mail address the user has, as `/api/me/mail` names it; nil until one is made.
     private(set) var mailAddress: String?
+    /// The bytes of each image put up, in order.
+    private(set) var attachmentsPutUp: [Data] = []
     /// How many times the app let go of Gmail's confirmation.
     private(set) var confirmationsDismissed = 0
     /// Whether the agent is active, as deactivating and activating left it.
@@ -188,7 +190,8 @@ actor FakeServer {
         if request.httpMethod == "GET", path == "/api/agents" {
             return Self.answer(
                 request, 200,
-                #"[{"id":"\#(Self.agentID)","name":"エージェント","look":{"palette":3,"seed":42},"lastRanAt":"2026-11-09T22:00:00Z","active":\#(agentActive)}]"#)
+                #"[{"id":"\#(Self.agentID)","name":"エージェント","look":{"palette":3,"seed":42},"lastRanAt":"2026-11-09T22:00:00Z","active":\#(agentActive)}]"#
+            )
         }
         if request.httpMethod == "PUT", path == "/api/me/time-zone" {
             struct Sent: Decodable { let timeZone: String }
@@ -202,6 +205,18 @@ actor FakeServer {
             return Self.answer(request, 204, "")
         }
         switch (request.httpMethod, path) {
+        case ("GET", "/api/me"):
+            return Self.answer(
+                request, 200, #"{"id":"0d9c8b7a-6f5e-4d3c-2b1a-0f9e8d7c6b5a","name":"テスト","canAttachImages":true}"#)
+        case ("POST", "/api/attachments"):
+            guard let type = request.value(forHTTPHeaderField: "Content-Type"), type.hasPrefix("image/") else {
+                return Self.answer(request, 415, #"{"message":"Unsupported Media Type"}"#)
+            }
+            let size = request.httpBody?.count ?? 0
+            attachmentsPutUp.append(request.httpBody ?? Data())
+            return Self.answer(
+                request, 201,
+                #"{"id":"9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d","mediaType":"\#(type)","size":\#(size)}"#)
         case ("GET", "/api/me/mail"):
             return Self.answer(request, 200, mailSetupJSON)
         case ("POST", "/api/me/mail/address"):
@@ -269,17 +284,23 @@ actor FakeServer {
     private func thread(_ request: URLRequest, rest: String) -> (Data, URLResponse) {
         switch (request.httpMethod, rest) {
         case ("POST", "/posts"):
-            struct Sent: Decodable { let text: String }
+            struct Sent: Decodable {
+                let text: String
+                let attachmentIds: [String]?
+            }
             guard request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("application/json") == true,
                 let body = request.httpBody, let sent = try? JSONDecoder().decode(Sent.self, from: body)
             else { return Self.answer(request, 415, #"{"message":"Unsupported Media Type"}"#) }
-            guard !sent.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let attachments = (sent.attachmentIds ?? []).map {
+                #"{"id":"\#($0)","mediaType":"image/jpeg","size":1}"#
+            }
+            guard !attachments.isEmpty || !sent.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return Self.answer(
                     request, 400, #"{"message":"✖ Too small: expected string to have >=1 characters\n  → at text"}"#)
             }
             return Self.answer(
                 request, 202,
-                #"{"post":{"id":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","agentId":null,"text":"\#(sent.text)","attachments":[],"createdAt":"2026-11-10T09:00:00Z"},"runs":[{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"consults":[],"messages":[{"role":"user","text":"\#(sent.text)"}]}]}"#
+                #"{"post":{"id":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","agentId":null,"text":"\#(sent.text)","attachments":[\#(attachments.joined(separator: ","))],"createdAt":"2026-11-10T09:00:00Z"},"runs":[{"id":"6b1d3f5a-7c9e-4b2d-8f0a-3c5e7a9b1d2f","agentId":"1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e","taskId":null,"postId":"5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d","startedAt":"2026-11-10T09:00:00Z","endedAt":null,"lastError":null,"failedAttempts":0,"consults":[],"messages":[{"role":"user","text":"\#(sent.text)"}]}]}"#
             )
         case ("GET", "/entries"):
             return Self.answer(
