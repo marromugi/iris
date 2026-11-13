@@ -1,4 +1,4 @@
-import { type Message, messageSchema, nextAction } from "@iris/agent";
+import { type Message, messageSchema, nextAction, type UserMessage } from "@iris/agent";
 import {
   and,
   count,
@@ -509,7 +509,7 @@ export function insertPost(
   agentIds: readonly string[],
   attachmentIds: readonly string[] = [],
 ): string[] {
-  const opening = postAsRead(post, agentNamesById(storage));
+  const opening = postAsRead(post, attachmentIds, agentNamesById(storage));
   const runIds = agentIds.map(() => crypto.randomUUID());
   database(storage).transaction((tx) => {
     tx.insert(posts).values(post).run();
@@ -532,16 +532,27 @@ export function insertPost(
         })
         .run();
       tx.insert(messages)
-        .values(messageRow(runId, 0, { role: "user", text: opening }))
+        .values(messageRow(runId, 0, opening))
         .run();
     }
   });
   return runIds;
 }
 
-/** A post as an agent reads it: the user's as it is, an agent's after the agent's name. */
-function postAsRead(post: Post, agentNames: ReadonlyMap<string, string>): string {
-  return post.agentId === null ? post.text : `${agentNames.get(post.agentId) ?? ""}: ${post.text}`;
+/**
+ * A post as an agent reads it: the user's text as it is, an agent's after the agent's name, with
+ * the images it was sent with (`attachmentIds`, in order) as references.
+ */
+function postAsRead(
+  post: Post,
+  attachmentIds: readonly string[],
+  agentNames: ReadonlyMap<string, string>,
+): UserMessage {
+  const text =
+    post.agentId === null ? post.text : `${agentNames.get(post.agentId) ?? ""}: ${post.text}`;
+  return attachmentIds.length === 0
+    ? { role: "user", text }
+    : { role: "user", text, images: attachmentIds.map((id) => ({ type: "image", id })) };
 }
 
 function agentNamesById(storage: DurableObjectStorage): Map<string, string> {
@@ -928,7 +939,11 @@ export function* earlierInThread(
     .orderBy(asc(runs.endedAt), asc(runs.id))
     .all();
   type EarlierRun = (typeof earlierRunRows)[number];
-  const entries: ({ at: Date } & ({ post: Post; replies: EarlierRun[] } | { run: EarlierRun }))[] =
+  const entries: ({ at: Date } & (
+    | { post: PostWithAttachments; replies: EarlierRun[] }
+    | { run: EarlierRun }
+  ))[] = withAttachments(
+    storage,
     db
       .select()
       .from(posts)
@@ -939,12 +954,12 @@ export function* earlierInThread(
           lt(posts.createdAt, run.startedAt),
         ),
       )
-      .all()
-      .map((post) => ({
-        at: post.createdAt,
-        post,
-        replies: earlierRunRows.filter((row) => row.postId === post.id),
-      }));
+      .all(),
+  ).map((post) => ({
+    at: post.createdAt,
+    post,
+    replies: earlierRunRows.filter((row) => row.postId === post.id),
+  }));
   for (const row of earlierRunRows) {
     if (row.postId === null) {
       entries.push({ at: row.startedAt, run: row });
@@ -972,7 +987,8 @@ export function* earlierInThread(
     }
     const replies = entry.replies.flatMap((reply) => read(reply) ?? []);
     if (replies.length > 0) {
-      yield [{ role: "user", text: postAsRead(entry.post, agentNames) }, ...replies];
+      const attachmentIds = entry.post.attachments.map((attachment) => attachment.id);
+      yield [postAsRead(entry.post, attachmentIds, agentNames), ...replies];
     }
   }
 }

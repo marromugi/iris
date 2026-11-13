@@ -1,6 +1,8 @@
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { type NewAgent, newAgentSchema, randomLook } from "./agent";
+import { readAttachment } from "./attachment";
+import { canAttachImages } from "./model-provider";
 import { type NewGroup, newGroupSchema } from "./group";
 import type { NewMail } from "./mail/mail";
 import { keptSince } from "./mail/mail-tools";
@@ -418,12 +420,25 @@ export function createUserAgent(
           this.waker,
           (run) => toolsFor(this.env, run, this.ctx.storage),
           summarizing,
+          // A model that doesn't read images gets none of their bytes.
+          canAttachImages(this.env)
+            ? (attachmentId) => readAttachment(this.env.ATTACHMENTS, this.userId(), attachmentId)
+            : undefined,
         );
         await summarizing;
         await this.wakeAt(wakeAt);
       } finally {
         this.broadcast.idle();
       }
+    }
+
+    /** The user this object belongs to: it is reached by `getByName` with the user's ID. */
+    private userId(): string {
+      const name = this.ctx.id.name;
+      if (name === undefined) {
+        throw new Error("This user's Durable Object has no name; it is reached by the user's ID.");
+      }
+      return name;
     }
 
     /** The thread a socket is opened on, and what it hears; undefined when the user has no such thread or agent. */

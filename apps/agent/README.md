@@ -10,6 +10,8 @@
 
 モデルは `wrangler.jsonc` の `MODEL_PROVIDER` で選ぶ。`anthropic`（初期値）なら Claude Haiku 5.5（`src/anthropic-model.ts`、鍵は secret の `ANTHROPIC_API_KEY`）、`workers-ai` なら Workers AI の GLM-4.7-Flash（`src/workers-ai-model.ts`、AI バインディング）。Claude の考えた記録（thinking）は、返事のメッセージに `reasoning` の部分として残り、同じ実行の続きでモデルに送り返す。アプリへの `/api` と、あとの実行が読む前の会話には入れない。記録は、それより前のシステムプロンプト・ツール・会話がそのときと同じときだけ使われる。システムプロンプトには時刻を入れず、実行が始まった日（UTC）だけを書くので、実行のあいだは日をまたいでも変わらず、起床をまたいで続く実行（再試行、時間切れ、相談待ち）でも記録とプロンプトキャッシュが生きる。今の時刻が要るときは、エージェントが `date` で調べる。ツールの説明はエージェントの名前を並べるので、実行が待っているあいだにエージェントが足されると、API が前の記録を捨てて続ける（`thinking-binding-controls` のベータ。捨てた分は `console.warn` に出る）。Claude が断った返事、途中で切れた返事、文字もツール呼び出しもない返事は、実行の失敗になる。
 
+発言には画像を付けられる（`anthropic` のときだけ。`GET /api/me` の `canAttachImages`）。本体は R2 バケット `iris-attachments`（`ATTACHMENTS`）の `<userId>/<attachmentId>` にあり、保存するメッセージは画像の ID だけを持つ。実行は進めるたびに、モデルが読む画像の本体を 1 度だけ読んで、そのあいだのモデル呼び出しに渡す（`src/runner.ts` の `readImages`）。Claude には、画像を送った順に、発言の文字の前に置いて送る。1 回に渡すのは 20 枚・1 投稿分の大きさ（20MB）までで、今の実行の発言の画像を先に、残りは前の発言の画像を新しいほうから入れる。入らなかった画像、本体のない画像、Workers AI のときの画像は、その位置に「渡せなかった」という短い文字（`UNREAD_IMAGE_TEXT`）になる。
+
 アプリは `/api` で読み書きする。`/api` の定義は `openapi.json` に書き出してあり、アプリのクライアントはここから作る。`GET /api/agents/{agentId}/events` を WebSocket で開くと、そのエージェントの実行が変わるたびにその実行が、実行のあいだは「起動中」「考え中」「書いている途中の文字」が届く（`RunEvent`、`src/run-broadcast.ts`）。途中の文字を送る間隔は `WRITING_EVERY_MS`（`src/api/schemas.ts`）まで。保存するのは返事ができてから。アプリは、ソケットを開いてから実行を読む（開く前に起きたことは届かない）。ソケットは Durable Object の休止を妨げない。
 
 ## メール

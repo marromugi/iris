@@ -6,6 +6,7 @@ import {
   messageSchema,
   nextAction,
   step,
+  UNREAD_IMAGE_TEXT,
 } from "@iris/agent";
 import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
@@ -215,4 +216,53 @@ test("when a run's system prompt changes between wake-ups, the real API leaves o
   expect(leftOut(response ?? "")).toContainEqual(
     expect.objectContaining({ type: "thinking_dropped", reason: "prefix_binding_mismatch" }),
   );
+});
+
+/** 32×32 PNGs of one color each. */
+const RED_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mO4IyJCU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAJ3LED19/LmKAAAAAElFTkSuQmCC";
+const BLUE_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mMQ0bhDU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAHncYD2v4JFYAAAAAElFTkSuQmCC";
+
+const bytes = (base64: string) => Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+
+test("the real API takes a post's images with no text and a stand-in for one it wasn't given, and the model reads them in order", async () => {
+  const reply = await model({
+    system:
+      "For each image the user sent, in order, say its color in one English word, or 'missing' for one you weren't given. Write only the words, separated by commas.",
+    messages: [
+      {
+        role: "user",
+        text: "",
+        images: [
+          { type: "image", id: "red" },
+          { type: "image", id: "gone" },
+          { type: "image", id: "blue" },
+        ],
+      },
+    ],
+    tools: [],
+    images: new Map([
+      ["red", { mediaType: "image/png", bytes: bytes(RED_PNG) }],
+      ["blue", { mediaType: "image/png", bytes: bytes(BLUE_PNG) }],
+    ]),
+  });
+
+  const text = reply.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+  console.log(JSON.stringify(exchanges.at(-1)?.request, null, 2).slice(0, 2000));
+  console.log("Reply:", text);
+  // The model needn't count the stand-in as an image; it goes in the image's place.
+  expect(text.toLowerCase()).toMatch(/red.*blue/s);
+  expect(exchanges.at(-1)?.request).toMatchObject({
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: RED_PNG } },
+          { type: "text", text: UNREAD_IMAGE_TEXT },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: BLUE_PNG } },
+        ],
+      },
+    ],
+  });
 });

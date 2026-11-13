@@ -16,10 +16,21 @@ export type ModelProgress =
   | { readonly type: "thinking" }
   | { readonly type: "writing"; readonly text: string };
 
+/** An image's bytes as the model is given them. */
+export interface ImageBytes {
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface ModelRequest {
   readonly system: string | undefined;
   readonly messages: readonly Message[];
   readonly tools: readonly ToolSpec[];
+  /**
+   * The bytes of the images the messages refer to, by the images' IDs. A model that reads images
+   * gives an image left out here as `UNREAD_IMAGE_TEXT`.
+   */
+  readonly images?: ReadonlyMap<string, ImageBytes>;
   /** Called as the model works on the message, by a model that can say. */
   readonly onProgress?: (progress: ModelProgress) => void;
 }
