@@ -12,22 +12,19 @@ struct PostImagesTests {
         let shelf = FakeImages(["a": wide])
         let images = PostImages(directory: FakeAgentDirectory(images: shelf))
 
-        async let first = images.image("a", longestEdge: 780)
-        async let second = images.image("a", longestEdge: 780)
-        _ = try await (first, second)
-        let large = try await images.image("a", longestEdge: 4096)
+        async let first = images.phase(of: "a", longestEdge: 780)
+        async let second = images.phase(of: "a", longestEdge: 780)
+        _ = await (first, second)
+        let large = try #require(await images.phase(of: "a", longestEdge: 4096).image)
 
         #expect(shelf.reads == ["a"])
         #expect(large.width == 1568)
     }
 
-    @Test func showsAnImageUprightNoLargerThanAskedInItsOwnShape() async throws {
+    @Test func showsAnImageNoLargerThanAskedInItsOwnShape() async throws {
         let images = PostImages(directory: FakeAgentDirectory(images: FakeImages(["a": wide])))
 
-        guard case .shown(let image) = await images.phase(of: "a", longestEdge: 780) else {
-            Issue.record("The image isn't shown")
-            return
-        }
+        let image = try #require(await images.phase(of: "a", longestEdge: 780).image)
 
         #expect(image.width == 780)
         #expect(image.height == 519)
@@ -37,7 +34,7 @@ struct PostImagesTests {
         let images = PostImages(
             directory: FakeAgentDirectory(images: FakeImages(["a": Samples.turnedPhoto(width: 300, height: 200)])))
 
-        let image = try await images.image("a", longestEdge: 780)
+        let image = try #require(await images.phase(of: "a", longestEdge: 780).image)
 
         #expect(image.width == 200)
         #expect(image.height == 300)
@@ -57,32 +54,28 @@ struct PostImagesTests {
 
         #expect(await images.phase(of: "a", longestEdge: 780).hasFailed)
         shelf.fail(with: nil)
-        #expect(await !images.phase(of: "a", longestEdge: 780).hasFailed)
+        #expect(await images.phase(of: "a", longestEdge: 780).image != nil)
 
         #expect(shelf.reads == ["a", "a"])
     }
 
-    @Test func pastTheBytesItKeepsLetsGoTheImageAskedForLongestAgo() async throws {
-        let bytes = Data(repeating: 1, count: 10)
-        let shelf = FakeImages(["a": bytes, "b": bytes, "c": bytes])
-        let images = PostImages(directory: FakeAgentDirectory(images: shelf), keptBytes: 20)
+    @Test func pastTheBytesItKeepsLetsGoTheImageAskedForLongestAgo() async {
+        let shelf = FakeImages(["a": wide, "b": wide, "c": wide])
+        let images = PostImages(directory: FakeAgentDirectory(images: shelf), keptBytes: 2 * wide.count)
 
-        _ = try await images.data(of: "a")
-        _ = try await images.data(of: "b")
-        _ = try await images.data(of: "a")
-        _ = try await images.data(of: "c")
-        _ = try await images.data(of: "a")
-        _ = try await images.data(of: "b")
+        for id in ["a", "b", "a", "c", "a", "b"] {
+            _ = await images.phase(of: id, longestEdge: 780)
+        }
 
         #expect(shelf.reads == ["a", "b", "c", "b"])
     }
 
-    @Test func keepsTheImageJustReadEvenWhenItAloneIsPastTheBytesItKeeps() async throws {
-        let shelf = FakeImages(["a": Data(repeating: 1, count: 30)])
-        let images = PostImages(directory: FakeAgentDirectory(images: shelf), keptBytes: 20)
+    @Test func keepsTheImageJustReadEvenWhenItAloneIsPastTheBytesItKeeps() async {
+        let shelf = FakeImages(["a": wide])
+        let images = PostImages(directory: FakeAgentDirectory(images: shelf), keptBytes: 1)
 
-        _ = try await images.data(of: "a")
-        _ = try await images.data(of: "a")
+        _ = await images.phase(of: "a", longestEdge: 780)
+        _ = await images.phase(of: "a", longestEdge: 780)
 
         #expect(shelf.reads == ["a"])
     }
@@ -91,5 +84,9 @@ struct PostImagesTests {
 extension PostImagePhase {
     var hasFailed: Bool {
         if case .failed = self { true } else { false }
+    }
+
+    var image: CGImage? {
+        if case .shown(let image) = self { image } else { nil }
     }
 }

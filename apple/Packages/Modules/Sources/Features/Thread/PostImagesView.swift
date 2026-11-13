@@ -13,7 +13,8 @@ struct PostImagesView: View {
     /// The side of each square when there are several.
     static let squareSide: CGFloat = 120
     static let spacing: CGFloat = 4
-    /// The pixels images are read at here: a lone image's `largestSide` at 3x, which also covers a square's cut.
+    /// The pixels images are read at here: a lone image's `largestSide` at 3x, which also covers a square cut from an
+    /// image up to about twice as long as it is wide.
     static let readEdge = 780
 
     var body: some View {
@@ -78,25 +79,6 @@ private struct PostImageButton<Content: View>: View {
     }
 }
 
-/// One of a post's images, read upright at `longestEdge` pixels while it is shown, and drawn by `content` as it
-/// stands.
-struct PostImageReader<Content: View>: View {
-    let id: Attachment.ID
-    let longestEdge: Int
-    let images: PostImages
-    @ViewBuilder let content: (PostImagePhase) -> Content
-
-    @State private var phase = PostImagePhase.reading
-
-    var body: some View {
-        content(phase)
-            .task(id: id) {
-                let next = await images.phase(of: id, longestEdge: longestEdge)
-                if !Task.isCancelled { phase = next }
-            }
-    }
-}
-
 /// A lone image, its whole shape shown, or a square placeholder while it is read or once it failed.
 private struct LoneImage: View {
     let phase: PostImagePhase
@@ -104,14 +86,25 @@ private struct LoneImage: View {
     var body: some View {
         switch phase {
         case .shown(let image):
+            let size = Self.size(of: image)
             Image(decorative: image, scale: 1)
                 .resizable()
-                .scaledToFit()
-                .frame(maxWidth: PostImagesView.largestSide, maxHeight: PostImagesView.largestSide)
+                .frame(width: size.width, height: size.height)
         case .reading, .failed:
             ImagePlaceholder(phase: phase)
                 .frame(width: PostImagesView.largestSide * 0.7, height: PostImagesView.largestSide * 0.7)
         }
+    }
+
+    /// The image's shape with its longer side `largestSide` points. A frame that only caps the size would leave a
+    /// tall image in a square as wide as `largestSide`, off the post's right edge.
+    static func size(of image: CGImage) -> CGSize {
+        let side = PostImagesView.largestSide
+        let width = CGFloat(image.width)
+        let height = CGFloat(image.height)
+        return width >= height
+            ? CGSize(width: side, height: side * height / width)
+            : CGSize(width: side * width / height, height: side)
     }
 }
 

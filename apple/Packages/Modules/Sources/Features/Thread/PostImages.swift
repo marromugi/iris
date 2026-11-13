@@ -25,19 +25,15 @@ final class PostImages {
         self.keptBytes = keptBytes
     }
 
-    /// The image upright and no longer than `longestEdge` pixels on either side. One that is gone is `.refused`; bytes
-    /// that aren't an image are `.unexpected`.
-    func image(_ id: Attachment.ID, longestEdge: Int) async throws(AppError) -> CGImage {
+    private func image(_ id: Attachment.ID, longestEdge: Int) async throws(AppError) -> CGImage {
         try await Self.decoded(try await data(of: id), longestEdge: longestEdge)
     }
 
     /// How the image stands once it is read upright at `longestEdge` pixels: shown, or failed when it is gone or can't
-    /// be read. A read cancelled meanwhile stays `.reading`.
+    /// be read.
     func phase(of id: Attachment.ID, longestEdge: Int) async -> PostImagePhase {
         do throws(AppError) {
             return .shown(try await image(id, longestEdge: longestEdge))
-        } catch .cancelled {
-            return .reading
         } catch {
             log.error("An image a post carries could not be shown: \(String(describing: error), privacy: .public)")
             return .failed
@@ -45,7 +41,7 @@ final class PostImages {
     }
 
     /// The image's bytes, read through the server unless they are kept.
-    func data(of id: Attachment.ID) async throws(AppError) -> Data {
+    private func data(of id: Attachment.ID) async throws(AppError) -> Data {
         if let index = kept.firstIndex(where: { $0.id == id }) {
             let image = kept.remove(at: index)
             kept.append(image)

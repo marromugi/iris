@@ -206,7 +206,7 @@ extension IrisBackend {
         }
     }
 
-    /// Puts up a JPEG image to send with a post, and gives back its ID. The server takes at most 5 MB, and refuses
+    /// Puts up a JPEG image to send with a post, and gives back its ID. The server takes at most `Attachment.largestBytes`, and refuses
     /// images while the model can't read them. A post must take it within a day, or the server removes it.
     public func putUp(jpeg: Data) async throws(AppError) -> Attachment {
         switch try await call({ try await client.putUpAttachment(body: .jpeg(HTTPBody(jpeg))) }) {

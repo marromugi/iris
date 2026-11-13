@@ -19,7 +19,7 @@ struct PostImageViewer: View {
     @State private var current: Attachment.ID
     @Environment(\.dismiss) private var dismiss
 
-    /// The pixels an opened image is read at: larger than any image the server takes is likely to be.
+    /// The pixels an opened image is read at: more than any screen shows, and more than the 1568 the app sends.
     static let readEdge = 4096
 
     init(opened: OpenedImages, images: PostImages) {
@@ -41,12 +41,16 @@ struct PostImageViewer: View {
         .background(.black)
         .environment(\.colorScheme, .dark)
         .overlay(alignment: .topTrailing) {
-            Button("閉じる", systemImage: "xmark") { dismiss() }
-                .labelStyle(.iconOnly)
-                .font(.title3.weight(.semibold))
-                .padding(12)
-                .background(.thinMaterial, in: .circle)
-                .padding()
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.title3.weight(.semibold))
+                    .padding(12)
+                    .background(.thinMaterial, in: .circle)
+            }
+            .accessibilityLabel("閉じる")
+            .padding()
         }
     }
 }

@@ -12,7 +12,7 @@ struct ThreadScreen: View {
     /// The user's agents by ID, for showing whose run each is.
     let agents: [Agent.ID: Agent]
     let directory: any AgentDirectory
-    /// The images the user's posts carry, read once each.
+    /// The images the user's posts carry, kept once read.
     let images: PostImages
     @State private var open: OpenThread
     /// The one-to-one thread's agent being active; nil for a group or a consult.
