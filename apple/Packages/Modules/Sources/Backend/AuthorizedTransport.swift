@@ -6,8 +6,8 @@ import OpenAPIRuntime
 /// Carries the generated client's requests with the user's access token. When the server refuses the token, it
 /// refreshes once and tries again; when it refuses that one too, or says the token names no user, the sign-in ends.
 struct AuthorizedTransport: ClientTransport {
-    // The largest request body the app sends: an image put up for a post, which the server takes up to 5 MB.
-    private static let maxRequestBodyBytes = 5 * 1024 * 1024
+    // The largest request body the app sends: an image put up for a post.
+    private static let maxRequestBodyBytes = Attachment.largestBytes
 
     let vault: SignInVault
     let send: Send

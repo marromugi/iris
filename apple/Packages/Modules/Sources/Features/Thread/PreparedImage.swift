@@ -25,7 +25,7 @@ nonisolated struct PreparedImage: Sendable {
     @concurrent
     static func make(from data: Data) async throws(AppError) -> PreparedImage {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-            let image = scaled(source, longestEdge: longestEdge)
+            let image = source.uprightImage(longestEdge: longestEdge)
         else {
             log.error("A picked image could not be read")
             throw .unexpected
@@ -38,22 +38,11 @@ nonisolated struct PreparedImage: Sendable {
             destination, image, [kCGImageDestinationLossyCompressionQuality: jpegQuality] as CFDictionary)
         guard CGImageDestinationFinalize(destination),
             let written = CGImageSourceCreateWithData(jpeg, nil),
-            let thumbnail = scaled(written, longestEdge: thumbnailEdge)
+            let thumbnail = written.uprightImage(longestEdge: thumbnailEdge)
         else {
             log.error("A picked image could not be written as JPEG")
             throw .unexpected
         }
         return PreparedImage(jpeg: jpeg as Data, thumbnail: thumbnail)
-    }
-
-    /// The source's first image turned upright, no longer than `longestEdge` on either side. ImageIO never makes an
-    /// image larger here.
-    private static func scaled(_ source: CGImageSource, longestEdge: Int) -> CGImage? {
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: longestEdge,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
