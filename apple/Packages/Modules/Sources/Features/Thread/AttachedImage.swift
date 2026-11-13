@@ -62,6 +62,8 @@ final class AttachedImage: Identifiable {
     private func run() async {
         do throws(AppError) {
             let jpeg = try await jpegReady()
+            // Making the JPEG doesn't stop for a cancel, so one taken off meanwhile is caught here.
+            if Task.isCancelled { return }
             state = .uploading
             let id = try await backend.putUp(jpeg: jpeg)
             state = .uploaded(id)

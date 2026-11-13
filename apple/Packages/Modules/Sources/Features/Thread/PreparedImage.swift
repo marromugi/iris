@@ -46,16 +46,13 @@ nonisolated struct PreparedImage: Sendable {
         return PreparedImage(jpeg: jpeg as Data, thumbnail: thumbnail)
     }
 
-    /// The source's first image turned upright, no longer than `longestEdge` on either side; never made larger.
+    /// The source's first image turned upright, no longer than `longestEdge` on either side. ImageIO never makes an
+    /// image larger here.
     private static func scaled(_ source: CGImageSource, longestEdge: Int) -> CGImage? {
-        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-            let width = properties[kCGImagePropertyPixelWidth] as? Int,
-            let height = properties[kCGImagePropertyPixelHeight] as? Int
-        else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: min(longestEdge, max(width, height)),
+            kCGImageSourceThumbnailMaxPixelSize: longestEdge,
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }

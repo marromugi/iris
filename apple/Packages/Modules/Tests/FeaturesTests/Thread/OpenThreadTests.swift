@@ -350,6 +350,34 @@ struct OpenThreadTests {
         await following.value
     }
 
+    @Test func takesNoImagesUntilTheServerSaysPostsMayCarryThemAndKeepsTheAnswerWhenAskingAgainFails() async {
+        let backend = FakeThreadBackend(.init(failure: .offline))
+        let thread = OpenThread(backend: backend)
+        await thread.checkImageAttaching()
+        #expect(!thread.canAttachImages)
+
+        backend.answer { $0.failure = nil }
+        await thread.checkImageAttaching()
+        backend.answer { $0.failure = .offline }
+        await thread.checkImageAttaching()
+
+        #expect(thread.canAttachImages)
+    }
+
+    @Test func anImageTakenOffBeforeItIsPutUpIsNeverPutUp() async {
+        let backend = FakeThreadBackend()
+        let thread = await threadTakingImages(backend)
+        let gate = FakePickedImage.Gate()
+
+        let attaching = thread.attach([FakePickedImage(gate: gate)])
+        thread.remove(thread.images[0])
+        await gate.open()
+        await attaching.value
+
+        #expect(thread.images.isEmpty)
+        #expect(backend.uploaded.isEmpty)
+    }
+
     /// A thread that is read and may carry images, with `backend` behind it.
     func threadTakingImages(_ backend: FakeThreadBackend = FakeThreadBackend()) async -> OpenThread {
         let thread = OpenThread(backend: backend)
