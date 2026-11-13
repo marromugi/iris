@@ -10,6 +10,8 @@ export {
 export {
   type AssistantMessage,
   assistantMessageSchema,
+  type ImagePart,
+  imagePartSchema,
   type JsonArray,
   type JsonObject,
   type JsonValue,
@@ -25,8 +27,9 @@ export {
   toolCalls,
   type ToolResultMessage,
   toolResultMessageSchema,
+  UNREAD_IMAGE_TEXT,
   type UserMessage,
   userMessageSchema,
 } from "./message";
-export type { Model, ModelProgress, ModelRequest, ToolSpec } from "./model";
+export type { ImageBytes, Model, ModelProgress, ModelRequest, ToolSpec } from "./model";
 export { defineTool, type Tool, type ToolCall, type ToolOutcome } from "./tool";

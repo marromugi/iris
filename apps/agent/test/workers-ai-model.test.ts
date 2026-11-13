@@ -1,4 +1,4 @@
-import type { ModelProgress } from "@iris/agent";
+import { type ModelProgress, UNREAD_IMAGE_TEXT } from "@iris/agent";
 import { expect, test } from "vitest";
 import { type ChatCompletionStream, createWorkersAiModel } from "../src/workers-ai-model";
 
@@ -235,4 +235,25 @@ test("rejects an empty reply, but keeps a refusal as the assistant's text", asyn
     role: "assistant",
     parts: [{ type: "text", text: "I can't help with that." }],
   });
+});
+
+test("gives a user message's images as text, since the model doesn't read them", async () => {
+  const { complete, inputs } = completionStreaming([{ content: "OK" }]);
+
+  await createWorkersAiModel(complete)({
+    system: undefined,
+    messages: [
+      { role: "user", text: "", images: [{ type: "image", id: "a" }] },
+      { role: "assistant", parts: [{ type: "text", text: "I can't see it." }] },
+      { role: "user", text: "This one?", images: [{ type: "image", id: "b" }] },
+    ],
+    tools: [],
+    images: new Map([["a", { mediaType: "image/png", bytes: new Uint8Array([1]) }]]),
+  });
+
+  expect(inputs[0]?.messages).toEqual([
+    { role: "user", content: UNREAD_IMAGE_TEXT },
+    { role: "assistant", content: "I can't see it." },
+    { role: "user", content: `${UNREAD_IMAGE_TEXT}\nThis one?` },
+  ]);
 });

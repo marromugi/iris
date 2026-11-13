@@ -1,6 +1,7 @@
 import {
   type Agent,
   DEFAULT_MAX_STEPS,
+  type ImageBytes,
   type Message,
   type ModelProgress,
   run,
@@ -24,6 +25,17 @@ export const MAX_FAILED_ATTEMPTS = 3;
 
 /** How many messages of what came before in the thread the model reads at most, before the run's own. */
 export const MAX_EARLIER_MESSAGES = 40;
+
+/**
+ * How many images, and how many of their bytes, one model request carries at most, within what
+ * the Anthropic API takes in one request (32MB, base64 adding a third) and what a Durable Object
+ * holds in memory. One post's images always fit.
+ */
+export const MAX_IMAGES_PER_REQUEST = 20;
+export const MAX_IMAGE_BYTES_PER_REQUEST = 20 * 1024 * 1024;
+
+/** Reads an image's bytes by its ID; undefined when they aren't kept. */
+export type ReadAttachment = (attachmentId: string) => Promise<Uint8Array | undefined>;
 
 /** How a run is getting on while it is carried on: picked up, then the model's progress on each message. */
 export type RunProgress = { readonly type: "starting" } | ModelProgress;
@@ -127,6 +139,8 @@ export class Waker {
  *
  * Once `WAKE_UP_BUDGET_MS` has passed since it began, nothing new starts, and each run going on
  * stops after its current message and is due again at once, so the next wake-up carries it on.
+ *
+ * The images in what each run's model reads have their bytes read by `readAttachment`.
  */
 export async function runDue(
   storage: DurableObjectStorage,
@@ -136,6 +150,7 @@ export async function runDue(
   waker: Waker = new Waker(),
   toolsFor: (run: RunOf) => RunTools = () => ({ tools: [] }),
   alongside: Promise<void> = Promise.resolve(),
+  readAttachment: ReadAttachment = async () => undefined,
 ): Promise<Date | undefined> {
   let alongsideDone = false;
   // Its failure is the caller's to hear; here it only ends the wait.
@@ -185,15 +200,17 @@ export async function runDue(
         };
         going.set(
           runId,
-          carryOn(storage, withTools, runId, now, watcher, outOfTime).finally(async () => {
-            try {
-              await own.release?.();
-            } catch (error) {
-              console.error(`Letting go of run ${runId}'s tools failed.`, error);
-            }
-            going.delete(runId);
-            waiting.delete(runId);
-          }),
+          carryOn(storage, withTools, runId, now, watcher, outOfTime, readAttachment).finally(
+            async () => {
+              try {
+                await own.release?.();
+              } catch (error) {
+                console.error(`Letting go of run ${runId}'s tools failed.`, error);
+              }
+              going.delete(runId);
+              waiting.delete(runId);
+            },
+          ),
         );
       }
     }
@@ -287,6 +304,42 @@ export interface RunAgent extends Agent {
   readonly modelName: string;
 }
 
+/**
+ * The bytes of the images the run's model reads: those in the run's own messages first, then those
+ * in `earlier` (oldest first), the latest first, as many as fit in `MAX_IMAGES_PER_REQUEST` and
+ * `MAX_IMAGE_BYTES_PER_REQUEST`. An image left out, or whose bytes aren't kept, has no entry.
+ */
+export async function readImages(
+  storage: DurableObjectStorage,
+  own: readonly Message[],
+  earlier: readonly Message[],
+  readAttachment: ReadAttachment,
+): Promise<Map<string, ImageBytes>> {
+  const chosen: store.Attachment[] = [];
+  let size = 0;
+  for (const message of [...own, ...earlier.toReversed()]) {
+    for (const { id } of message.role === "user" ? (message.images ?? []) : []) {
+      const attachment = store.findAttachment(storage, id);
+      if (
+        attachment === undefined ||
+        chosen.length >= MAX_IMAGES_PER_REQUEST ||
+        size + attachment.size > MAX_IMAGE_BYTES_PER_REQUEST
+      ) {
+        continue;
+      }
+      chosen.push(attachment);
+      size += attachment.size;
+    }
+  }
+  const read = await Promise.all(
+    chosen.map(async ({ id, mediaType }) => {
+      const bytes = await readAttachment(id);
+      return bytes === undefined ? [] : [[id, { mediaType, bytes }] as const];
+    }),
+  );
+  return new Map(read.flat());
+}
+
 /** A run with no steps left: it ends where it is. */
 async function* noSteps(): AsyncGenerator<Message, void, undefined> {}
 
@@ -302,6 +355,7 @@ async function carryOn(
   now: () => Date,
   watcher: RunWatcher,
   outOfTime: () => boolean,
+  readAttachment: ReadAttachment,
 ): Promise<void> {
   store.postponeRun(storage, runId, new Date(now().getTime() + RETRY_DELAY_MS));
   watcher.progress(runId, { type: "starting" });
@@ -311,6 +365,9 @@ async function carryOn(
       MAX_EARLIER_MESSAGES,
     );
     const conversation = store.loadConversation(storage, runId);
+    // Read once for the run's model calls of this wake-up; the stored messages keep only references.
+    const images = await readImages(storage, conversation, earlier, readAttachment);
+    const withImages: Agent = { ...agent, model: (request) => agent.model({ ...request, images }) };
     let seq = conversation.length;
     // Steps count across attempts and wake-ups: the run's own messages after its first are the
     // steps it has taken.
@@ -323,7 +380,7 @@ async function carryOn(
     };
     const steps =
       stepsLeft > 0
-        ? run(agent, [...earlier, ...conversation], { onProgress, maxSteps: stepsLeft })
+        ? run(withImages, [...earlier, ...conversation], { onProgress, maxSteps: stepsLeft })
         : noSteps();
     for await (const message of steps) {
       if (store.hasRunEnded(storage, runId)) {

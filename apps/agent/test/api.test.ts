@@ -479,7 +479,10 @@ test("puts up an image, sends it with a post, and gives its bytes back", async (
   expect(putResponse.status).toBe(201);
   expect(await putResponse.json()).toEqual(kept);
   expect(sent.status).toBe(202);
-  expect(await sent.json()).toMatchObject({ post: { text: "", attachments: [kept] } });
+  const sentJson: { post: unknown; runs: { messages: unknown[] }[] } = await sent.json();
+  expect(sentJson.post).toMatchObject({ text: "", attachments: [kept] });
+  // The run's first message leaves its images to the post.
+  expect(sentJson.runs.map((run) => run.messages)).toEqual([[{ role: "user", text: "" }]]);
   expect(again.status).toBe(400);
   expect(await again.json()).toEqual({ message: "An image isn't there, or was already sent." });
   expect(bytes.status).toBe(200);

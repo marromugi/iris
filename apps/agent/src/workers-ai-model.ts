@@ -6,6 +6,7 @@ import {
   type Model,
   type ModelProgress,
   type ToolSpec,
+  UNREAD_IMAGE_TEXT,
 } from "@iris/agent";
 import { z } from "zod";
 
@@ -202,7 +203,12 @@ class Reply {
 
 function toChatMessage(message: Message): ChatCompletionMessageParam {
   if (message.role === "user") {
-    return { role: "user", content: message.text };
+    // This model doesn't read images; each is given as text, in the order they were sent.
+    const images = (message.images ?? []).map(() => UNREAD_IMAGE_TEXT);
+    return {
+      role: "user",
+      content: [...images, message.text].filter((text) => text !== "").join("\n"),
+    };
   }
   if (message.role === "tool") {
     return {

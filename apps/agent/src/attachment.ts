@@ -16,6 +16,16 @@ export function attachmentKey(userId: string, attachmentId: string): string {
   return `${userId}/${attachmentId}`;
 }
 
+/** The bytes of the user's image, or undefined when they aren't kept. */
+export async function readAttachment(
+  bucket: R2Bucket,
+  userId: string,
+  attachmentId: string,
+): Promise<Uint8Array | undefined> {
+  const object = await bucket.get(attachmentKey(userId, attachmentId));
+  return object === null ? undefined : new Uint8Array(await object.arrayBuffer());
+}
+
 /** Whether `value` names one of the image types a post can carry. */
 export function isAttachmentMediaType(value: string | undefined): value is AttachmentMediaType {
   return ATTACHMENT_MEDIA_TYPES.some((type) => type === value);

@@ -41,9 +41,23 @@ export const reasoningPartSchema = z.object({
   data: jsonValueSchema,
 });
 
+/**
+ * An image the user sent, by the ID it is kept under. The message holds only this reference; the
+ * image's bytes go to the model with the request (`ModelRequest.images`).
+ */
+export const imagePartSchema = z.object({
+  type: z.literal("image"),
+  id: z.string().min(1),
+});
+
+/** What a model is given in place of an image it can't have: its bytes are gone, or it doesn't read images. */
+export const UNREAD_IMAGE_TEXT = "[An image was sent here, but it couldn't be read.]";
+
+/** The text may be empty when the message has images, which come in the order they were sent. */
 export const userMessageSchema = z.object({
   role: z.literal("user"),
   text: z.string(),
+  images: z.array(imagePartSchema).optional(),
 });
 
 /** The parts keep the order the model wrote them in, which its service may need when they go back. */
@@ -77,6 +91,7 @@ export const messageSchema = z.discriminatedUnion("role", [
 ]);
 
 export type TextPart = z.infer<typeof textPartSchema>;
+export type ImagePart = z.infer<typeof imagePartSchema>;
 export type ToolCallPart = z.infer<typeof toolCallPartSchema>;
 export type ReasoningPart = z.infer<typeof reasoningPartSchema>;
 export type UserMessage = z.infer<typeof userMessageSchema>;

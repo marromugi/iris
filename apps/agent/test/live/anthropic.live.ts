@@ -216,3 +216,39 @@ test("when a run's system prompt changes between wake-ups, the real API leaves o
     expect.objectContaining({ type: "thinking_dropped", reason: "prefix_binding_mismatch" }),
   );
 });
+
+/** 32×32 PNGs of one color each. */
+const RED_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mO4IyJCU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAJ3LED19/LmKAAAAAElFTkSuQmCC";
+const BLUE_PNG =
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKklEQVR42mMQ0bhDU8QwasGoBaMWjFowasGoBaMWjFowasGoBaMWDBULAHncYD2v4JFYAAAAAElFTkSuQmCC";
+
+const bytes = (base64: string) => Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+
+test("the real model reads a post's images in order, with no text, and hears of one it couldn't be given", async () => {
+  const reply = await model({
+    system:
+      "For each image the user sent, in order, say its color in one English word, or 'unreadable' for one that couldn't be read. Write only the words, separated by commas.",
+    messages: [
+      {
+        role: "user",
+        text: "",
+        images: [
+          { type: "image", id: "red" },
+          { type: "image", id: "gone" },
+          { type: "image", id: "blue" },
+        ],
+      },
+    ],
+    tools: [],
+    images: new Map([
+      ["red", { mediaType: "image/png", bytes: bytes(RED_PNG) }],
+      ["blue", { mediaType: "image/png", bytes: bytes(BLUE_PNG) }],
+    ]),
+  });
+
+  const text = reply.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+  console.log(JSON.stringify(exchanges.at(-1)?.request, null, 2).slice(0, 2000));
+  console.log("Reply:", text);
+  expect(text.toLowerCase()).toMatch(/red.*unreadable.*blue/s);
+});

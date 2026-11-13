@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import type Anthropic from "@anthropic-ai/sdk";
 import type {
   BetaContentBlockParam,
@@ -8,14 +9,18 @@ import type {
 } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import {
   type AssistantMessage,
+  type ImageBytes,
   type JsonObject,
   type JsonValue,
   jsonValueSchema,
   type Message,
   type Model,
   type ToolSpec,
+  UNREAD_IMAGE_TEXT,
+  type UserMessage,
 } from "@iris/agent";
 import { z } from "zod";
+import { isAttachmentMediaType } from "./attachment";
 
 /** The Claude model every user's agent thinks with when the provider is Anthropic. */
 export const ANTHROPIC_MODEL = "claude-haiku-5-5";
@@ -53,7 +58,7 @@ export function createAnthropicModel(client: Anthropic): Model {
       // Caches the conversation so far; each step of a run sends it again with one more message.
       cache_control: { type: "ephemeral" },
       ...(request.system === undefined ? {} : { system: request.system }),
-      messages: toAnthropicMessages(request.messages),
+      messages: toAnthropicMessages(request.messages, request.images ?? new Map()),
       ...(tools.length > 0 ? { tools } : {}),
     });
     let written = "";
@@ -135,7 +140,10 @@ function toAssistantMessage(reply: BetaMessage): AssistantMessage {
 }
 
 /** The conversation as Claude takes it: a tool call's results go back together in one user message. */
-function toAnthropicMessages(messages: readonly Message[]): BetaMessageParam[] {
+function toAnthropicMessages(
+  messages: readonly Message[],
+  images: ReadonlyMap<string, ImageBytes>,
+): BetaMessageParam[] {
   const converted: BetaMessageParam[] = [];
   let results: BetaToolResultBlockParam[] | undefined;
   for (const message of messages) {
@@ -154,7 +162,7 @@ function toAnthropicMessages(messages: readonly Message[]): BetaMessageParam[] {
     }
     results = undefined;
     if (message.role === "user") {
-      converted.push({ role: "user", content: message.text });
+      converted.push({ role: "user", content: userContent(message, images) });
       continue;
     }
     // A reply with nothing Claude takes, such as another service's blank text, is left out: the API
@@ -165,6 +173,33 @@ function toAnthropicMessages(messages: readonly Message[]): BetaMessageParam[] {
     }
   }
   return converted;
+}
+
+/**
+ * A user message's images, in the order they were sent, then its text, which is left out when
+ * blank since the API refuses an empty text block.
+ */
+function userContent(
+  message: UserMessage,
+  images: ReadonlyMap<string, ImageBytes>,
+): string | BetaContentBlockParam[] {
+  if (message.images === undefined || message.images.length === 0) {
+    return message.text;
+  }
+  const blocks: BetaContentBlockParam[] = message.images.map(({ id }) => {
+    const image = images.get(id);
+    return image === undefined || !isAttachmentMediaType(image.mediaType)
+      ? { type: "text", text: UNREAD_IMAGE_TEXT }
+      : {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: image.mediaType,
+            data: Buffer.from(image.bytes).toString("base64"),
+          },
+        };
+  });
+  return isBlank(message.text) ? blocks : [...blocks, { type: "text", text: message.text }];
 }
 
 function toAnthropicBlock(part: AssistantMessage["parts"][number]): BetaContentBlockParam[] {

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { ModelProgress, ModelRequest } from "@iris/agent";
+import { type ModelProgress, type ModelRequest, UNREAD_IMAGE_TEXT } from "@iris/agent";
 import { expect, test } from "vitest";
 import { createAnthropicModel } from "../src/anthropic-model";
 
@@ -255,4 +255,62 @@ test("rejects a reply Claude declined, one cut off, and one with no text or tool
   await expect(createAnthropicModel(onlyThinking.client)(ask("Hi"))).rejects.toThrow(
     "Claude (claude-haiku-5-5) returned an empty message (stop reason: end_turn).",
   );
+});
+
+/** An image block as the API takes it. */
+const imageBlock = (mediaType: string, bytes: Uint8Array) => ({
+  type: "image",
+  source: { type: "base64", media_type: mediaType, data: btoa(String.fromCharCode(...bytes)) },
+});
+
+test("sends a user message's images in order before its text, leaving out blank text, and says so of an image it wasn't given", async () => {
+  const { client, requests } = claudeStreaming([{ type: "text", text: ["OK"] }]);
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+  const jpeg = new Uint8Array([0xff, 0xd8, 0xff]);
+
+  await createAnthropicModel(client)({
+    system: undefined,
+    messages: [
+      {
+        role: "user",
+        text: "Which is older?",
+        images: [
+          { type: "image", id: "b" },
+          { type: "image", id: "a" },
+        ],
+      },
+      { role: "assistant", parts: [{ type: "text", text: "The second." }] },
+      {
+        role: "user",
+        text: " ",
+        images: [
+          { type: "image", id: "gone" },
+          { type: "image", id: "a" },
+        ],
+      },
+    ],
+    tools: [],
+    images: new Map([
+      ["a", { mediaType: "image/png", bytes: png }],
+      ["b", { mediaType: "image/jpeg", bytes: jpeg }],
+    ]),
+  });
+
+  expect(requests[0]?.body).toMatchObject({
+    messages: [
+      {
+        role: "user",
+        content: [
+          imageBlock("image/jpeg", jpeg),
+          imageBlock("image/png", png),
+          { type: "text", text: "Which is older?" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "The second." }] },
+      {
+        role: "user",
+        content: [{ type: "text", text: UNREAD_IMAGE_TEXT }, imageBlock("image/png", png)],
+      },
+    ],
+  });
 });

@@ -151,10 +151,11 @@ const [textPart, toolCallPart]: readonly [
 ] = assistantMessageSchema.shape.parts.element.options;
 
 // A message as @iris/agent defines it, except that a tool call's input is written as any value:
-// the OpenAPI generator can't describe the JSON-value check the agent runs on it.
+// the OpenAPI generator can't describe the JSON-value check the agent runs on it. A user message
+// leaves out its images, which the post it came from carries (`Post.attachments`).
 const messageSchema = z
   .discriminatedUnion("role", [
-    userMessageSchema,
+    userMessageSchema.omit({ images: true }),
     assistantMessageSchema.extend({
       parts: z.array(
         z.discriminatedUnion("type", [
@@ -215,6 +216,9 @@ export function runJson(run: Run): z.infer<typeof runSchema> {
 }
 
 function messageJson(message: Message): z.infer<typeof messageSchema> {
+  if (message.role === "user") {
+    return { role: "user", text: message.text };
+  }
   return message.role === "assistant"
     ? { ...message, parts: message.parts.filter((part) => part.type !== "reasoning") }
     : message;
