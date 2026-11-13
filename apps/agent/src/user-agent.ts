@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { type NewAgent, newAgentSchema, randomLook } from "./agent";
 import { readAttachment } from "./attachment";
+import { canAttachImages } from "./model-provider";
 import { type NewGroup, newGroupSchema } from "./group";
 import type { NewMail } from "./mail/mail";
 import { keptSince } from "./mail/mail-tools";
@@ -419,7 +420,10 @@ export function createUserAgent(
           this.waker,
           (run) => toolsFor(this.env, run, this.ctx.storage),
           summarizing,
-          (attachmentId) => readAttachment(this.env.ATTACHMENTS, this.userId(), attachmentId),
+          // A model that doesn't read images gets none of their bytes.
+          canAttachImages(this.env)
+            ? (attachmentId) => readAttachment(this.env.ATTACHMENTS, this.userId(), attachmentId)
+            : undefined,
         );
         await summarizing;
         await this.wakeAt(wakeAt);

@@ -225,10 +225,10 @@ const BLUE_PNG =
 
 const bytes = (base64: string) => Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
 
-test("the real model reads a post's images in order, with no text, and hears of one it couldn't be given", async () => {
+test("the real model reads a post's images in order, with no text, and hears of one it wasn't given", async () => {
   const reply = await model({
     system:
-      "For each image the user sent, in order, say its color in one English word, or 'unreadable' for one that couldn't be read. Write only the words, separated by commas.",
+      "For each image the user sent, in order, say its color in one English word, or 'missing' for one you weren't given. Write only the words, separated by commas.",
     messages: [
       {
         role: "user",
@@ -250,5 +250,5 @@ test("the real model reads a post's images in order, with no text, and hears of 
   const text = reply.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
   console.log(JSON.stringify(exchanges.at(-1)?.request, null, 2).slice(0, 2000));
   console.log("Reply:", text);
-  expect(text.toLowerCase()).toMatch(/red.*unreadable.*blue/s);
+  expect(text.toLowerCase()).toMatch(/red.*missing.*blue/s);
 });

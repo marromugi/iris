@@ -207,7 +207,7 @@ function toChatMessage(message: Message): ChatCompletionMessageParam {
     const images = (message.images ?? []).map(() => UNREAD_IMAGE_TEXT);
     return {
       role: "user",
-      content: [...images, message.text].filter((text) => text !== "").join("\n"),
+      content: [...images, message.text].filter((text) => text.trim() !== "").join("\n"),
     };
   }
   if (message.role === "tool") {

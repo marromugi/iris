@@ -7,8 +7,10 @@ import {
   run,
   type Tool,
 } from "@iris/agent";
+import { MAX_ATTACHMENT_BYTES } from "./attachment";
 import { type ConsultContext, consultTool, RunCut } from "./consult";
 import { nextSummaryDueAt, runsWaitingForSummaries } from "./daily-summary";
+import { MAX_ATTACHMENTS_PER_POST } from "./message";
 import { dayOfRun } from "./run-day";
 import { nextRunAt } from "./schedule";
 import * as store from "./store";
@@ -32,7 +34,7 @@ export const MAX_EARLIER_MESSAGES = 40;
  * holds in memory. One post's images always fit.
  */
 export const MAX_IMAGES_PER_REQUEST = 20;
-export const MAX_IMAGE_BYTES_PER_REQUEST = 20 * 1024 * 1024;
+export const MAX_IMAGE_BYTES_PER_REQUEST = MAX_ATTACHMENTS_PER_POST * MAX_ATTACHMENT_BYTES;
 
 /** Reads an image's bytes by its ID; undefined when they aren't kept. */
 export type ReadAttachment = (attachmentId: string) => Promise<Uint8Array | undefined>;
@@ -140,7 +142,8 @@ export class Waker {
  * Once `WAKE_UP_BUDGET_MS` has passed since it began, nothing new starts, and each run going on
  * stops after its current message and is due again at once, so the next wake-up carries it on.
  *
- * The images in what each run's model reads have their bytes read by `readAttachment`.
+ * The images in what each run's model reads have their bytes read by `readAttachment`; without
+ * it, none are read.
  */
 export async function runDue(
   storage: DurableObjectStorage,

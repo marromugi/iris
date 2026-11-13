@@ -2,7 +2,8 @@ import type { AssistantMessage, Message } from "@iris/agent";
 import { reset, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, test } from "vitest";
-import { attachmentKey } from "../src/attachment";
+import { attachmentKey, MAX_ATTACHMENT_BYTES } from "../src/attachment";
+import { MAX_ATTACHMENTS_PER_POST } from "../src/message";
 import { MAX_IMAGE_BYTES_PER_REQUEST, MAX_IMAGES_PER_REQUEST, readImages } from "../src/runner";
 import * as store from "../src/store";
 import { modelRequests, scriptedModel } from "./worker";
@@ -116,9 +117,12 @@ test("a request carries the run's own images first, then earlier ones the latest
   const older = sized(7 * MB);
   const latest = sized(4 * MB);
   const many = Array.from({ length: MAX_IMAGES_PER_REQUEST }, () => sized(1));
+  const fullPost = Array.from({ length: MAX_ATTACHMENTS_PER_POST }, () =>
+    sized(MAX_ATTACHMENT_BYTES),
+  );
 
-  const [byBytes, byCount] = await runInDurableObject(userAgent(), async (_, state) => {
-    for (const attachment of [...own, oldest, older, latest, ...many]) {
+  const [byBytes, byCount, full] = await runInDurableObject(userAgent(), async (_, state) => {
+    for (const attachment of [...own, oldest, older, latest, ...many, ...fullPost]) {
       store.insertAttachment(state.storage, attachment);
     }
     return [
@@ -129,6 +133,12 @@ test("a request carries the run's own images first, then earlier ones the latest
         read,
       ),
       await readImages(state.storage, [post(...many.map((a) => a.id))], [post(oldest.id)], read),
+      await readImages(
+        state.storage,
+        [post(...fullPost.map((a) => a.id))],
+        [post(oldest.id)],
+        read,
+      ),
     ];
   });
 
@@ -136,4 +146,6 @@ test("a request carries the run's own images first, then earlier ones the latest
   expect(MAX_IMAGE_BYTES_PER_REQUEST).toBe(20 * MB);
   expect([...byBytes.keys()]).toEqual([...own, latest, oldest].map((a) => a.id));
   expect([...byCount.keys()]).toEqual(many.map((a) => a.id));
+  // A post of the most and largest images there can be fills the request on its own.
+  expect([...full.keys()]).toEqual(fullPost.map((a) => a.id));
 });

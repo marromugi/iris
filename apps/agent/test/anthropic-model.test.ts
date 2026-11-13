@@ -263,7 +263,7 @@ const imageBlock = (mediaType: string, bytes: Uint8Array) => ({
   source: { type: "base64", media_type: mediaType, data: btoa(String.fromCharCode(...bytes)) },
 });
 
-test("sends a user message's images in order before its text, leaving out blank text, and says so of an image it wasn't given", async () => {
+test("sends a user message's images in order before its text, leaving out blank text, and says so of an image it wasn't given or can't take", async () => {
   const { client, requests } = claudeStreaming([{ type: "text", text: ["OK"] }]);
   const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
   const jpeg = new Uint8Array([0xff, 0xd8, 0xff]);
@@ -285,6 +285,7 @@ test("sends a user message's images in order before its text, leaving out blank 
         text: " ",
         images: [
           { type: "image", id: "gone" },
+          { type: "image", id: "bitmap" },
           { type: "image", id: "a" },
         ],
       },
@@ -293,6 +294,7 @@ test("sends a user message's images in order before its text, leaving out blank 
     images: new Map([
       ["a", { mediaType: "image/png", bytes: png }],
       ["b", { mediaType: "image/jpeg", bytes: jpeg }],
+      ["bitmap", { mediaType: "image/bmp", bytes: new Uint8Array([0x42, 0x4d]) }],
     ]),
   });
 
@@ -309,7 +311,11 @@ test("sends a user message's images in order before its text, leaving out blank 
       { role: "assistant", content: [{ type: "text", text: "The second." }] },
       {
         role: "user",
-        content: [{ type: "text", text: UNREAD_IMAGE_TEXT }, imageBlock("image/png", png)],
+        content: [
+          { type: "text", text: UNREAD_IMAGE_TEXT },
+          { type: "text", text: UNREAD_IMAGE_TEXT },
+          imageBlock("image/png", png),
+        ],
       },
     ],
   });

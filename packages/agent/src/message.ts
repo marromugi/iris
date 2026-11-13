@@ -50,8 +50,11 @@ export const imagePartSchema = z.object({
   id: z.string().min(1),
 });
 
-/** What a model is given in place of an image it can't have: its bytes are gone, or it doesn't read images. */
-export const UNREAD_IMAGE_TEXT = "[An image was sent here, but it couldn't be read.]";
+/**
+ * What a model is given in place of an image it can't have: its bytes are gone, the request has no
+ * room left for it, or the model doesn't read images.
+ */
+export const UNREAD_IMAGE_TEXT = "[An image was sent here, but it couldn't be given to you.]";
 
 /** The text may be empty when the message has images, which come in the order they were sent. */
 export const userMessageSchema = z.object({
