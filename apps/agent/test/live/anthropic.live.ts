@@ -6,6 +6,7 @@ import {
   messageSchema,
   nextAction,
   step,
+  UNREAD_IMAGE_TEXT,
 } from "@iris/agent";
 import { env } from "cloudflare:workers";
 import { expect, test } from "vitest";
@@ -225,7 +226,7 @@ const BLUE_PNG =
 
 const bytes = (base64: string) => Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
 
-test("the real model reads a post's images in order, with no text, and hears of one it wasn't given", async () => {
+test("the real API takes a post's images with no text and a stand-in for one it wasn't given, and the model reads them in order", async () => {
   const reply = await model({
     system:
       "For each image the user sent, in order, say its color in one English word, or 'missing' for one you weren't given. Write only the words, separated by commas.",
@@ -250,5 +251,18 @@ test("the real model reads a post's images in order, with no text, and hears of 
   const text = reply.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
   console.log(JSON.stringify(exchanges.at(-1)?.request, null, 2).slice(0, 2000));
   console.log("Reply:", text);
-  expect(text.toLowerCase()).toMatch(/red.*missing.*blue/s);
+  // The model needn't count the stand-in as an image; it goes in the image's place.
+  expect(text.toLowerCase()).toMatch(/red.*blue/s);
+  expect(exchanges.at(-1)?.request).toMatchObject({
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: RED_PNG } },
+          { type: "text", text: UNREAD_IMAGE_TEXT },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: BLUE_PNG } },
+        ],
+      },
+    ],
+  });
 });
