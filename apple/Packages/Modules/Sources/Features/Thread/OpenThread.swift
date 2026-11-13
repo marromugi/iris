@@ -1,13 +1,15 @@
 import Backend
 import Observation
 
-/// One thread as the thread screen shows it: reading its posts and runs, sending a post, and keeping both current from
-/// the thread's events socket while the screen is shown.
+/// One thread as the thread screen shows it: reading its posts and runs, sending a post with the images picked for it,
+/// and keeping both current from the thread's events socket while the screen is shown.
 @Observable
 final class OpenThread {
     /// How many of the latest posts and runs the thread reads, the most the server gives. Replies at the oldest end
     /// whose post didn't fit are left out, so a reply is never shown without what it answers.
     static let entriesShown = 100
+    /// How many images a post carries at most, the most the server takes.
+    static let imagesPerPost = 4
 
     /// The thread's latest posts and runs, latest first. Turns to `.failed(.signedOut)` when the server refuses the
     /// sign-in, so the screen offers to sign in again.
@@ -17,6 +19,10 @@ final class OpenThread {
     private(set) var progress: [String: RunProgress] = [:]
     /// What the user is writing in the thread.
     var draft = ""
+    /// The images picked for the next post, in the order picked.
+    private(set) var images: [AttachedImage] = []
+    /// Whether posts may carry images, as the server said; false until it says.
+    private(set) var canAttachImages = false
     /// Whether a post is on its way to the server.
     private(set) var isSending = false
     /// Why the last post did not go through.
@@ -49,10 +55,45 @@ final class OpenThread {
         self.now = now
     }
 
-    /// Whether there is something written to send, and a thread to send it to.
+    /// Whether there is something written or an image to send, a thread to send it to, and every image picked is put
+    /// up.
     var canSend: Bool {
-        guard case .loaded = entries, !isSending else { return false }
-        return !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard case .loaded = entries, !isSending, images.count <= Self.imagesPerPost,
+            images.allSatisfy({ $0.uploadedID != nil })
+        else { return false }
+        return !images.isEmpty || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// How many more images the next post can take; none while posts may not carry images.
+    var imagesLeft: Int {
+        canAttachImages ? max(Self.imagesPerPost - images.count, 0) : 0
+    }
+
+    /// Asks the server whether posts may carry images. When it can't say, they stay without.
+    func checkImageAttaching() async {
+        do throws(AppError) {
+            canAttachImages = try await backend.canAttachImages()
+        } catch {
+            canAttachImages = false
+        }
+    }
+
+    /// Adds the images picked, as many as the post has room for, and starts putting each up. The task ends once every
+    /// one is put up or failed.
+    @discardableResult
+    func attach(_ picked: [any PickedImage]) -> Task<Void, Never> {
+        let added = picked.prefix(imagesLeft).map { AttachedImage(picked: $0, backend: backend) }
+        images += added
+        let work = added.map { $0.start() }
+        return Task {
+            for task in work { await task.value }
+        }
+    }
+
+    /// Takes the image off the next post.
+    func remove(_ image: AttachedImage) {
+        image.cancel()
+        images.removeAll { $0 === image }
     }
 
     /// Whether the screen says why a message did not go through; setting it to false puts the problem away.
@@ -92,26 +133,30 @@ final class OpenThread {
         return Task { await load() }
     }
 
-    /// Sends what the user wrote and puts the post and the runs it starts in the thread, unless the socket brought them
-    /// first, as it does when it is open: the socket's are the newer. When the server does not take it, the text goes back to the
-    /// field, before anything written since, with the problem to show.
+    /// Sends what the user wrote with the images put up, and puts the post and the runs it starts in the thread, unless
+    /// the socket brought them first, as it does when it is open: the socket's are the newer. When the server does not
+    /// take it, the text goes back to the field and the images to the bar, before anything added since, with the problem
+    /// to show.
     @discardableResult
     func send() -> Task<Void, Never>? {
         guard canSend else { return nil }
         let text = draft
+        let sentImages = images
         draft = ""
+        images = []
         isSending = true
         sendProblem = nil
         return Task {
             defer { isSending = false }
             do throws(AppError) {
-                let sent = try await backend.send(text)
+                let sent = try await backend.send(text, attaching: sentImages.compactMap(\.uploadedID))
                 for entry in [Entry.post(sent.post)] + sent.runs.map(Entry.run) {
                     if readsOnTheWay > 0 { cameDuringRead.append(.sent(entry)) }
                     placeIfMissing(entry)
                 }
             } catch {
                 draft = draft.isEmpty ? text : "\(text)\n\(draft)"
+                images = sentImages + images
                 if error == .signedOut {
                     entries = .failed(.signedOut)
                 } else {

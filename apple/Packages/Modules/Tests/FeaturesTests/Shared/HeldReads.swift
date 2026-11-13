@@ -1,4 +1,5 @@
 import Backend
+import Foundation
 
 @testable import Features
 
@@ -74,7 +75,11 @@ struct HeldEntryReads: ThreadBackend {
         return entries
     }
 
-    func send(_ text: String) async throws(AppError) -> SentPost { try await backend.send(text) }
+    func send(_ text: String, attaching attachmentIDs: [Attachment.ID]) async throws(AppError) -> SentPost {
+        try await backend.send(text, attaching: attachmentIDs)
+    }
+    func canAttachImages() async throws(AppError) -> Bool { try await backend.canAttachImages() }
+    func putUp(jpeg: Data) async throws(AppError) -> Attachment.ID { try await backend.putUp(jpeg: jpeg) }
 
     func followEvents(
         onOpen: @Sendable () async -> Void,

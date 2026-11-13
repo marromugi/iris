@@ -313,6 +313,100 @@ struct OpenThreadTests {
 
         #expect(thread.runs?.count == 5)
     }
+
+    /// A thread that is read and may carry images, with `backend` behind it.
+    func threadTakingImages(_ backend: FakeThreadBackend = FakeThreadBackend()) async -> OpenThread {
+        let thread = OpenThread(backend: backend)
+        await thread.load()
+        await thread.checkImageAttaching()
+        return thread
+    }
+
+    @Test func sendsTheImagesPutUpWithThePostAndLetsGoOfThem() async throws {
+        let backend = FakeThreadBackend()
+        let thread = await threadTakingImages(backend)
+
+        await thread.attach([FakePickedImage(), FakePickedImage()]).value
+        #expect(thread.canSend)
+        let picked = thread.images.compactMap(\.uploadedID)
+        await thread.send()?.value
+
+        #expect(Set(backend.uploaded.map(\.id)) == Set(picked))
+        let post = try #require(thread.entries.value?.dropFirst().first?.post)
+        #expect(post.text == "")
+        #expect(post.attachments.map(\.id) == picked)
+        #expect(picked.count == 2)
+        #expect(thread.images.isEmpty)
+    }
+
+    @Test func waitsToSendUntilEveryImageIsPutUp() async {
+        let thread = await threadTakingImages()
+        thread.draft = "これを見て"
+        let gate = FakePickedImage.Gate()
+
+        let attaching = thread.attach([FakePickedImage(), FakePickedImage(gate: gate)])
+        await eventually { thread.images.first?.uploadedID != nil }
+
+        #expect(thread.images.last?.state == .preparing)
+        #expect(!thread.canSend)
+        #expect(thread.send() == nil)
+        await gate.open()
+        await attaching.value
+        #expect(thread.canSend)
+    }
+
+    @Test func anImageThatFailsBlocksSendingUntilItIsTriedAgainOrRemoved() async {
+        let backend = FakeThreadBackend(.init(uploadFailure: .offline))
+        let thread = await threadTakingImages(backend)
+        thread.draft = "これを見て"
+
+        await thread.attach([FakePickedImage(), FakePickedImage()]).value
+        #expect(thread.images.map(\.state) == [.failed(.offline), .failed(.offline)])
+        #expect(!thread.canSend)
+
+        backend.answer { $0.uploadFailure = nil }
+        await thread.images[0].retry()?.value
+        #expect(thread.images[0].uploadedID == "attachment-1")
+        #expect(!thread.canSend)
+        thread.remove(thread.images[1])
+        #expect(thread.images.count == 1)
+        #expect(thread.canSend)
+    }
+
+    @Test func takesAtMostFourImagesAPost() async {
+        let thread = await threadTakingImages()
+
+        await thread.attach(Array(repeating: FakePickedImage(), count: 3)).value
+        #expect(thread.imagesLeft == 1)
+        await thread.attach(Array(repeating: FakePickedImage(), count: 3)).value
+
+        #expect(thread.images.count == 4)
+        #expect(thread.imagesLeft == 0)
+    }
+
+    @Test func takesNoImagesWhileTheServerSaysPostsCantCarryThem() async {
+        let thread = OpenThread(backend: FakeThreadBackend(.init(canAttachImages: false)))
+        await thread.load()
+        await thread.checkImageAttaching()
+
+        await thread.attach([FakePickedImage()]).value
+
+        #expect(thread.imagesLeft == 0)
+        #expect(thread.images.isEmpty)
+    }
+
+    @Test func imagesOfAPostThatDoesNotGoThroughGoBackToTheBar() async {
+        let backend = FakeThreadBackend()
+        let thread = await threadTakingImages(backend)
+        await thread.attach([FakePickedImage()]).value
+        let picked = thread.images
+        backend.answer { $0.failure = .offline }
+
+        await thread.send()?.value
+
+        #expect(thread.images.map(\.id) == picked.map(\.id))
+        #expect(thread.sendProblem == .offline)
+    }
 }
 
 /// Holds every post sent once the server has started its runs, as the server does before it answers, until the test
@@ -345,8 +439,8 @@ private actor HeldSends: ThreadBackend {
         held = nil
     }
 
-    func send(_ text: String) async throws(AppError) -> SentPost {
-        let sent = try await backend.send(text)
+    func send(_ text: String, attaching attachmentIDs: [Backend.Attachment.ID]) async throws(AppError) -> SentPost {
+        let sent = try await backend.send(text, attaching: attachmentIDs)
         guard let run = sent.runs.first else { return sent }
         let failure = await withCheckedContinuation { continuation in
             held = (run, continuation)
@@ -358,6 +452,8 @@ private actor HeldSends: ThreadBackend {
     }
 
     func entries(limit: Int) async throws(AppError) -> [ThreadEntry] { try await backend.entries(limit: limit) }
+    func canAttachImages() async throws(AppError) -> Bool { try await backend.canAttachImages() }
+    func putUp(jpeg: Data) async throws(AppError) -> Backend.Attachment.ID { try await backend.putUp(jpeg: jpeg) }
 
     func followEvents(
         onOpen: @Sendable () async -> Void,
@@ -371,5 +467,13 @@ extension OpenThread {
     /// The runs among the thread's entries, latest first, once it is read.
     var runs: [Run]? {
         entries.value?.compactMap(\.run)
+    }
+}
+
+extension Entry {
+    /// The entry's post, when it is one.
+    var post: Post? {
+        guard case .post(let post) = self else { return nil }
+        return post
     }
 }

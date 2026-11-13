@@ -1,4 +1,5 @@
 import Backend
+import Foundation
 
 /// One of the user's threads, reached through the server.
 nonisolated struct ServerThread: ThreadBackend {
@@ -9,8 +10,16 @@ nonisolated struct ServerThread: ThreadBackend {
         try await backend.entries(of: id, limit: limit)
     }
 
-    func send(_ text: String) async throws(AppError) -> SentPost {
-        try await backend.sendPost(text, to: id)
+    func send(_ text: String, attaching attachmentIDs: [Attachment.ID]) async throws(AppError) -> SentPost {
+        try await backend.sendPost(text, attaching: attachmentIDs, to: id)
+    }
+
+    func canAttachImages() async throws(AppError) -> Bool {
+        try await backend.me().canAttachImages
+    }
+
+    func putUp(jpeg: Data) async throws(AppError) -> Attachment.ID {
+        try await backend.putUp(jpeg: jpeg).id
     }
 
     func followEvents(

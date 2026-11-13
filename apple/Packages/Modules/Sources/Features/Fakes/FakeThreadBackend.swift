@@ -20,6 +20,12 @@
             var socketsOpened = 0
             /// The events socket that is open, if one is.
             var socket: AsyncStream<RunEvent>.Continuation?
+            /// Whether posts may carry images.
+            var canAttachImages = true
+            /// Why putting up an image fails, when it does; apart from `failure`.
+            var uploadFailure: AppError?
+            /// The images put up, by ID, in order.
+            var uploaded: [(id: Attachment.ID, jpeg: Data)] = []
         }
 
         private let answers: Mutex<Answers>
@@ -51,12 +57,18 @@
         }
 
         /// Makes a post with a run of each replier that has the text alone; the runs stay going until the test changes
-        /// them.
-        func send(_ text: String) async throws(AppError) -> SentPost {
+        /// them. The post carries the images put up here, by ID.
+        func send(_ text: String, attaching attachmentIDs: [Attachment.ID]) async throws(AppError) -> SentPost {
             try answers.withLock { answers throws(AppError) in
                 if let failure = answers.failure { throw failure }
+                let uploaded = answers.uploaded
+                let attachments = attachmentIDs.map { id in
+                    Attachment(
+                        id: id, mediaType: "image/jpeg", size: uploaded.first { $0.id == id }?.jpeg.count ?? 0)
+                }
                 let post = Post(
-                    id: "post-\(answers.posts.count + 1)", agentId: nil, text: text, attachments: [], createdAt: answers.sentAt)
+                    id: "post-\(answers.posts.count + 1)", agentId: nil, text: text, attachments: attachments,
+                    createdAt: answers.sentAt)
                 let runs = answers.repliers.enumerated().map { index, agentID in
                     Run(
                         id: "sent-\(answers.runs.count + index + 1)", agentId: agentID, postId: post.id,
@@ -67,6 +79,27 @@
                 answers.runs.insert(contentsOf: runs, at: 0)
                 return SentPost(post: post, runs: runs)
             }
+        }
+
+        func canAttachImages() async throws(AppError) -> Bool {
+            try answers.withLock { answers throws(AppError) in
+                if let failure = answers.failure { throw failure }
+                return answers.canAttachImages
+            }
+        }
+
+        func putUp(jpeg: Data) async throws(AppError) -> Attachment.ID {
+            try answers.withLock { answers throws(AppError) in
+                if let failure = answers.uploadFailure ?? answers.failure { throw failure }
+                let id = "attachment-\(answers.uploaded.count + 1)"
+                answers.uploaded.append((id, jpeg))
+                return id
+            }
+        }
+
+        /// The images put up, by ID, in order.
+        var uploaded: [(id: Attachment.ID, jpeg: Data)] {
+            answers.withLock { $0.uploaded }
         }
 
         func followEvents(
