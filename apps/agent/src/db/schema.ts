@@ -75,7 +75,8 @@ export const runs = sqliteTable("runs", {
   endedAt: integer("ended_at", { mode: "timestamp_ms" }),
   lastError: text("last_error"),
   failedAttempts: integer("failed_attempts").notNull().default(0),
-  dueAt: integer("due_at", { mode: "timestamp_ms" }).notNull(),
+  /** When the run is next carried on; null while it waits for the user to answer its question. */
+  dueAt: integer("due_at", { mode: "timestamp_ms" }),
 });
 
 export const messages = sqliteTable(

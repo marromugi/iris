@@ -48,7 +48,7 @@ test("an agent asks another in a consult and carries on with the answer", async 
   await runDurableObjectAlarm(userAgent());
 
   const [askerAsks, answererAnswers, askerCarriesOn] = modelRequests;
-  expect(askerAsks?.tools.map((tool) => tool.name)).toEqual(["ask_agent"]);
+  expect(askerAsks?.tools.map((tool) => tool.name)).toEqual(["ask_agent", "ask_user"]);
   expect(answererAnswers?.messages).toEqual([
     { role: "user", text: "エージェント: 今日の株価は？" },
   ]);
@@ -151,7 +151,7 @@ test("an agent with no one to ask isn't offered the tool", async () => {
   await userAgent().sendMessage(only?.id ?? "", { text: "Hi" });
   await runDurableObjectAlarm(userAgent());
 
-  expect(modelRequests[0]?.tools).toEqual([]);
+  expect(modelRequests[0]?.tools.map((tool) => tool.name)).not.toContain("ask_agent");
 });
 
 /** Each run asks 物知り, which answers, and each asker ends with what it heard. */

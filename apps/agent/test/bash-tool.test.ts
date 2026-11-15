@@ -66,7 +66,7 @@ test("a run's bash commands go to its own agent's shell, and the model reads wha
   });
 
   expect(ran).toEqual([{ agentId, command: "ls" }]);
-  expect(modelRequests[0]?.tools.map((tool) => tool.name)).toEqual(["bash"]);
+  expect(modelRequests[0]?.tools.map((tool) => tool.name)).toEqual(["bash", "ask_user"]);
   expect(modelRequests[1]?.messages.at(-1)).toEqual({
     role: "tool",
     callId: "call-1",

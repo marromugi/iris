@@ -22,6 +22,7 @@ import { mailSetup } from "./routes/me/mail/get";
 import { setTimeZone } from "./routes/me/time-zone/put";
 import { threadEntries } from "./routes/threads/[threadId]/entries/get";
 import { openThreadEvents, THREAD_EVENTS_PATH } from "./routes/threads/[threadId]/events/get";
+import { answerQuestion } from "./routes/runs/[runId]/answer/post";
 import { sendPost } from "./routes/threads/[threadId]/posts/post";
 import { listThreads } from "./routes/threads/get";
 import { addGroup } from "./routes/threads/post";
@@ -66,6 +67,7 @@ agentApi.openapiRoutes([
   removeTask,
   recentRuns,
   sendMessage,
+  answerQuestion,
   listThreads,
   addGroup,
   threadEntries,

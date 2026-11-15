@@ -7,6 +7,7 @@ import {
   run,
   type Tool,
 } from "@iris/agent";
+import { askUserTool, AwaitingAnswer } from "./ask-user";
 import { MAX_ATTACHMENT_BYTES } from "./attachment";
 import { type ConsultContext, consultTool, RunCut } from "./consult";
 import { nextSummaryDueAt, runsWaitingForSummaries } from "./daily-summary";
@@ -142,6 +143,9 @@ export class Waker {
  * Once `WAKE_UP_BUDGET_MS` has passed since it began, nothing new starts, and each run going on
  * stops after its current message and is due again at once, so the next wake-up carries it on.
  *
+ * A run whose agent asks the user (`ask_user`) stops there and isn't due again until the user
+ * answers, so no wake-up is set for it meanwhile; the thread's later runs wait behind it.
+ *
  * The images in what each run's model reads have their bytes read by `readAttachment`; without
  * it, none are read.
  */
@@ -228,10 +232,14 @@ export async function runDue(
   }
 }
 
-/** The tools a run is offered on top of its agent's own: asking another agent, unless it is in a consult. */
+/**
+ * The tools a run is offered on top of its agent's own: asking another agent, unless it is in a
+ * consult, and asking the user, in its one-to-one thread.
+ */
 function runTools(context: ConsultContext): Tool[] {
-  const consult = consultTool(context);
-  return consult === undefined ? [] : [consult];
+  return [consultTool(context), askUserTool(context.storage, context.runId)].filter(
+    (tool) => tool !== undefined,
+  );
 }
 
 /** Starts a run of each task whose time came, and moves the task to its next time after now. */
@@ -415,6 +423,11 @@ async function carryOn(
     if (error instanceof RunCut) {
       store.postponeRun(storage, runId, now());
       watcher.stopped(runId);
+      return;
+    }
+    if (error instanceof AwaitingAnswer) {
+      store.waitForAnswer(storage, runId);
+      watcher.changed(runId);
       return;
     }
     const failedAt = now();

@@ -582,6 +582,7 @@ test("a message starts a run due at once, which the model answers after the agen
       endedAt: null,
       lastError: null,
       failedAttempts: 0,
+      waitsForAnswer: false,
       messages: [{ role: "user", text: "Which one is urgent?" }],
       consults: [],
     },
