@@ -29,9 +29,12 @@ struct PhraseFader: Equatable {
     func phrase(at turn: Int) -> String {
         let count = phrases.count
         guard count > 0, turn >= 0 else { return "" }
-        let stride =
-            [37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3].first { prime in
-                count % prime != 0 && prime % count != 1 && prime % count != count - 1
+        let primes: [Int] = [37, 31, 29, 23, 19, 17, 13, 11, 7, 5, 3]
+        let stride: Int =
+            primes.first { prime -> Bool in
+                let sharedFactor: Int = count % prime
+                let wrapped: Int = prime % count
+                return sharedFactor != 0 && wrapped != 1 && wrapped != count - 1
             } ?? 1
         return phrases[(turn % count) * stride % count]
     }
