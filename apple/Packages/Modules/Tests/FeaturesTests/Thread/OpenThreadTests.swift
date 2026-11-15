@@ -471,6 +471,73 @@ struct OpenThreadTests {
         #expect(thread.images.map(\.id) == picked.map(\.id))
         #expect(thread.sendProblem == .offline)
     }
+
+    /// A thread whose latest run waits for the user to answer its agent's question.
+    func askingThread() -> FakeThreadBackend {
+        FakeThreadBackend(.init(runs: [Samples.askingRun, Samples.mailRun], posts: [Samples.mailPost, Samples.askingPost]))
+    }
+
+    @Test func theLatestRunsQuestionWaitsUntilItIsAnswered() async {
+        let backend = askingThread()
+        let thread = OpenThread(backend: backend)
+        await thread.load()
+
+        #expect(
+            thread.waitingQuestion
+                == WaitingQuestion(runID: Samples.askingRun.id, askedAt: 2, question: Samples.askingQuestion))
+
+        await thread.answer("日曜")?.value
+
+        #expect(backend.answered.map(\.answer) == ["日曜"])
+        #expect(backend.answered.map(\.runID) == [Samples.askingRun.id])
+        #expect(thread.waitingQuestion == nil)
+        #expect(!thread.isAnswering)
+    }
+
+    @Test func anAnswerThatComesBackWhileAReadIsOnItsWayStaysAfterTheReadLands() async {
+        let backend = HeldEntryReads(askingThread())
+        let thread = OpenThread(backend: backend)
+        let firstRead = Task { await thread.load() }
+        await backend.release()
+        await firstRead.value
+
+        // The read takes the thread from before the answer, and lands after it.
+        let read = Task { await thread.load() }
+        await backend.heldRead()
+        await thread.answer("日曜")?.value
+        await backend.release()
+        await read.value
+
+        #expect(thread.waitingQuestion == nil)
+    }
+
+    @Test func aLateAnswerLeavesTheNextQuestionTheSameRunAskedSince() async throws {
+        let backend = askingThread()
+        let thread = OpenThread(backend: backend)
+        await thread.load()
+        var asksAgain = Samples.askingRun
+        let asking = try #require(asksAgain.messages.last)
+        asksAgain.messages += [.case3(.init(role: .tool, callId: "call-1", isError: false, content: "日曜")), asking]
+        asksAgain.question?.question = "何時にしますか？"
+
+        let answering = thread.answer("日曜")
+        thread.hear(Samples.changed(asksAgain))
+        await answering?.value
+
+        #expect(thread.waitingQuestion?.question.question == "何時にしますか？")
+    }
+
+    @Test func anAnswerThatDoesNotGoThroughSaysWhyAndTheQuestionStillWaits() async {
+        let backend = askingThread()
+        let thread = OpenThread(backend: backend)
+        await thread.load()
+        backend.answer { $0.failure = .offline }
+
+        await thread.answer("日曜")?.value
+
+        #expect(thread.sendProblem == .offline)
+        #expect(thread.waitingQuestion?.runID == Samples.askingRun.id)
+    }
 }
 
 /// Holds every post sent once the server has started its runs, as the server does before it answers, until the test
@@ -516,6 +583,9 @@ private actor HeldSends: ThreadBackend {
     }
 
     func entries(limit: Int) async throws(AppError) -> [ThreadEntry] { try await backend.entries(limit: limit) }
+    func answer(_ answer: String, toRun runID: String) async throws(AppError) -> Run {
+        try await backend.answer(answer, toRun: runID)
+    }
     func canAttachImages() async throws(AppError) -> Bool { try await backend.canAttachImages() }
     func putUp(jpeg: Data) async throws(AppError) -> Backend.Attachment.ID { try await backend.putUp(jpeg: jpeg) }
 

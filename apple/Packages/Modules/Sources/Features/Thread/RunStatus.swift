@@ -1,9 +1,11 @@
 import Backend
 
-/// How a run stands: from whether it ended and whether its last attempt failed, and while it is carried on, from how
-/// the events socket says it is getting on.
+/// How a run stands: from whether it ended, whether its last attempt failed, and whether it waits for the user's answer,
+/// and while it is carried on, from how the events socket says it is getting on.
 enum RunStatus: Hashable {
     case running
+    /// Its agent asked the user a question and waits, however long, for the answer.
+    case waitingForAnswer
     /// Picked up, and about to ask the model.
     case starting
     /// The model is asked and hasn't written anything of its message yet.
@@ -18,6 +20,7 @@ enum RunStatus: Hashable {
 
     init(of run: Run, progress: RunProgress? = nil) {
         switch (run.endedAt, run.lastError, progress) {
+        case (nil, _, nil) where run.question != nil: self = .waitingForAnswer
         case (nil, _, .case1?): self = .starting
         case (nil, _, .case2?): self = .thinking
         case (nil, _, .case3?): self = .writing
@@ -31,6 +34,7 @@ enum RunStatus: Hashable {
     var label: String {
         switch self {
         case .running: "実行中"
+        case .waitingForAnswer: "答え待ち"
         case .starting: "起動中"
         case .thinking: "考え中"
         case .writing: "書いています"
@@ -43,6 +47,7 @@ enum RunStatus: Hashable {
     var systemImage: String {
         switch self {
         case .running, .starting: "hourglass"
+        case .waitingForAnswer: "questionmark.bubble"
         case .thinking: "ellipsis.bubble"
         case .writing: "pencil"
         case .retrying: "arrow.clockwise"

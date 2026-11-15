@@ -25,7 +25,9 @@ final class OpenThread {
     private(set) var canAttachImages = false
     /// Whether a post is on its way to the server.
     private(set) var isSending = false
-    /// Why the last post did not go through.
+    /// Whether an answer to the waiting question is on its way to the server.
+    private(set) var isAnswering = false
+    /// Why the last post or answer did not go through.
     private(set) var sendProblem: AppError?
 
     private let backend: any ThreadBackend
@@ -158,6 +160,42 @@ final class OpenThread {
             } catch {
                 draft = draft.isEmpty ? text : "\(text)\n\(draft)"
                 images = sentImages + images
+                if error == .signedOut {
+                    entries = .failed(.signedOut)
+                } else {
+                    sendProblem = error
+                }
+            }
+        }
+    }
+
+    /// The latest run that waits for the user to answer its agent's question, with the question; nil when none waits.
+    var waitingQuestion: WaitingQuestion? {
+        guard case .loaded(let shown) = entries else { return nil }
+        for case .run(let run) in shown {
+            if let question = run.question {
+                return WaitingQuestion(runID: run.id, askedAt: run.messages.count, question: question)
+            }
+        }
+        return nil
+    }
+
+    /// Sends `answer` to the waiting question, and puts the run as the server gives it back in the thread, unless the
+    /// socket already said the question no longer waits, which is newer; a read on its way when the answer comes back
+    /// keeps it too. When the server does not take it, the problem is there to show and the question still waits.
+    @discardableResult
+    func answer(_ answer: String) -> Task<Void, Never>? {
+        guard let waiting = waitingQuestion, !isAnswering else { return nil }
+        isAnswering = true
+        sendProblem = nil
+        return Task {
+            defer { isAnswering = false }
+            do throws(AppError) {
+                let run = try await backend.answer(answer, toRun: waiting.runID)
+                guard waitingQuestion?.id == waiting.id else { return }
+                if readsOnTheWay > 0 { cameDuringRead.append(.heard(.run(run))) }
+                place(.run(run))
+            } catch {
                 if error == .signedOut {
                     entries = .failed(.signedOut)
                 } else {

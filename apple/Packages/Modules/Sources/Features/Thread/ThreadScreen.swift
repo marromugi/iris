@@ -6,7 +6,8 @@ import SwiftUI
 /// it is shown, the thread's events keep it current: each post and run as it changes, and while a run is carried on,
 /// whether it is starting or thinking, and its reply as it is written. An agent's one-to-one thread has its tasks a step
 /// away, and is where the agent is deactivated and activated again; while it is deactivated, the field gives way to
-/// the way to activate it.
+/// the way to activate it. While a run waits for the user to answer its agent's question, the field gives way to the
+/// question, which takes the answer.
 struct ThreadScreen: View {
     let thread: ChatThread
     /// The user's agents by ID, for showing whose run each is.
@@ -89,7 +90,13 @@ struct ThreadScreen: View {
                 // A consult is only for reading: the agents ask and answer in it.
                 if let activity, !activity.isActive {
                     DeactivatedBar(isSwitching: activity.isSwitching) { activity.activate() }
-                } else if thread.consultRunId == nil {
+                } else if thread.consultRunId != nil {
+                    EmptyView()
+                } else if let waiting = open.waitingQuestion {
+                    QuestionCard(question: waiting.question, isAnswering: open.isAnswering) { open.answer($0) }
+                        // A new question starts with nothing picked or written.
+                        .id(waiting.id)
+                } else {
                     MessageBar(
                         text: $open.draft, canSend: open.canSend, images: open.images, imagesLeft: open.imagesLeft,
                         onPick: { open.attach($0) }, onRemove: { open.remove($0) }
@@ -163,6 +170,19 @@ struct ThreadScreen: View {
     #Preview("実行あり") {
         NavigationStack {
             ThreadScreen(thread: Samples.threads[1], agents: agents, directory: FakeAgentDirectory(), images: images)
+        }
+    }
+
+    #Preview("質問に答える") {
+        NavigationStack {
+            ThreadScreen(
+                thread: Samples.threads[1], agents: agents,
+                directory: FakeAgentDirectory(
+                    thread: FakeThreadBackend(
+                        .init(
+                            runs: [Samples.askingRun, Samples.answeredRun],
+                            posts: [Samples.answeredPost, Samples.askingPost]))),
+                images: images)
         }
     }
 

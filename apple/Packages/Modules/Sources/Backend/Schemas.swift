@@ -1,3 +1,5 @@
+import OpenAPIRuntime
+
 // The server's types as the app reads them, under names that say what they are in the app. They are the generated
 // ones, since openapi.json is the server's contract.
 
@@ -34,6 +36,9 @@ public typealias Me = Components.Schemas.Me
 /// One run of an agent, started by a task or by a message sent to it: when it started and ended, how its attempts
 /// went, and its conversation.
 public typealias Run = Components.Schemas.Run
+/// The question a run's agent asked the user and waits on: the question, two to four choices, and whether more than one
+/// may be picked. The user may also answer in their own words.
+public typealias Question = Components.Schemas.Run.QuestionPayload
 /// One message of a run's conversation: the user's prompt, the assistant's answer, or a tool's result.
 public typealias RunMessage = Components.Schemas.Message
 /// What an agent's events socket sends: a run as it is now, or how the run being carried on is getting on.
@@ -53,4 +58,16 @@ extension ChatThread: Identifiable {}
 extension Attachment: Identifiable {
     /// The most bytes an image may have; the server takes no larger one.
     public static let largestBytes = 5 * 1024 * 1024
+}
+
+/// A tool the assistant called in a run's conversation: its ID, name, and input.
+public typealias ToolCall = Components.Schemas.Message.Case2Payload.PartsPayloadPayload.Case2Payload
+
+extension ToolCall {
+    /// The question the call asks the user when it is an `ask_user` call; nil for any other call, or one whose input
+    /// has no question.
+    public var askedQuestion: String? {
+        guard name == "ask_user", let fields = input?.value as? [String: (any Sendable)?] else { return nil }
+        return fields["question"] as? String
+    }
 }

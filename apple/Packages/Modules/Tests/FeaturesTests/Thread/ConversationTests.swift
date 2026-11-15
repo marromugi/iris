@@ -50,4 +50,44 @@ struct ConversationTests {
 
         #expect(uses.map(\.consult) == [nil, consult, nil])
     }
+
+    @Test func aQuestionAskedOfTheUserIsShownWithItsAnswerApartFromTheTools() {
+        #expect(
+            Conversation(Samples.answeredRun).blocks.map(\.kind) == [
+                .assistant("候補を 3 つ見つけました。"),
+                .question("どの店にしますか？", answer: .given("イタリアン")),
+                .assistant("土曜 12:00 にイタリアンを 2 名で予約しました。"),
+            ])
+        #expect(
+            Conversation(Samples.askingRun).blocks.map(\.kind) == [
+                .question("美容院はどちらの日に予約しますか？", answer: .waiting)
+            ])
+        var ended = Samples.askingRun
+        ended.endedAt = Samples.moment("2026-11-10T00:20:00Z")
+        #expect(Conversation(ended).blocks.map(\.kind) == [.question("美容院はどちらの日に予約しますか？", answer: .none)])
+    }
+
+    @Test func onlyAskUserIsShownAsAQuestion() throws {
+        var run = Samples.askingRun
+        let asked = try #require(run.messages.last)
+        guard case .case2(var assistant) = asked, case .case2(var call) = assistant.parts.first else {
+            Issue.record("The sample asking run doesn't end with a tool call.")
+            return
+        }
+        call.name = "survey"
+        assistant.parts = [.case2(call)]
+        run.messages[run.messages.count - 1] = .case2(assistant)
+
+        #expect(Conversation(run).blocks.map(\.kind) == [.tools([.init(id: 0, name: "survey", result: nil)])])
+    }
+
+    @Test func aQuestionThatWasRefusedStaysATool() {
+        var run = Samples.askingRun
+        run.messages.append(.case3(.init(role: .tool, callId: "call-1", isError: true, content: "ask_user wasn't asked")))
+
+        #expect(
+            Conversation(run).blocks.map(\.kind) == [
+                .tools([.init(id: 0, name: "ask_user", result: .init(content: "ask_user wasn't asked", isError: true))])
+            ])
+    }
 }

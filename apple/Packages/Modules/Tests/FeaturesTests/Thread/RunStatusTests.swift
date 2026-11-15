@@ -36,6 +36,12 @@ struct RunStatusTests {
         #expect(RunStatus(of: run, progress: progress) == status)
     }
 
+    @Test func aRunWhoseAgentAskedTheUserWaitsForTheAnswerUntilItIsCarriedOnAgain() {
+        #expect(RunStatus(of: Samples.askingRun) == .waitingForAnswer)
+        #expect(RunStatus.waitingForAnswer.label == "答え待ち")
+        #expect(RunStatus(of: Samples.askingRun, progress: Samples.thinking) == .thinking)
+    }
+
     @Test func anEndedRunIsFinishedWhateverProgressWasLastHeard() {
         #expect(RunStatus(of: Samples.weatherRun, progress: Samples.writing("Hel")) == .finished)
     }

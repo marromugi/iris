@@ -11,11 +11,22 @@ struct Conversation: Equatable {
             case assistant(String)
             /// Tools the assistant called with no text between them, in order.
             case tools([ToolUse])
+            /// A question the assistant asked the user, and where its answer stands.
+            case question(String, answer: Answer)
         }
 
         /// The block's place in the conversation, which only grows at the end.
         let id: Int
         let kind: Kind
+    }
+
+    /// Where the answer to a question the assistant asked the user stands.
+    enum Answer: Equatable {
+        case given(String)
+        /// The run waits for it.
+        case waiting
+        /// The run ended without it, as when its agent was deactivated.
+        case none
     }
 
     /// A tool the assistant called, and what it gave back once it answered.
@@ -39,10 +50,11 @@ struct Conversation: Equatable {
 
     /// A run's conversation, its tool calls that asked another agent with their consults.
     init(_ run: Run) {
-        self.init(run.messages, consults: run.consults)
+        self.init(run.messages, consults: run.consults, ended: run.endedAt != nil)
     }
 
-    init(_ messages: [RunMessage], consults: [Consult] = []) {
+    /// `ended` says whether the run has ended, so a question it asked that has no answer will get none.
+    init(_ messages: [RunMessage], consults: [Consult] = [], ended: Bool = false) {
         let consultByCall = Dictionary(consults.map { ($0.callId, $0.thread) }, uniquingKeysWith: { first, _ in first })
         // The generator numbers the cases in the order of the oneOf in openapi.json: user, assistant, tool; and for an
         // assistant's parts, text, tool call.
@@ -79,10 +91,17 @@ struct Conversation: Equatable {
                         endTools()
                         kinds.append(.assistant(text.text))
                     case .case2(let call):
-                        tools.append(
-                            ToolUse(
-                                id: calls, name: call.name, result: calls < results.count ? results[calls] : nil,
-                                consult: consultByCall[call.id]))
+                        let result = calls < results.count ? results[calls] : nil
+                        // A question that was refused, as one asked with other tools, asked nothing: it stays a tool.
+                        if let question = call.askedQuestion, result?.isError != true {
+                            endTools()
+                            kinds.append(
+                                .question(
+                                    question, answer: result.map { .given($0.content) } ?? (ended ? .none : .waiting)))
+                        } else {
+                            tools.append(
+                                ToolUse(id: calls, name: call.name, result: result, consult: consultByCall[call.id]))
+                        }
                         calls += 1
                     }
                 }
