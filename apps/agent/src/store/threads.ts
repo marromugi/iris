@@ -3,7 +3,7 @@ import { agents, posts, runs, threadMembers, threads } from "../db/schema";
 import { agentNamesById } from "./agents";
 import { withAttachments } from "./attachments";
 import { database } from "./database";
-import { type PostWithAttachments } from "./posts";
+import type { PostWithAttachments } from "./posts";
 import { type Run, toRun } from "./runs";
 
 /** Adds a group thread with the agents as its members. The caller checks that the agents are the user's. */

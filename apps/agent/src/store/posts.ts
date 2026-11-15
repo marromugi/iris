@@ -1,8 +1,8 @@
-import { type UserMessage } from "@iris/agent";
+import type { UserMessage } from "@iris/agent";
 import { and, eq, isNull } from "drizzle-orm";
 import { attachments, messages, posts, runs } from "../db/schema";
 import { agentNamesById } from "./agents";
-import { type Attachment } from "./attachments";
+import type { Attachment } from "./attachments";
 import { messageRow } from "./conversation";
 import { database } from "./database";
 

@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gte, lt } from "drizzle-orm";
 import { mails, mailSetup } from "../db/schema";
-import { type Mail } from "../mail/mail";
-import { type GmailForwardingRequest, type MailState } from "../mail/setup";
+import type { Mail } from "../mail/mail";
+import type { GmailForwardingRequest, MailState } from "../mail/setup";
 import { database } from "./database";
 
 /** Keeps a mail the user forwarded. */

@@ -1,6 +1,6 @@
 import { and, asc, eq, inArray, isNull, max } from "drizzle-orm";
 import { agents, runs, tasks, threadMembers, threads } from "../db/schema";
-import { type Look } from "../agent";
+import type { Look } from "../agent";
 import { database } from "./database";
 import { type Task, toTask } from "./tasks";
 

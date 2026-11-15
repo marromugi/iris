@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, lte, min } from "drizzle-orm";
 import { agents, tasks } from "../db/schema";
-import { type Schedule } from "../schedule";
+import type { Schedule } from "../schedule";
 import { database } from "./database";
 import { noRunWaitsForAnswer } from "./runs";
 

@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { attachments } from "../db/schema";
 import { database } from "./database";
-import { type Post, type PostWithAttachments } from "./posts";
+import type { Post, PostWithAttachments } from "./posts";
 
 /** An image put up to send with a post. */
 export interface Attachment {
