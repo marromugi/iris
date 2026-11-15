@@ -249,6 +249,7 @@ test("lists an agent's latest runs with their conversations, without the model's
     endedAt: expect.any(String),
     lastError: null,
     failedAttempts: 0,
+    question: null,
     consults: [],
     messages: [
       { role: "user", text: "Summarize today's email" },
@@ -278,6 +279,7 @@ test("sends a message to an agent, which starts one of its runs, and says why on
     endedAt: null,
     lastError: null,
     failedAttempts: 0,
+    question: null,
     consults: [],
     messages: [{ role: "user", text: "Hello" }],
   });

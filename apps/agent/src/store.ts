@@ -757,6 +757,11 @@ export function postponeRun(storage: DurableObjectStorage, runId: string, dueAt:
   database(storage).update(runs).set({ dueAt }).where(eq(runs.id, runId)).run();
 }
 
+/** Makes the run wait for the user's answer: it isn't due again until it is given a time. */
+export function waitForAnswer(storage: DurableObjectStorage, runId: string): void {
+  database(storage).update(runs).set({ dueAt: null }).where(eq(runs.id, runId)).run();
+}
+
 /** Whether the run has ended, or is gone. */
 export function hasRunEnded(storage: DurableObjectStorage, runId: string): boolean {
   const row = database(storage)
@@ -818,6 +823,8 @@ export interface Run {
   /** Why the last attempt failed. Cleared when a later attempt finishes; kept on a run given up. */
   readonly lastError: string | null;
   readonly failedAttempts: number;
+  /** Whether it hasn't ended and waits for the user to answer its question. */
+  readonly waitsForAnswer: boolean;
   readonly messages: Message[];
   /** The consults its agent asked in, by the tool call that asked. */
   readonly consults: readonly { readonly callId: string; readonly thread: Thread }[];
@@ -834,6 +841,7 @@ function toRun(storage: DurableObjectStorage, row: typeof runs.$inferSelect): Ru
     endedAt: row.endedAt,
     lastError: row.lastError,
     failedAttempts: row.failedAttempts,
+    waitsForAnswer: row.endedAt === null && row.dueAt === null,
     messages: loadConversation(storage, row.id),
     consults: consultsOf(storage, row.id),
   };

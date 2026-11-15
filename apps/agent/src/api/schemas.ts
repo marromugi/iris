@@ -9,6 +9,7 @@ import {
   userMessageSchema,
 } from "@iris/agent";
 import { lookSchema } from "../agent";
+import { questionSchema, waitingQuestion } from "../question";
 import type { MailState } from "../mail/setup";
 import { scheduleSchema } from "../schedule";
 import type { Agent, PostWithAttachments, Run, Task, Thread } from "../store";
@@ -187,6 +188,14 @@ export const runSchema = z
     lastError: z.string().nullable(),
     failedAttempts: z.int().nonnegative(),
     messages: z.array(messageSchema),
+    question: questionSchema
+      .extend({ multiSelect: z.boolean() })
+      .meta({ id: "Question" })
+      .nullable()
+      .meta({
+        description:
+          "The question its agent asked the user and waits on: its last message calls ask_user with it. Null when it waits on none. Answer it with POST /api/runs/{runId}/answer",
+      }),
     consults: z
       .array(
         z
@@ -211,6 +220,7 @@ export function runJson(run: Run): z.infer<typeof runSchema> {
     lastError: run.lastError,
     failedAttempts: run.failedAttempts,
     messages: run.messages.map(messageJson),
+    question: run.waitsForAnswer ? (waitingQuestion(run.messages) ?? null) : null,
     consults: run.consults.map(({ callId, thread }) => ({ callId, thread: threadJson(thread) })),
   };
 }

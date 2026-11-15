@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { z } from "zod";
 import { type NewAgent, newAgentSchema, randomLook } from "./agent";
+import { answerQuestion } from "./ask-user";
 import { readAttachment } from "./attachment";
 import { canAttachImages } from "./model-provider";
 import { type NewGroup, newGroupSchema } from "./group";
@@ -42,6 +43,7 @@ export type AddGroupResult =
   | { readonly ok: true; readonly thread: store.Thread }
   | { readonly ok: false; readonly error: string };
 
+export type AnswerResult = { ok: true; run: store.Run } | { ok: false; error: string };
 export type PostResult =
   | { readonly ok: true; readonly post: store.PostWithAttachments; readonly runs: store.Run[] }
   | { readonly ok: false; readonly error: string };
@@ -509,6 +511,28 @@ export function createUserAgent(
       });
       await this.wakeAt(nextWakeAt(this.ctx.storage));
       return { post, runs };
+    }
+
+    /**
+     * Answers the question the run waits on, which carries the run on with the answer as its
+     * result. Undefined when the user has no such run; `ok: false` when it isn't waiting for an
+     * answer.
+     */
+    async answerQuestion(runId: string, answer: string): Promise<AnswerResult | undefined> {
+      if (store.findRun(this.ctx.storage, runId) === undefined) {
+        return undefined;
+      }
+      const answered = answerQuestion(this.ctx.storage, runId, answer, new Date());
+      if (!answered.ok) {
+        return answered;
+      }
+      const run = store.findRun(this.ctx.storage, runId);
+      if (run === undefined) {
+        throw new Error(`Run ${runId} was answered but isn't stored.`);
+      }
+      this.broadcast.changed(runId);
+      await this.wakeAt(nextWakeAt(this.ctx.storage));
+      return { ok: true, run };
     }
 
     /** Sets the alarm for `time`, and tells a wake-up going on that work may be due. */
