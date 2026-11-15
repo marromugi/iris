@@ -1,4 +1,4 @@
-import { nextAction, type Message } from "@iris/agent";
+import { nextAction, type Message, toolCalls } from "@iris/agent";
 import { z } from "zod";
 
 export const ASK_USER_TOOL = "ask_user";
@@ -45,6 +45,37 @@ export const newAnswerSchema = z.object({
     .max(MAX_ANSWER_LENGTH)
     .describe("The choices picked, or the user's own answer, as the agent reads it"),
 });
+
+/** A question an agent asked with `ask_user` and the user's answer to it. */
+export interface Asked {
+  readonly question: string;
+  readonly answer: string;
+}
+
+/**
+ * The questions the conversation asked with `ask_user` that were answered, in order. A call that
+ * failed, such as one with invalid input, asked nothing.
+ */
+export function answeredQuestions(messages: readonly Message[]): Asked[] {
+  const asked = new Map<string, string>();
+  const answered: Asked[] = [];
+  for (const message of messages) {
+    if (message.role === "assistant") {
+      for (const call of toolCalls(message)) {
+        const parsed = questionSchema.safeParse(call.input);
+        if (call.name === ASK_USER_TOOL && parsed.success) {
+          asked.set(call.id, parsed.data.question);
+        }
+      }
+    } else if (message.role === "tool" && !message.isError) {
+      const question = asked.get(message.callId);
+      if (question !== undefined) {
+        answered.push({ question, answer: message.content });
+      }
+    }
+  }
+  return answered;
+}
 
 /** The question the conversation waits on: its next call waiting for a result is `ask_user`. */
 export function waitingQuestion(messages: readonly Message[]): Question | undefined {

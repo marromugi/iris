@@ -264,7 +264,7 @@ export const runEventSchema = z
   .discriminatedUnion("type", [
     z.object({ type: z.literal("run"), run: runSchema }).meta({
       description:
-        "A run started, got a message, or ended or failed an attempt: the run as it is now",
+        "A run started, got a message, ended or failed an attempt, began waiting for the user's answer, or was answered: the run as it is now",
     }),
     z.object({ type: z.literal("progress"), runId: z.uuid(), progress: runProgressSchema }).meta({
       description: `How a run being carried on is getting on. A socket that opens during a run hears the latest at once. Writing comes at most every ${WRITING_EVERY_MS} ms; the run's next run event has the whole message.`,

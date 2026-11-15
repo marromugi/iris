@@ -1,4 +1,4 @@
-import { defineTool, nextAction, type Tool } from "@iris/agent";
+import { defineTool, nextAction, type Tool, toolCalls } from "@iris/agent";
 import { ASK_USER_TOOL, questionSchema } from "./question";
 import * as store from "./store";
 
@@ -25,13 +25,22 @@ export function askUserTool(storage: DurableObjectStorage, runId: string): Tool 
   return defineTool({
     name: ASK_USER_TOOL,
     description:
-      "Ask the user a question with a few choices, and wait for the answer, which comes back as this tool's result. The user can also write their own answer. The run waits until they answer, however long that is.",
+      "Ask the user a question with a few choices, and wait for the answer, which comes back as this tool's result. The user can also write their own answer. The run waits until they answer, however long that is. Call it alone, with no other tool call in the same message.",
     input: questionSchema,
     async run() {
+      // A call after it in the same message would run with input chosen before the answer.
+      const asking = store.loadConversation(storage, runId).findLast((m) => m.role === "assistant");
+      if (asking !== undefined && toolCalls(asking).length > 1) {
+        return { ok: false, error: ALONE };
+      }
       throw new AwaitingAnswer();
     },
   });
 }
+
+/** Why an `ask_user` call made together with other tool calls isn't asked. */
+export const ALONE =
+  "ask_user wasn't asked: call it alone, with no other tool call in the same message, so nothing runs before you read the answer.";
 
 /** Why an answer is refused: the run isn't waiting on a question, having ended or never asked. */
 export const NOT_WAITING = "The run isn't waiting for an answer.";

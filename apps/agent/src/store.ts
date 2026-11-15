@@ -37,6 +37,7 @@ import {
   threads,
 } from "./db/schema";
 import type { Look } from "./agent";
+import { answeredQuestions } from "./question";
 import { DEFAULT_TIME_ZONE } from "./day";
 import type { Mail } from "./mail/mail";
 import type { GmailForwardingRequest, MailState } from "./mail/setup";
@@ -427,7 +428,9 @@ export function nextDueTask(storage: DurableObjectStorage, now: Date): Task | un
     .select({ task: tasks })
     .from(tasks)
     .innerJoin(agents, eq(agents.id, tasks.agentId))
-    .where(and(lte(tasks.nextRunAt, now), isNull(agents.deactivatedAt)))
+    .where(
+      and(lte(tasks.nextRunAt, now), isNull(agents.deactivatedAt), noRunWaitsForAnswer(storage)),
+    )
     .orderBy(asc(tasks.nextRunAt), asc(tasks.id))
     .limit(1)
     .get();
@@ -757,9 +760,16 @@ export function postponeRun(storage: DurableObjectStorage, runId: string, dueAt:
   database(storage).update(runs).set({ dueAt }).where(eq(runs.id, runId)).run();
 }
 
-/** Makes the run wait for the user's answer: it isn't due again until it is given a time. */
+/**
+ * Makes the run wait for the user's answer: it isn't due again until it is given a time. Reaching
+ * the question is the run getting on, so earlier failed attempts no longer count against it.
+ */
 export function waitForAnswer(storage: DurableObjectStorage, runId: string): void {
-  database(storage).update(runs).set({ dueAt: null }).where(eq(runs.id, runId)).run();
+  database(storage)
+    .update(runs)
+    .set({ dueAt: null, lastError: null, failedAttempts: 0 })
+    .where(eq(runs.id, runId))
+    .run();
 }
 
 /** Whether the run has ended, or is gone. */
@@ -1147,15 +1157,40 @@ export function knownAgents(storage: DurableObjectStorage, agentIds: readonly st
     .map((row) => row.id);
 }
 
-/** The earliest next run time among the active agents' tasks. */
+/**
+ * The earliest next run time among the active agents' tasks, leaving out those whose thread has a
+ * run waiting for the user's answer.
+ */
 export function earliestTaskRunAt(storage: DurableObjectStorage): Date | undefined {
   const row = database(storage)
     .select({ next: min(tasks.nextRunAt) })
     .from(tasks)
     .innerJoin(agents, eq(agents.id, tasks.agentId))
-    .where(isNull(agents.deactivatedAt))
+    .where(and(isNull(agents.deactivatedAt), noRunWaitsForAnswer(storage)))
     .get();
   return row?.next ?? undefined;
+}
+
+const waitingRuns = alias(runs, "waiting_runs");
+
+/**
+ * The task's thread has no run waiting for the user's answer. A task of such a thread starts no
+ * run, which would only wait behind it, and sets no wake-up: once the answer comes, it runs once
+ * and moves to its next time after then, like a task that missed several times.
+ */
+function noRunWaitsForAnswer(storage: DurableObjectStorage) {
+  return notExists(
+    database(storage)
+      .select({ id: waitingRuns.id })
+      .from(waitingRuns)
+      .where(
+        and(
+          eq(waitingRuns.threadId, tasks.threadId),
+          isNull(waitingRuns.endedAt),
+          isNull(waitingRuns.dueAt),
+        ),
+      ),
+  );
 }
 
 /** Counts one web search in `month` ("2026-11") and gives the month's count with it. */
@@ -1366,8 +1401,9 @@ export interface SaidLine {
  * What was said in the thread from `startsAt` until `endsAt`, in order, for a thread that isn't a
  * consult (where agents post): each post the user sent
  * then, followed by the replies to it that ended with one, and each run a task started then, as
- * its prompt followed by its reply. Tool calls, their results, and the model's reasoning are left
- * out.
+ * its prompt followed by its reply. A reply is preceded by the questions its agent asked the user
+ * with `ask_user` and the user's answers. Other tool calls, their results, and the model's
+ * reasoning are left out.
  */
 export function saidBetween(
   storage: DurableObjectStorage,
@@ -1377,11 +1413,25 @@ export function saidBetween(
 ): SaidLine[] {
   const db = database(storage);
   const names = agentNamesById(storage);
-  const replyOf = (runId: string): string | undefined => {
-    const conversation = loadConversation(storage, runId);
-    return conversation.length > 0 && nextAction(conversation).type === "done"
-      ? replyText(conversation)
-      : undefined;
+  // An ended run's questions and answers, then its reply; nothing for a run without a reply.
+  const replyLines = (run: { id: string; agentId: string; endedAt: Date | null }): SaidLine[] => {
+    const conversation = loadConversation(storage, run.id);
+    if (
+      run.endedAt === null ||
+      conversation.length === 0 ||
+      nextAction(conversation).type !== "done"
+    ) {
+      return [];
+    }
+    const at = run.endedAt;
+    const name = names.get(run.agentId) ?? "";
+    return [
+      ...answeredQuestions(conversation).flatMap(({ question, answer }) => [
+        { at, speaker: name, text: question },
+        { at, speaker: "User", text: answer },
+      ]),
+      { at, speaker: name, text: replyText(conversation) },
+    ];
   };
   const inDay = (column: typeof posts.createdAt | typeof runs.startedAt) =>
     and(gte(column, startsAt), lt(column, endsAt));
@@ -1398,12 +1448,7 @@ export function saidBetween(
       .where(eq(runs.postId, post.id))
       .orderBy(asc(runs.endedAt), asc(runs.id))
       .all()
-      .flatMap((run) => {
-        const text = run.endedAt === null ? undefined : replyOf(run.id);
-        return text === undefined || run.endedAt === null
-          ? []
-          : [{ at: run.endedAt, speaker: names.get(run.agentId) ?? "", text }];
-      });
+      .flatMap(replyLines);
     said.push({
       at: post.createdAt,
       lines: [
@@ -1429,7 +1474,6 @@ export function saidBetween(
   for (const run of taskRuns) {
     const name = names.get(run.agentId) ?? "";
     const [prompt] = loadConversation(storage, run.id);
-    const reply = run.endedAt === null ? undefined : replyOf(run.id);
     said.push({
       at: run.startedAt,
       lines: [
@@ -1438,9 +1482,7 @@ export function saidBetween(
           speaker: `Task for ${name}`,
           text: prompt?.role === "user" ? prompt.text : "",
         },
-        ...(reply === undefined || run.endedAt === null
-          ? []
-          : [{ at: run.endedAt, speaker: name, text: reply }]),
+        ...replyLines(run),
       ],
     });
   }
