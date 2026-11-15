@@ -3,8 +3,9 @@ import SwiftUI
 
 /// One run in an agent's one-to-one thread: the schedule that started it with its prompt (a run that replies to a post
 /// leaves the post to be shown on its own), then the conversation, then, until the model writes, the moving blob and
-/// the thinking line where the reply will go; once it writes, the message so far and how the run stands. The agent is
-/// the thread's, so neither its name nor its orb is shown.
+/// the thinking line where the reply will go; once it writes, the message so far and how the run stands. A run whose
+/// agent asked the user a question ends with the question and stands as waiting for the answer. The agent is the
+/// thread's, so neither its name nor its orb is shown.
 struct RunView: View {
     let run: Run
     /// How the run is getting on, while it is carried on.
@@ -207,8 +208,16 @@ private struct BlockView: View {
                 Label(question, systemImage: "questionmark.bubble")
                     .font(.body.weight(.semibold))
                     .textSelection(.enabled)
-                if let answer {
-                    UserBubble(text: answer)
+                switch answer {
+                case .given(let text):
+                    UserBubble(text: text)
+                case .waiting:
+                    EmptyView()
+                case .none:
+                    Text("答えずに終わりました")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
         }

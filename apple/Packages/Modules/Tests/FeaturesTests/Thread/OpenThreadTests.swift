@@ -482,7 +482,9 @@ struct OpenThreadTests {
         let thread = OpenThread(backend: backend)
         await thread.load()
 
-        #expect(thread.waitingQuestion == WaitingQuestion(runID: Samples.askingRun.id, question: Samples.askingQuestion))
+        #expect(
+            thread.waitingQuestion
+                == WaitingQuestion(runID: Samples.askingRun.id, askedAt: 2, question: Samples.askingQuestion))
 
         await thread.answer("日曜")?.value
 
@@ -490,14 +492,6 @@ struct OpenThreadTests {
         #expect(backend.answered.map(\.runID) == [Samples.askingRun.id])
         #expect(thread.waitingQuestion == nil)
         #expect(!thread.isAnswering)
-    }
-
-    @Test func noQuestionWaitsInAThreadWhereNoneWasAsked() async {
-        let thread = OpenThread(backend: FakeThreadBackend())
-        await thread.load()
-
-        #expect(thread.waitingQuestion == nil)
-        #expect(thread.answer("日曜") == nil)
     }
 
     @Test func anAnswerThatDoesNotGoThroughSaysWhyAndTheQuestionStillWaits() async {

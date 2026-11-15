@@ -1,7 +1,7 @@
 import Backend
 
-/// How a run stands: from whether it ended and whether its last attempt failed, and while it is carried on, from how
-/// the events socket says it is getting on.
+/// How a run stands: from whether it ended, whether its last attempt failed, and whether it waits for the user's answer,
+/// and while it is carried on, from how the events socket says it is getting on.
 enum RunStatus: Hashable {
     case running
     /// Its agent asked the user a question and waits, however long, for the answer.

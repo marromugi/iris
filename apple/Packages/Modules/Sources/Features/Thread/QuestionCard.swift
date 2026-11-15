@@ -1,11 +1,11 @@
 import Backend
 import SwiftUI
 
-/// The answer to a question as the agent reads it: the choices picked, in the order they were offered, then what the
-/// user wrote, joined by "、". Nil when nothing is picked and nothing is written.
-func answerText(choices: [String], picked: Set<String>, written: String) -> String? {
+/// The answer to a question as the agent reads it: the choices picked, by their place among those offered, in that
+/// order, then what the user wrote, joined by "、". Nil when nothing is picked and nothing is written.
+func answerText(choices: [String], picked: Set<Int>, written: String) -> String? {
     let parts =
-        choices.filter { picked.contains($0) }
+        choices.indices.filter { picked.contains($0) }.map { choices[$0] }
         + [written.trimmingCharacters(in: .whitespacesAndNewlines)].filter { !$0.isEmpty }
     return parts.isEmpty ? nil : parts.joined(separator: "、")
 }
@@ -19,7 +19,8 @@ struct QuestionCard: View {
     let isAnswering: Bool
     let onAnswer: (String) -> Void
 
-    @State private var picked: Set<String> = []
+    /// The choices ticked, by their place; the card is made anew for each question, so places don't move.
+    @State private var picked: Set<Int> = []
     @State private var written = ""
 
     private var answer: String? {
@@ -31,16 +32,17 @@ struct QuestionCard: View {
         VStack(alignment: .leading, spacing: 12) {
             Label(question.question, systemImage: "questionmark.bubble")
                 .font(.headline)
-            ForEach(Array(question.choices.enumerated()), id: \.offset) { _, choice in
+            ForEach(question.choices.indices, id: \.self) { index in
+                let choice = question.choices[index]
                 ChoiceButton(
                     label: choice.label, description: choice.description,
-                    tick: question.multiSelect ? picked.contains(choice.label) : nil
+                    tick: question.multiSelect ? picked.contains(index) : nil
                 ) {
                     if question.multiSelect {
-                        if picked.contains(choice.label) {
-                            picked.remove(choice.label)
+                        if picked.contains(index) {
+                            picked.remove(index)
                         } else {
-                            picked.insert(choice.label)
+                            picked.insert(index)
                         }
                     } else {
                         onAnswer(choice.label)

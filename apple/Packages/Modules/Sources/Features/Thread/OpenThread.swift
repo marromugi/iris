@@ -173,14 +173,16 @@ final class OpenThread {
     var waitingQuestion: WaitingQuestion? {
         guard case .loaded(let shown) = entries else { return nil }
         for case .run(let run) in shown {
-            if let question = run.question { return WaitingQuestion(runID: run.id, question: question) }
+            if let question = run.question {
+                return WaitingQuestion(runID: run.id, askedAt: run.messages.count, question: question)
+            }
         }
         return nil
     }
 
     /// Sends `answer` to the waiting question, and puts the run as the server gives it back in the thread, unless the
-    /// socket already said it no longer waits, which is newer. When the server does not take it, the problem is there
-    /// to show and the question still waits.
+    /// socket already said the question no longer waits, which is newer; a read on its way when the answer comes back
+    /// keeps it too. When the server does not take it, the problem is there to show and the question still waits.
     @discardableResult
     func answer(_ answer: String) -> Task<Void, Never>? {
         guard let waiting = waitingQuestion, !isAnswering else { return nil }
@@ -190,7 +192,8 @@ final class OpenThread {
             defer { isAnswering = false }
             do throws(AppError) {
                 let run = try await backend.answer(answer, toRun: waiting.runID)
-                guard waitingQuestion?.runID == run.id else { return }
+                guard waitingQuestion?.id == waiting.id else { return }
+                if readsOnTheWay > 0 { cameDuringRead.append(.heard(.run(run))) }
                 place(.run(run))
             } catch {
                 if error == .signedOut {

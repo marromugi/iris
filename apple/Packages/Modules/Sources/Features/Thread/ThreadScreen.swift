@@ -90,11 +90,13 @@ struct ThreadScreen: View {
                 // A consult is only for reading: the agents ask and answer in it.
                 if let activity, !activity.isActive {
                     DeactivatedBar(isSwitching: activity.isSwitching) { activity.activate() }
+                } else if thread.consultRunId != nil {
+                    EmptyView()
                 } else if let waiting = open.waitingQuestion {
                     QuestionCard(question: waiting.question, isAnswering: open.isAnswering) { open.answer($0) }
                         // A new question starts with nothing picked or written.
-                        .id(waiting.runID)
-                } else if thread.consultRunId == nil {
+                        .id(waiting.id)
+                } else {
                     MessageBar(
                         text: $open.draft, canSend: open.canSend, images: open.images, imagesLeft: open.imagesLeft,
                         onPick: { open.attach($0) }, onRemove: { open.remove($0) }
