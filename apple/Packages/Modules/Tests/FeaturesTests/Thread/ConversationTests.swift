@@ -50,4 +50,27 @@ struct ConversationTests {
 
         #expect(uses.map(\.consult) == [nil, consult, nil])
     }
+
+    @Test func aQuestionAskedOfTheUserIsShownWithItsAnswerApartFromTheTools() {
+        #expect(
+            Conversation(Samples.answeredRun).blocks.map(\.kind) == [
+                .assistant("候補を 3 つ見つけました。"),
+                .question("どの店にしますか？", answer: "イタリアン"),
+                .assistant("土曜 12:00 にイタリアンを 2 名で予約しました。"),
+            ])
+        #expect(
+            Conversation(Samples.askingRun).blocks.map(\.kind) == [
+                .question("美容院はどちらの日に予約しますか？", answer: nil)
+            ])
+    }
+
+    @Test func aQuestionThatWasRefusedStaysATool() {
+        var run = Samples.askingRun
+        run.messages.append(.case3(.init(role: .tool, callId: "call-1", isError: true, content: "ask_user wasn't asked")))
+
+        #expect(
+            Conversation(run).blocks.map(\.kind) == [
+                .tools([.init(id: 0, name: "ask_user", result: .init(content: "ask_user wasn't asked", isError: true))])
+            ])
+    }
 }

@@ -14,6 +14,10 @@ nonisolated struct ServerThread: ThreadBackend {
         try await backend.sendPost(text, attaching: attachmentIDs, to: id)
     }
 
+    func answer(_ answer: String, toRun runID: String) async throws(AppError) -> Run {
+        try await backend.answerQuestion(answer, ofRun: runID)
+    }
+
     func canAttachImages() async throws(AppError) -> Bool {
         try await backend.me().canAttachImages
     }

@@ -202,6 +202,15 @@ private struct BlockView: View {
             MarkdownView(blocks: MarkdownBlock.blocks(of: text))
         case .tools(let uses):
             ToolUsesView(uses: uses)
+        case .question(let question, let answer):
+            VStack(alignment: .leading, spacing: 24) {
+                Label(question, systemImage: "questionmark.bubble")
+                    .font(.body.weight(.semibold))
+                    .textSelection(.enabled)
+                if let answer {
+                    UserBubble(text: answer)
+                }
+            }
         }
     }
 }
@@ -273,6 +282,18 @@ private struct RunEnd: View {
     #Preview("書いている途中") {
         ScrollView {
             RunView(run: Samples.sentRun, progress: Samples.writing("下書きを作りました。件名は「請求書の")).padding()
+        }
+    }
+
+    #Preview("答え待ち") {
+        ScrollView {
+            RunView(run: Samples.askingRun).padding()
+        }
+    }
+
+    #Preview("答えて完了") {
+        ScrollView {
+            RunView(run: Samples.answeredRun).padding()
         }
     }
 

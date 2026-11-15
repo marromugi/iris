@@ -11,6 +11,8 @@ struct Conversation: Equatable {
             case assistant(String)
             /// Tools the assistant called with no text between them, in order.
             case tools([ToolUse])
+            /// A question the assistant asked the user, and the user's answer once it came.
+            case question(String, answer: String?)
         }
 
         /// The block's place in the conversation, which only grows at the end.
@@ -79,10 +81,15 @@ struct Conversation: Equatable {
                         endTools()
                         kinds.append(.assistant(text.text))
                     case .case2(let call):
-                        tools.append(
-                            ToolUse(
-                                id: calls, name: call.name, result: calls < results.count ? results[calls] : nil,
-                                consult: consultByCall[call.id]))
+                        let result = calls < results.count ? results[calls] : nil
+                        // A question that was refused, as one asked with other tools, asked nothing: it stays a tool.
+                        if let question = call.askedQuestion, result?.isError != true {
+                            endTools()
+                            kinds.append(.question(question, answer: result?.content))
+                        } else {
+                            tools.append(
+                                ToolUse(id: calls, name: call.name, result: result, consult: consultByCall[call.id]))
+                        }
                         calls += 1
                     }
                 }

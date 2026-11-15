@@ -8,6 +8,8 @@ nonisolated protocol ThreadBackend: Sendable {
     /// Sends a post with the images put up for it, by ID, and gives back the post and the runs that reply to it as they
     /// start.
     func send(_ text: String, attaching attachmentIDs: [Attachment.ID]) async throws(AppError) -> SentPost
+    /// Answers the question the run waits on, and gives back the run with the answer added.
+    func answer(_ answer: String, toRun runID: String) async throws(AppError) -> Run
     /// Whether posts may carry images; not while the model the agents think with can't read them.
     func canAttachImages() async throws(AppError) -> Bool
     /// Puts up a JPEG image to send with a post, and gives back its ID.

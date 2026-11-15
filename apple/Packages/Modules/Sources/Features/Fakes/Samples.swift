@@ -138,10 +138,87 @@
             }
             """)
 
+        /// A run whose agent asked the user a question and waits for the answer.
+        static let askingRun = run(
+            """
+            {
+              "id": "5d7f9b1c-3e5a-4c7e-9b1d-3f5a7c9e1b3d",
+              "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+              "taskId": null,
+              "postId": "a1b2c3d4-0004-4a00-8000-000000000004",
+              "startedAt": "2026-11-10T00:10:00Z",
+              "endedAt": null,
+              "lastError": null,
+              "failedAttempts": 0,
+              "consults": [],
+              "question": {
+                "question": "美容院はどちらの日に予約しますか？",
+                "choices": [
+                  {"label": "土曜", "description": "10:00 と 14:00 が空いています"},
+                  {"label": "日曜", "description": "11:00 だけ空いています"}
+                ],
+                "multiSelect": false
+              },
+              "messages": [
+                {"role": "user", "text": "来週末に美容院を予約して"},
+                {"role": "assistant", "parts": [
+                  {"type": "tool-call", "id": "call-1", "name": "ask_user", "input": {
+                    "question": "美容院はどちらの日に予約しますか？",
+                    "choices": [
+                      {"label": "土曜", "description": "10:00 と 14:00 が空いています"},
+                      {"label": "日曜", "description": "11:00 だけ空いています"}
+                    ]
+                  }}
+                ]}
+              ]
+            }
+            """)
+
+        /// The question `askingRun` waits on.
+        static var askingQuestion: Question {
+            guard let question = askingRun.question else {
+                preconditionFailure("The sample asking run waits on no question.")
+            }
+            return question
+        }
+
+        /// A run whose agent asked the user a question, read the answer, and replied.
+        static let answeredRun = run(
+            """
+            {
+              "id": "7b9d1f3a-5c7e-4a9b-8d1f-5b7d9f1a3c5e",
+              "agentId": "1f0e2d3c-4b5a-4968-8778-695a4b3c2d1e",
+              "taskId": null,
+              "postId": "a1b2c3d4-0005-4a00-8000-000000000005",
+              "startedAt": "2026-11-10T00:12:00Z",
+              "endedAt": "2026-11-10T00:15:00Z",
+              "lastError": null,
+              "failedAttempts": 0,
+              "consults": [],
+              "question": null,
+              "messages": [
+                {"role": "user", "text": "週末のランチの店を予約して"},
+                {"role": "assistant", "parts": [
+                  {"type": "text", "text": "候補を 3 つ見つけました。"},
+                  {"type": "tool-call", "id": "call-1", "name": "ask_user", "input": {
+                    "question": "どの店にしますか？",
+                    "choices": [{"label": "和食"}, {"label": "イタリアン"}, {"label": "中華"}]
+                  }}
+                ]},
+                {"role": "tool", "callId": "call-1", "isError": false, "content": "イタリアン"},
+                {"role": "assistant", "parts": [
+                  {"type": "text", "text": "土曜 12:00 にイタリアンを 2 名で予約しました。"}
+                ]}
+              ]
+            }
+            """)
+
         /// The posts the sample runs that a post started reply to, each with its run's first message and start.
         static let mailPost = post(of: mailRun)
         static let gaveUpPost = post(of: gaveUpRun)
         static let sentPost = post(of: sentRun)
+        static let askingPost = post(of: askingRun)
+        static let answeredPost = post(of: answeredRun)
 
         static func post(of run: Run) -> Post {
             guard let postID = run.postId, case .case1(let first)? = run.messages.first else {

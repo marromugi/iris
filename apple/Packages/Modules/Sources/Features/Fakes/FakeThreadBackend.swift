@@ -26,6 +26,8 @@
             var uploadFailure: AppError?
             /// The images put up, by ID, in order.
             var uploaded: [(id: Attachment.ID, jpeg: Data)] = []
+            /// The answers sent, with the run each answered, in order.
+            var answered: [(runID: String, answer: String)] = []
         }
 
         private let answers: Mutex<Answers>
@@ -79,6 +81,27 @@
                 answers.runs.insert(contentsOf: runs, at: 0)
                 return SentPost(post: post, runs: runs)
             }
+        }
+
+        /// Gives the run's waiting question `answer` as its result and stops it waiting; refused for a run that waits on
+        /// none.
+        func answer(_ answer: String, toRun runID: String) async throws(AppError) -> Run {
+            try answers.withLock { answers throws(AppError) in
+                if let failure = answers.failure { throw failure }
+                guard let index = answers.runs.firstIndex(where: { $0.id == runID }), answers.runs[index].question != nil
+                else { throw .refused(message: "The run isn't waiting for an answer.") }
+                var run = answers.runs[index]
+                run.question = nil
+                run.messages.append(.case3(.init(role: .tool, callId: "call-1", isError: false, content: answer)))
+                answers.runs[index] = run
+                answers.answered.append((runID, answer))
+                return run
+            }
+        }
+
+        /// The answers sent, with the run each answered, in order.
+        var answered: [(runID: String, answer: String)] {
+            answers.withLock { $0.answered }
         }
 
         func canAttachImages() async throws(AppError) -> Bool {

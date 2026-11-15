@@ -196,6 +196,22 @@ extension IrisBackend {
         }
     }
 
+    /// Answers the question the run waits on, and gives back the run with the answer as its last message. The run then
+    /// carries on. Refused when the run no longer waits on a question, as when it was already answered.
+    public func answerQuestion(_ answer: String, ofRun runID: String) async throws(AppError) -> Run {
+        let body = Components.Schemas.NewAnswer(answer: answer)
+        switch try await call({ try await client.answerQuestion(path: .init(runId: runID), body: .json(body)) }) {
+        case .accepted(let accepted): return try decoded { try accepted.body.json }
+        case .notFound(let refused): throw try refusal { try refused.body.json }
+        case .conflict(let refused): throw try refusal { try refused.body.json }
+        case .badRequest(let refused): throw try refusal { try refused.body.json }
+        case .unsupportedMediaType(let refused): throw try refusal { try refused.body.json }
+        case .internalServerError(let failed): throw try refusal { try failed.body.json }
+        case .unauthorized, .forbidden: throw .signedOut
+        case .undocumented: throw .unexpected
+        }
+    }
+
     /// The signed-in user, with whether their posts may carry images.
     public func me() async throws(AppError) -> Me {
         switch try await call({ try await client.me() }) {
