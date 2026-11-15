@@ -494,6 +494,39 @@ struct OpenThreadTests {
         #expect(!thread.isAnswering)
     }
 
+    @Test func anAnswerThatComesBackWhileAReadIsOnItsWayStaysAfterTheReadLands() async {
+        let backend = HeldEntryReads(askingThread())
+        let thread = OpenThread(backend: backend)
+        let firstRead = Task { await thread.load() }
+        await backend.release()
+        await firstRead.value
+
+        // The read takes the thread from before the answer, and lands after it.
+        let read = Task { await thread.load() }
+        await backend.heldRead()
+        await thread.answer("日曜")?.value
+        await backend.release()
+        await read.value
+
+        #expect(thread.waitingQuestion == nil)
+    }
+
+    @Test func aLateAnswerLeavesTheNextQuestionTheSameRunAskedSince() async throws {
+        let backend = askingThread()
+        let thread = OpenThread(backend: backend)
+        await thread.load()
+        var asksAgain = Samples.askingRun
+        let asking = try #require(asksAgain.messages.last)
+        asksAgain.messages += [.case3(.init(role: .tool, callId: "call-1", isError: false, content: "日曜")), asking]
+        asksAgain.question?.question = "何時にしますか？"
+
+        let answering = thread.answer("日曜")
+        thread.hear(Samples.changed(asksAgain))
+        await answering?.value
+
+        #expect(thread.waitingQuestion?.question.question == "何時にしますか？")
+    }
+
     @Test func anAnswerThatDoesNotGoThroughSaysWhyAndTheQuestionStillWaits() async {
         let backend = askingThread()
         let thread = OpenThread(backend: backend)
