@@ -265,12 +265,14 @@ test("a failed summary is tried again later, and its day is passed over once it 
 });
 
 test("the user's time zone sets where their days end, and an unknown one is refused", async () => {
-  await exchange("Lunch ideas?", "Soup.", new Date("2026-11-12T12:00:00-05:00"));
+  // A future day: storage clamps an alarm set in the past to now, so the stored alarm can only be
+  // compared exactly when it is still ahead of the clock.
+  await exchange("Lunch ideas?", "Soup.", new Date("2099-11-12T12:00:00-05:00"));
 
   expect(await userAgent().setTimeZone("Mars/Olympus")).toMatchObject({ ok: false });
   expect(await userAgent().setTimeZone("America/New_York")).toEqual({ ok: true });
 
-  const newYorkMorning = new Date("2026-11-13T04:00:00-05:00");
+  const newYorkMorning = new Date("2099-11-13T04:00:00-05:00");
   expect(await wakeAt()).toEqual(newYorkMorning);
   expect(await runInDurableObject(userAgent(), (_, state) => state.storage.getAlarm())).toBe(
     newYorkMorning.getTime(),
