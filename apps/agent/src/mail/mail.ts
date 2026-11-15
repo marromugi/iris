@@ -14,6 +14,13 @@ export const MAIL_ADDRESS = `${MAIL_LOCAL_PART}@${MAIL_DOMAIN}`;
 /** How long mail is kept after it arrives. */
 export const MAIL_KEPT_DAYS = 7;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The mail that is still kept at `now`: what arrived in the last `MAIL_KEPT_DAYS` days. */
+export function keptSince(now: Date): Date {
+  return new Date(now.getTime() - MAIL_KEPT_DAYS * DAY_MS);
+}
+
 /** How much of a mail's text is kept, in UTF-16 code units. */
 export const MAX_MAIL_TEXT = 50_000;
 

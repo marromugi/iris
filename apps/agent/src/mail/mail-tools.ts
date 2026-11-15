@@ -1,12 +1,10 @@
 import { defineTool, type Tool } from "@iris/agent";
 import { z } from "zod";
 import { untrusted } from "../untrusted";
-import { type Mail, MAIL_KEPT_DAYS } from "./mail";
+import { keptSince, type Mail, MAIL_KEPT_DAYS } from "./mail";
 
 /** How many mails one listing shows at most. */
 export const MAIL_LIST_LIMIT = 100;
-
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** What the mail tools call the text they hand the model. */
 const MAIL_CONTENT = "mail";
@@ -20,11 +18,6 @@ export interface MailBox {
   ): { mail: Mail[]; more: number };
   /** A mail by ID that arrived from `after`. */
   find(id: string, after: Date): Mail | undefined;
-}
-
-/** The mail that is still kept at `now`: what arrived in the last `MAIL_KEPT_DAYS` days. */
-export function keptSince(now: Date): Date {
-  return new Date(now.getTime() - MAIL_KEPT_DAYS * DAY_MS);
 }
 
 /**
